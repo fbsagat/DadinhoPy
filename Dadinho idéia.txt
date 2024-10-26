@@ -19,14 +19,14 @@ Tela 1: Chamada de loby, a tela principal de início, onde os jogadores se encon
 	Regra: Quando o botão de iniciar partida for apertado, o jogo mudará para a tela 2.
 
 
-Tela 2: É chamada de partida, onde os jogadores jogarão uma partida, é nesta tela que acontecerão eventos chamados
+Tela 2: É chamada de jogar, onde os jogadores jogarão uma partida, é nesta tela que acontecerão eventos chamados
 	 de atos.
 	 O primeiro ato: Onde cada jogador será livre para jogar seus dados clicando no botão jogar dados, a jogada de dados acontecerá
 	 somente uma vez, cada jogador pode ver apenas o resultado dos seus dados, após jogar, devem aguardar o início da tela
 	 3 pelo JogadorServidor com um botão.
 	 Regra: Crie o botão Iniciar para o JogadorServidor.
 Tela 3:
-    Chamada de partida, o jogo deve mostrar todos os jogadores, um em cada canto da tela, de modo que
+    Chamada de turnos, o jogo deve mostrar todos os jogadores, um em cada canto da tela, de modo que
 	eles fiquem alinhados, e em baixo de cada um deles, de cada rodada, armazenadas em uma lista, até o final da partida.
     O primeiro ato: O jogo deve selecionar aleatoriamente quem deve começar uma rodada de adivinhação, onde ele poderá
 	dizer, por um input visual, a quantidade de dados e outro input visual, um número do dado, no caso, de 1 a 6,
