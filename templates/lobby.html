@@ -12,21 +12,34 @@
             margin-bottom: 10px;
             padding: 5px;
         }
+        #userList {
+            border: 1px solid #ccc;
+            height: 150px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+            padding: 5px;
+        }
     </style>
 </head>
 <body>
-    <h1>Dadinho</h1>
+<h1>Jogo do Dadinho</h1>
 
-    <div>
-        <input id="usernameInput" type="text" placeholder="Digite seu nome..." />
-        <button id="setUsernameButton">Definir Nome</button>
-    </div>
+<div>
+    <h3>Escolha seu nome na partida</h3>
+    <input id="usernameInput" type="text" placeholder="Digite seu nome..."/>
+    <button id="setUsernameButton">Definir Nome</button>
+</div>
+<br>
+<div id="userList">
+    <strong>Jogadores Conectados:</strong>
+    <div id="userListItems"></div>
+</div>
 
-    <div id="messages"></div>
-    <input id="messageInput" type="text" placeholder="Digite sua mensagem..." />
-    <button id="sendButton" disabled>Enviar</button>
+<div>
+    <button id="specialButton" style="display: none;">Iniciar Jogo</button>
+</div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
-    <script src="/static/lobby_script.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+<script src="/static/lobby_script.js"></script>
 </body>
 </html>

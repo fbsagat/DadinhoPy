@@ -6,25 +6,28 @@ document.getElementById("setUsernameButton").onclick = () => {
     username = usernameInput.value.trim();
 
     if (username) {
+        socket.emit("set_username", { username });  // Envia o nome ao servidor
         usernameInput.disabled = true; // Desabilita o campo de nome após definir
         document.getElementById("sendButton").disabled = false; // Habilita o botão de enviar
         usernameInput.value = ""; // Limpa o campo de entrada
     }
 };
 
-document.getElementById("sendButton").onclick = () => {
-    const messageInput = document.getElementById("messageInput");
-    const message = messageInput.value;
-
-    if (message && username) {
-        socket.emit("send_message", { username, message });
-        messageInput.value = ""; // Limpa o campo de entrada
+// Recebe o status de "mestre" do servidor
+socket.on("user_role", (data) => {
+    if (data.is_master) {
+        document.getElementById("specialButton").style.display = "block";  // Mostra o botão especial
     }
-};
+});
 
-// Recebe mensagens do servidor
-socket.on("receive_message", (data) => {
-    const messagesDiv = document.getElementById("messages");
-    messagesDiv.innerHTML += `<div><strong>${data.username}:</strong> ${data.message}</div>`;
-    messagesDiv.scrollTop = messagesDiv.scrollHeight; // Rolagem automática para a parte inferior
+// Atualiza a lista de usuários
+socket.on("update_user_list", (data) => {
+    const userListItems = document.getElementById("userListItems");
+    userListItems.innerHTML = ""; // Limpa a lista existente
+
+    data.users.forEach((user) => {
+        const userItem = document.createElement("div");
+        userItem.textContent = user;
+        userListItems.appendChild(userItem); // Adiciona cada usuário à lista
+    });
 });
