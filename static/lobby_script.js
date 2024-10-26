@@ -16,7 +16,8 @@ document.getElementById("setUsernameButton").onclick = () => {
 // Recebe o status de "mestre" do servidor
 socket.on("user_role", (data) => {
     if (data.is_master) {
-        document.getElementById("specialButton").style.display = "block";  // Mostra o botão especial
+        const startGameButton = document.getElementById("startGameButton");
+        startGameButton.style.display = "block";  // Exibe o botão "Iniciar Jogo" para o mestre
     }
 });
 

@@ -15,6 +15,11 @@ def index():
     return render_template("lobby.html")
 
 
+@app.route("/jogar_dados")
+def game():
+    return render_template("jogar_dados.html")
+
+
 @socketio.on("connect")
 def handle_connect():
     # Se não houver um mestre, este usuário se torna o mestre
