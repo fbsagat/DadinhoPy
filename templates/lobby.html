@@ -4,45 +4,88 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dadinho</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
     <style>
-        #messages {
-            border: 1px solid #ccc;
-            height: 300px;
-            overflow-y: scroll;
-            margin-bottom: 10px;
-            padding: 5px;
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #2c2c2c; /* Fundo mais escuro */
+            color: #f4f4f4; /* Cor do texto clara */
+            margin: 0;
+            padding: 20px;
         }
-        #userList {
+
+        h1 {
+            color: #ffffff; /* Cor do título mais clara */
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            width: 300px;
             border: 1px solid #ccc;
-            height: 150px;
-            overflow-y: scroll;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 10px 15px;
+            margin-top: 10px;
+            background-color: #28a745; /* Cor do botão */
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-block; /* Para garantir que o botão se comporte como um bloco inline */
+        }
+
+        button:hover {
+            background-color: #218838;
+        }
+
+        #userList {
+            margin-top: 20px;
+            background-color: #3e3e3e; /* Fundo mais claro para a lista de usuários */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        #userList strong {
+            display: block;
             margin-bottom: 10px;
-            padding: 5px;
+            font-size: 1.2em;
+        }
+
+        #userListItems, #usermasterListItems {
+            margin-top: 10px;
+        }
+
+        /* Estilo para centralizar o botão "Iniciar" */
+        .center-button {
+            display: flex;
+            justify-content: center; /* Centraliza horizontalmente */
+            margin-top: 20px; /* Espaço acima do botão */
         }
     </style>
 </head>
 <body>
-<h1>Jogo do Dadinho</h1>
-
-<div>
-    <h3>Escolha seu nome na partida</h3>
-    <input id="usernameInput" type="text" placeholder="Digite seu nome..."/>
-    <button id="setUsernameButton">Definir Nome</button>
-</div>
+<h1>Jogo do Dadinho!</h1>
+<input type="text" id="apelido" placeholder="Escreva seu apelido aqui">
+<button onclick="sendMessage()">Pronto</button>
 <br>
+
+<div class="center-button">
+    <button id="startGameButton" style="display: none;" onclick="iniciarpartida()">Iniciar</button>
+</div>
+
+<br><br>
 <div id="userList">
     <strong>Jogadores Conectados:</strong>
     <div id="userListItems"></div>
+    <div id="usermasterListItems"></div>
 </div>
 
-<div>
-    <!-- Botão "Iniciar Jogo" visível apenas para o "mestre" -->
-    <a href="/jogar_dados">
-        <button id="startGameButton" style="display: none;">Iniciar Jogo</button>
-    </a>
-</div>
+<script src="/static/lobby.js"></script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
-<script src="/static/lobby_script.js"></script>
 </body>
 </html>

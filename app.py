@@ -1,13 +1,13 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, url_for
 from flask_socketio import SocketIO, emit
-import uuid
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
 
 # Armazenar informações dos usuários
-users = {}
+jogadores = {}
 
 
 @app.route("/")
@@ -15,58 +15,69 @@ def index():
     return render_template("lobby.html")
 
 
-@app.route("/jogar_dados")
-def game():
-    return render_template("jogar_dados.html")
-
-
-@socketio.on("connect")
+# Evento para conexão de novos usuários
+@socketio.on('connect')
 def handle_connect():
-    # Se não houver um mestre, este usuário se torna o mestre
-    if not any(user.get("master") for user in users.values()):
-        master_status = True
-    else:
-        master_status = False
-
-    user_id = str(uuid.uuid4())  # Gera um UUID único
-    users[request.sid] = {"id": user_id, "username": None, "master": master_status}
-    print(f"Usuário conectado: {user_id}, Master: {master_status}")
-
-    # Envia ao cliente se ele é o "mestre" ou não
-    emit("user_role", {"is_master": master_status})
-
-
-@socketio.on("set_username")
-def handle_set_username(data):
-    user_sid = request.sid
-    none_count = sum(1 for user in users.values() if user['username'] is not None)
-    master = True if none_count < 1 else False
-    if user_sid in users:
-        users[user_sid]["username"] = data["username"]  # Define o nome do usuário
-        users[user_sid]["master"] = master  # Define se vai ser o servidor
-        print(f"Nome definido para {user_sid}: {data['username']}, master: {master}")
-        emit("update_user_list", {"users": [user["username"] for user in users.values() if user["username"]]},
-             broadcast=True)
+    client_id = request.sid
+    jogadores_qtd = len(jogadores)
+    master = False
+    if jogadores_qtd == 0:
+        print('temos', len(jogadores), 'jogadores, portanto MASTER True')
+        master = True
+    jogadores[client_id] = {'username': None, 'master': master, 'pontos': 0, 'entrou': datetime.now()}
+    print(f'Client {client_id} connected')
+    print('Jogadores conectados: ', len(jogadores), jogadores)
+    print(master)
+    emit("user_role", {"is_master": master})
 
 
-# @socketio.on("send_message")
-# def handle_send_message(data):
-#     user_sid = request.sid
-#     if user_sid in users:
-#         username = users[user_sid]["username"]  # Obtém o nome do usuário
-#         print(f"Mensagem recebida de {username}: {data['message']}")
-#         emit("receive_message", {"username": username, "message": data["message"]}, broadcast=True)
-
-
-@socketio.on("disconnect")
+# Evento para desconexão de usuários
+@socketio.on('disconnect')
 def handle_disconnect():
-    user_sid = request.sid
-    if user_sid in users:
-        print(f"Usuário desconectado: {users[user_sid]['username'] or users[user_sid]['id']}")
-        del users[user_sid]  # Remove o usuário da lista ao desconectar
-        emit("update_user_list", {"users": [user["username"] for user in users.values() if user["username"]]},
-             broadcast=True)
+    client_id = request.sid
+    era_master = False
+    first_value = False
+    if jogadores[client_id]['master'] is True:
+        era_master = True
+    if client_id in jogadores:
+        del jogadores[client_id]
+        if era_master is True:
+            # Ordenando o dicionário pelos valores de 'entrou'
+            sorted_data = dict(sorted(jogadores.items(), key=lambda item: item[1]['entrou']))
+            first_key, first_value = next(iter(sorted_data.items()))
+            first_value['master'] = first_value = True
+            print('sorted_data, primeiro vira master', sorted_data)
+    print('Client disconnected')
+    emit("update_user_list", {
+        "users": [
+            f"{user["username"]} ({user["pontos"]} pontos)" + (str(' (Master)') if user["master"] is True else str(''))
+            for user in
+            jogadores.values() if user["username"]]},
+         broadcast=True)
+    emit("user_role", {"is_master": first_value}, broadcast=True)
 
 
-if __name__ == "__main__":
-    socketio.run(app, debug=True)
+# Evento para receber texto do cliente
+@socketio.on('apelido')
+def handle_apelido(data):
+    print(f'Received apelido: {data["apelido_msg"]}')
+    client_id = request.sid
+    jogadores[client_id]['username'] = data["apelido_msg"]
+    print('Jogadores conectados: ', len(jogadores), jogadores)
+    emit("update_user_list", {
+        "users": [
+            f"{user["username"]} ({user["pontos"]} pontos)" + (str(' (Master)') if user["master"] is True else str(''))
+            for user in
+            jogadores.values() if user["username"]]},
+         broadcast=True)
+    emit("user_role", {"is_master": jogadores[client_id]['master']})
+
+
+@socketio.on('jogar_dados')
+def jogar_dados():
+    # Próximo passo: Iniciar a nova tela onde os jogadores vão sortear seus dados
+    print('jogar dados')
+
+
+if __name__ == '__main__':
+    socketio.run(app)
