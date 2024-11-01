@@ -1,0 +1,53 @@
+body {
+    background-color: #001125;
+    /* Fundo escuro */
+    color: rgba(255, 0, 0, 0.212);
+    /* Texto branco */
+    height: 100vh;
+    /* Altura total da viewport */
+    display: flex;
+    /* Flexbox para centralização */
+    flex-direction: column;
+    /* Direção da coluna */
+    align-items: center;
+    /* Centraliza horizontalmente */
+}
+
+.custom-list {
+    background-color: #002952;
+    /* Fundo escuro */
+    color: white;
+    /* Texto claro */
+    max-width: 720px;
+    /* Largura máxima da lista */
+    margin: auto;
+    /* Centraliza a lista */
+    border-radius: 0.25rem;
+    /* Bordas arredondadas */
+}
+
+/* Estilo para a imagem fixa no topo */
+.fixed-top-image {
+    position: fixed;
+    /* Faz a imagem ficar fixa */
+    top: 0;
+    /* Posiciona no topo */
+    left: 50%;
+    /* Centraliza horizontalmente */
+    transform: translateX(-50%);
+    /* Ajusta para que a imagem fique centralizada */
+    z-index: 1000;
+    /* Garante que a imagem fique acima de outros elementos */
+}
+
+.topo-fixo {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 1000;
+    background-color: rgba(255, 255, 255, 0);
+}
+
+.espaco-abaixo {
+    padding-top: 250px;
+}

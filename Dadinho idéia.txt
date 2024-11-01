@@ -1,4 +1,4 @@
-Engrenagem: O jogo deve rodar em uma interface web criada em python + flask.
+Engrenagem: O jogo deve rodar em uma interface web criada em python + flask + js + html + css.
 Regras: O jogo deve ser multiplayer, onde cada página web carregada pelo link da rede local vira automaticamente um
 Jogador ou um JogadorServidor, caso seja o primeiro a entrar.
 
@@ -22,8 +22,7 @@ Tela 1: Chamada de loby, a tela principal de início, onde os jogadores se encon
 Tela 2: É chamada de jogar, onde os jogadores jogarão uma partida, é nesta tela que acontecerão eventos chamados
 	 de atos.
 	 O primeiro ato: Onde cada jogador será livre para jogar seus dados clicando no botão jogar dados, a jogada de dados acontecerá
-	 somente uma vez, cada jogador pode ver apenas o resultado dos seus dados, após jogar, devem aguardar o início da tela
-	 3 pelo JogadorServidor com um botão.
+	 somente uma vez, cada jogador pode ver apenas o resultado dos seus dados, após todos jogares, o servidor inicia a partida indo para a tela 3.
 	 Regra: Crie o botão Iniciar para o JogadorServidor.
 Tela 3:
     Chamada de turnos, o jogo deve mostrar todos os jogadores, um em cada canto da tela, de modo que
