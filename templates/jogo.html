@@ -22,15 +22,14 @@
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
             <div>
-                <input type="text" id="apelido" class="form-control w-50 text-center mx-auto"
-                    placeholder="Escreva seu nome...">
+                <input type="text" id="apelido" class="form-control w-50 text-center mx-auto" onkeydown="verificr_enter(event, 'button')" placeholder="Escreva seu nome...">
                 <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
             </div>
             <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded" id="lista_de_jogadores"
                 style="--bs-bg-opacity: .3;">
             </div>
             <div class="center-button mt-4">
-                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()">Iniciar partida
+                <button id="iniciar_jogo" class="btn btn-success" onclick="ir_jogar_dados()" style="display: none;" disabled>Iniciar partida
                 </button>
             </div>
         </div>
@@ -41,7 +40,7 @@
             <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded"
                 style="--bs-bg-opacity: .3;">
 
-                <button class="btn btn-primary mt-2" onclick="jogar_dados()">Jogar dados</button>
+                <button id="dadobotao" class="btn btn-primary mt-2" onclick="jogar_dados()">Jogar dados</button>
                 <div class="container mt-5">
 
                     <div class="row">
