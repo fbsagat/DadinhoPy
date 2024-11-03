@@ -21,6 +21,9 @@ document.addEventListener('keydown', function (event) {
     }
 });
 
+// embaralhar os dados ao iniciar
+window.onload = escolherImagemAleatoria;
+
 const socket = io({ autoConnect: true });
 socket.connect();
 
@@ -114,13 +117,75 @@ socket.on("connect_start", function (data) {
     }
 });
 
+socket.on("jogar_dados_resultado", function (data) {
+    const diceImages = [
+        "../static/imagens/dado/1.png",
+        "../static/imagens/dado/2.png",
+        "../static/imagens/dado/3.png",
+        "../static/imagens/dado/4.png",
+        "../static/imagens/dado/5.png",
+        "../static/imagens/dado/6.png"
+    ];
+
+    const dados = [
+        document.getElementById('dado1'),
+        document.getElementById('dado2'),
+        document.getElementById('dado3')
+    ];
+    const rollSound = document.getElementById('rollSound');
+
+    let currentIndex = 0;
+    const rollInterval = 100; // Intervalo de troca de imagens em milissegundos
+    let valor = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000;
+    const rollTime = valor; // Tempo total da rolagem em milissegundos
+
+    // Inicia o som de rolagem
+    rollSound.currentTime = 0;
+    rollSound.play();
+
+    // Inicia a animação de rolagem para todos os dados
+    const animation = setInterval(() => {
+        dados.forEach(dado => {
+            dado.src = diceImages[currentIndex];
+        });
+        currentIndex = (currentIndex + 1) % diceImages.length;
+    }, rollInterval);
+
+    // Após o tempo total de rolagem, exibe o resultado final e para a animação
+    setTimeout(() => {
+        clearInterval(animation);
+
+        // Recebe os resultados finais para cada dado (simulado aqui)
+        const finalResults = [
+            `../static/imagens/dado/${data.dados_jogador[0]}.png`, // Exemplo de resultado final do dado 1
+            `../static/imagens/dado/${data.dados_jogador[1]}.png`, // Exemplo de resultado final do dado 1
+            `../static/imagens/dado/${data.dados_jogador[2]}.png`, // Exemplo de resultado final do dado 1
+        ];
+
+        // Atualiza as imagens com os resultados finais
+        dados.forEach((dado, index) => {
+            dado.src = finalResults[index];
+        });
+
+        // Para o som
+        rollSound.pause();
+        rollSound.currentTime = 0;
+        socket.emit('joguei_dados', data.jogador);
+    }, rollTime);
+});
+
 // Função para enviar apelido ao servidor
 function enviar_apelido() {
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
-    socket.emit('apelido', { apelido_msg: textInput.value });
-    textInput.disabled = true; // Desativa o input
-    botaapelido.disabled = true; // Desativa o input
+    let apelido = textInput.value.trim();
+    if (apelido) {
+        socket.emit('apelido', { apelido_msg: textInput.value });
+        textInput.disabled = true; // Desativa o input
+        botaapelido.disabled = true; // Desativa o input
+    } else {
+        alert('Preencha o seu nome(pelo menos uma letra fi)')
+    }
 }
 
 function ir_jogar_dados() {
@@ -129,15 +194,35 @@ function ir_jogar_dados() {
 }
 
 function jogar_dados() {
-    const bot_iniciar = document.getElementById('jogar_dados')
     socket.emit('jogar_dados')
+    const bot_iniciar = document.getElementById('jogar_dados')
     constant = dadobt = document.getElementById('dadobotao')
     dadobt.disabled = true; // Desativa o input
 }
 
+
 function verificr_enter(event, button) {
     if (event.key === 'Enter' && button === 'button') {
         enviar_apelido()
+    }
+}
+
+function escolherImagemAleatoria() {
+    let diceImages = [
+        "../static/imagens/dado/1.png",
+        "../static/imagens/dado/2.png",
+        "../static/imagens/dado/3.png",
+        "../static/imagens/dado/4.png",
+        "../static/imagens/dado/5.png",
+        "../static/imagens/dado/6.png"
+    ];
+
+    // Loop para atualizar as imagens de dado
+    for (let i = 1; i <= 3; i++) {
+        const randomIndex = Math.floor(Math.random() * diceImages.length); // Escolhe um índice aleatório
+        const randomImage = diceImages[randomIndex]; // Seleciona a imagem correspondente
+
+        document.getElementById(`dado${i}`).src = randomImage; // Atualiza o src da tag <img>
     }
 }
 

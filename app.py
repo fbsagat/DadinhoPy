@@ -10,7 +10,7 @@ socketio = SocketIO(app)
 # Armazenar informações dos usuários
 jogadores = {}
 jogador_count = 0
-dados_partida = {}
+dados_jogador = {}
 limite_jogadores = 6
 
 
@@ -64,8 +64,8 @@ def jogador_off(client_id):
             if dicionario[chave_item]['client_id'] == client_id:
                 del dicionario[chave_item]  # Remove o item correspondente
 
-                if chave_item in dados_partida:
-                    dados_partida.pop(chave_item)  # Apagar o registro de dados_partida tbm
+                if chave_item in dados_jogador:
+                    dados_jogador.pop(chave_item)  # Apagar o registro de dados_partida tbm
 
                 return True  # Retorna True se o item foi removido
         return False  # Retorna False se nenhum item foi encontrado
@@ -145,10 +145,17 @@ def jogar_dados():
     jogador = jogadores[jogador_n]
     print(f'{jogador['username']} jogou dados')
     nums = [1, 2, 3, 4, 5, 6]
-    dados_partida[jogador_n] = random.sample(nums, k=3)
-    print(dados_partida)
-    if (len(dados_partida) == len(jogadores)) and len(dados_partida) <= limite_jogadores:
-        mudar_pagina()
+    dados_r = random.sample(nums, k=3)
+    dados_jogador[jogador_n] = dados_r
+    print('dados_jogador', dados_jogador)
+    emit("jogar_dados_resultado", {"jogador": jogador_n, "dados_jogador": dados_r})
+    # if (len(dados_jogador) == len(jogadores)) and len(dados_jogador) <= limite_jogadores:
+    #     mudar_pagina()  # Antes de mudar página executar a animação e exibição do resultado pros jogadores
+
+
+@socketio.on('joguei_dados')
+def joguei_dados(data):
+    print('joguei_dadosAAA', data) # PAREI AQUI
 
 
 if __name__ == '__main__':
