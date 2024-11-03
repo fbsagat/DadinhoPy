@@ -1,95 +1,26 @@
-from flask import Flask, render_template, request, url_for
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
-from datetime import datetime
-import random
+from modelos import *
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
-
-# Armazenar informações dos usuários
-jogadores = {}
-jogador_count = 0
-dados_jogador = {}
-limite_jogadores = 6
-
-
-def virar_master():
-    # Qualquer um executa, mas quem vira o master é o que está true naa lista
-    def obter_client_id_master(dicionario):
-        for dados in dicionario.values():
-            if dados.get('master') is True:  # Verifica se master é True
-                return dados.get('client_id')  # Retorna o client_id correspondente
-        return None  # Retorna None se não encontrar
-
-    print('virar_master executado por: ', request.sid)
-    sid_jogador_master = obter_client_id_master(jogadores)
-    emit("master_def", {"is_master": True}, to=sid_jogador_master)
+lobby_unico = Lobby()
 
 
 def mudar_pagina():
-    print('mudar_pagina executado')
     emit("mudar_pagina", broadcast=True)
 
 
-def jogador_on(client_id):
-    global jogador_count
-    master = False
-    nenhum_master_verdadeiro = all(not item['master'] for item in jogadores.values())
-    if nenhum_master_verdadeiro:
-        master = True
-        virar_master()
-    jogador = {'client_id': client_id, 'username': None, 'master': master, 'pontos': 0, 'entrou': datetime.now()}
-    jogadores[jogador_count] = jogador
-    jogador_count += 1
-    print(jogadores)
-    print('total conectados: ', len(jogadores))
-
-
-def jogador_off(client_id):
-    def modificar_master(dicionario):
-        # Verificar se nenhum item tem master = True
-        nenhum_master_verdadeiro = all(not item['master'] for item in dicionario.values())
-
-        if nenhum_master_verdadeiro:
-            # Modificar a chave master do primeiro item para True
-            primeiro_item_chave = list(dicionario.keys())[0]  # Pega a chave do primeiro item
-            dicionario[primeiro_item_chave]['master'] = True
-            virar_master()
-            return True  # Retorna True se a modificação foi feita
-        return False  # Retorna False se não houve modificação
-
-    def remover_player_por_client_id(dicionario, client_id):
-        for chave_item in list(dicionario.keys()):  # Usar list para evitar alteração no dicionário durante a iteração
-            if dicionario[chave_item]['client_id'] == client_id:
-                del dicionario[chave_item]  # Remove o item correspondente
-
-                if chave_item in dados_jogador:
-                    dados_jogador.pop(chave_item)  # Apagar o registro de dados_partida tbm
-
-                return True  # Retorna True se o item foi removido
-        return False  # Retorna False se nenhum item foi encontrado
-
-    remover_player_por_client_id(jogadores, client_id)
-    if len(jogadores) > 0:
-        modificar_master(jogadores)
-    print(jogadores)
-    print('total conectados: ', len(jogadores))
-
-
 def atualizar_lista_usuarios():
-    emit("update_user_list", {
-        "users": [user["username"] for user in jogadores.values() if user["username"] is not None],
-        "pontos": [user["pontos"] for user in jogadores.values() if user["pontos"] is not None],
-        "masters": [user["master"] for user in jogadores.values() if user["master"] is not None]},
-         broadcast=True)
-
-
-def numero_por_client_id(dicionario, client_id):
-    # Retorna o número do jogador no dicionário 'jogadores' pelo client_id
-    for chave, item in dicionario.items():
-        if item['client_id'] == client_id:
-            return chave
+    lista = lobby_unico.listar_jogadores()
+    usernames = [jogador.username for jogador in lista if jogador.username is not None]
+    pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
+    masters = [jogador.master for jogador in lista if jogador.username is not None]
+    o_master = lobby_unico.retornar_master()
+    if o_master:
+        emit("master_def", {"is_master": True}, to=o_master.client_id)
+    emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, broadcast=True)
 
 
 @app.route("/")
@@ -99,63 +30,76 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    print('Um usuário conectado')
+    """
+    Esta função é executada no momento da conexão de um cliente web do servidor.
+    Ela deve criar uma instância de jogador, e decidir se ele é master, caso não haja algum,
+    Ela deve criar ums instância de partida caso não haja alguma também, e inserir o jogador master nela
+    """
     client_id = request.sid
-    jogador_on(client_id)
-    atualizar_lista_usuarios()
-    jognum = numero_por_client_id(jogadores, client_id)
-    master = jogadores[jognum]['master']
+    master = False if lobby_unico.verificar_jogador_master() else True
+    jogador = Jogador.criar_jogador(client_id=client_id, master=master)
+    lobby_unico.adicionar_jogador(jogador)
     emit("connect_start", {"is_master": master})
+    atualizar_lista_usuarios()
 
 
-# Evento para desconexão de usuários
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('Um usuário desconectado')
+    """
+    Esta função é executada no momento da desconexão de um cliente web do servidor.
+    Esta função deve remover o jogador da partida e caso este jogador seja um master e haja mais jogadores no lobby dele,
+    Selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do lobby,
+    caso não seja um master, apenas remover, caso apenas ele no lobby, reiniciar o servidor(por enquanto).
+    """
     client_id = request.sid
-    jogador_off(client_id)
+    lobby_unico.remover_jogador(client_id)
+    # print(lobby_unico)
+    if lobby_unico.contar_jogadores() > 0:
+        # Definir novo master
+        lobby_unico.definir_master()
     atualizar_lista_usuarios()
 
 
-# Evento para receber os apelidos dos jogadores
 @socketio.on('apelido')
 def escolher_apelido(data):
+    """
+    Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo
+    """
     apelido = data["apelido_msg"]
     client_id = request.sid
-    jogador_n = numero_por_client_id(jogadores, client_id)
-    jogadores[jogador_n]['username'] = apelido
-    print(f'Recebido apelido: {apelido}, Num:{jogador_n}, ID:{client_id}')
-    print(jogadores)
+
+    jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
+    jogador.username = apelido
     atualizar_lista_usuarios()
 
 
 @socketio.on('ir_jogar_dados')
 def ir_jogar_dados():
     client_id = request.sid
-    jogador_n = numero_por_client_id(jogadores, client_id)
-    jogador = jogadores[jogador_n]
-    if jogador['master'] is True and len(jogadores) >= 2:
+    jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
+    if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         mudar_pagina()
 
 
 @socketio.on('jogar_dados')
 def jogar_dados():
     client_id = request.sid
-    jogador_n = numero_por_client_id(jogadores, client_id)
-    jogador = jogadores[jogador_n]
-    print(f'{jogador['username']} jogou dados')
-    nums = [1, 2, 3, 4, 5, 6]
-    dados_r = random.sample(nums, k=3)
-    dados_jogador[jogador_n] = dados_r
-    print('dados_jogador', dados_jogador)
-    emit("jogar_dados_resultado", {"jogador": jogador_n, "dados_jogador": dados_r})
+    jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
+    print('Cheguei em jogar_dados')
+    # dados = jogador.partida.jogar_dados()
+    # nums = [1, 2, 3, 4, 5, 6]
+    # dados_r = random.sample(nums, k=3)
+    # dados_jogador[jogador_n] = dados_r
+    # # print('dados_jogador', dados_jogador)
+    # emit("jogar_dados_resultado", {"jogador": jogador_n, "dados_jogador": dados_r})
     # if (len(dados_jogador) == len(jogadores)) and len(dados_jogador) <= limite_jogadores:
-    #     mudar_pagina()  # Antes de mudar página executar a animação e exibição do resultado pros jogadores
+    #     mudar_pagina()  # Antes de mudar a página, executar a animação e exibição do resultado pros jogadores
 
 
 @socketio.on('joguei_dados')
 def joguei_dados(data):
-    print('joguei_dadosAAA', data) # PAREI AQUI
+    pass
+    # print('joguei_dadosAAA', data)  # PAREI AQUI
 
 
 if __name__ == '__main__':
