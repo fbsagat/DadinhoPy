@@ -1,26 +1,12 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
+from funcoes_gerais import *
 from modelos import *
+import time, random
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
-lobby_unico = Lobby()
-
-
-def mudar_pagina():
-    emit("mudar_pagina", broadcast=True)
-
-
-def atualizar_lista_usuarios():
-    lista = lobby_unico.listar_jogadores()
-    usernames = [jogador.username for jogador in lista if jogador.username is not None]
-    pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
-    masters = [jogador.master for jogador in lista if jogador.username is not None]
-    o_master = lobby_unico.retornar_master()
-    if o_master:
-        emit("master_def", {"is_master": True}, to=o_master.client_id)
-    emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, broadcast=True)
 
 
 @app.route("/")
@@ -78,28 +64,38 @@ def ir_jogar_dados():
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
-        mudar_pagina()
+        jogadores = lobby_unico.listar_jogadores()
+        partida.jogadores = jogadores
+        partida.jogar_dados()
+        mudar_pagina(1, broadcast=True)
 
 
 @socketio.on('jogar_dados')
 def jogar_dados():
+    """
+    Esta função envia os números dos dados aos jogadores, cada jogador recebe seus respectivos dados sorteados
+    """
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
-    print('Cheguei em jogar_dados')
-    # dados = jogador.partida.jogar_dados()
-    # nums = [1, 2, 3, 4, 5, 6]
-    # dados_r = random.sample(nums, k=3)
-    # dados_jogador[jogador_n] = dados_r
-    # # print('dados_jogador', dados_jogador)
-    # emit("jogar_dados_resultado", {"jogador": jogador_n, "dados_jogador": dados_r})
-    # if (len(dados_jogador) == len(jogadores)) and len(dados_jogador) <= limite_jogadores:
-    #     mudar_pagina()  # Antes de mudar a página, executar a animação e exibição do resultado pros jogadores
+    emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados})
 
 
 @socketio.on('joguei_dados')
 def joguei_dados(data):
-    pass
-    # print('joguei_dadosAAA', data)  # PAREI AQUI
+    """
+    Esta função é executada por cada jogador da partida quando termina de executar e visualizar o resultado de seus
+    dados. Ela deve redirecionar todos so jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
+    turnos, mas somente depois de todos os dados terem sido jogados.
+    """
+    jogadores = partida.jogadores
+    jogador = [jogador for jogador in jogadores if jogador.client_id == data]
+    # print('partida.todos_os_dados', partida.todos_os_dados)
+    # print('jogador', jogador)
+    partida.todos_os_dados += jogador[0].dados
+    # print('partida.todos_os_dados', partida.todos_os_dados)
+    if partida.contar_jogadores() == (len(partida.todos_os_dados) / partida.dados_qtd):
+        time.sleep(random.randint(3, 5))
+        mudar_pagina(2, broadcast=True)
 
 
 if __name__ == '__main__':

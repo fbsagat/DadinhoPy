@@ -86,7 +86,7 @@ socket.on("master_def", function (data) {
 });
 
 // Funções para mudança de página
-socket.on("mudar_pagina", function () {
+socket.on("mudar_pagina", function (num) {
     {
         const paginas = [
             document.getElementById('tela_jogadores'),
@@ -98,7 +98,7 @@ socket.on("mudar_pagina", function () {
         let indicie_atual = 0;
         paginas[indiceAtual].style.display = "none";
         // Atualiza o índice para a próxima página
-        indiceAtual = (indiceAtual + 1) % paginas.length; // Ciclo entre 0 e o número de páginas
+        indiceAtual = num.numero % paginas.length; // Ciclo entre 0 e o número de páginas
         // Mostra a próxima página
         paginas[indiceAtual].style.display = "block";
     }

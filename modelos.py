@@ -1,4 +1,5 @@
 from datetime import datetime
+import random
 
 
 class Jogador:
@@ -22,14 +23,13 @@ class Jogador:
         return (f"Jogador(client_id={self.client_id}, username={self.username}, "
                 f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
 
-    def listar_jogadores_por_ordem(self):
-        # Ordena os jogadores pela data de entrada
-        jogadores_ordenados = sorted(self.jogadores, key=lambda x: x.entrou)
-        # Lista com o índice de entrada
-        lista = []
-        for indice, jogador in enumerate(jogadores_ordenados, start=1):
-            lista.append(jogador)
-        return lista
+    def jogar_dados(self):
+        """Rola os três dados e retorna o resultado como uma lista de valores."""
+        dados_qtd = 3
+        dados = []
+        for dado in range(0, dados_qtd):
+            dados.append(random.randint(0, 6))
+        self.dados = dados
 
 
 class Lobby:
@@ -99,14 +99,45 @@ class Lobby:
 
 
 class Partida:
-    def __init__(self, jogador, lobby):
-        self.jogador = jogador  # Referência à instância de Jogador
-        self.lobby = lobby  # Referência à instância de Lobby
+    def __init__(self, lobby):
+        self.dados_qtd = 3
+        self.jogadores = []
+        self.lobby = lobby
+        self.todos_os_dados = []
+        self.primeiro_turno = True
 
     def __repr__(self):
+        txt = f"Partida do lobby {self.lobby} com os jogadores: {self.jogadores}"
+        return txt
+
+    def iniciar_partida(self):
+        if self.primeiro_turno is True:
+            self.jogar_dados()
+
+    def jogar_dados(self):
+        for jogador in self.jogadores:
+            jogador.jogar_dados()
+
+    def jogar_turnos(self):
+        """Inicia o ciclo de turnos até que alguém desconfie."""
+        primeira_rodada = True
+        pass
+
+    def contar_jogadores(self):
+        return len(self.jogadores)
+
+
+class Turno:
+    """Representa o turno de um jogador na partida."""
+
+    def executar(self):
+        """Executa o turno, onde o jogador pode aumentar a aposta ou desconfiar."""
         pass
 
 
 class Dado:
-    def __init__(self):
-        self.lados = 6
+    """Representa um dado de seis lados."""
+
+    def rolar(self):
+        """Rola o dado e retorna um valor entre 1 e 6."""
+        return random.randint(1, 6)
