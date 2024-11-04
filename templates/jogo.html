@@ -30,7 +30,8 @@
                 <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()" disabled>Pronto</button>
             </div>
             <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded" id="lista_de_jogadores"
-                style="--bs-bg-opacity: .3;">
+                style="--bs-bg-opacity: .3; width: 400px;">
+                <small>Aguardando jogadores...</small>
             </div>
             <div class="center-button mt-4">
                 <button id="iniciar_jogo" class="btn btn-success" onclick="ir_jogar_dados()" style="display: none;"
@@ -75,19 +76,29 @@
         <div class="row justify-content-around">
 
             <div class="d-flex justify-content-center gap-3">
-                <div class="col-5 d-flex justify-content-around align-items-center mx-auto my-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2" style="width: 400px;">
-                    <span class="fs-5 text-white me-2">Seus dados: </span>
-                    <div class="col-auto"><img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30"></div>
+                <div id="meus_dados"
+                    class="col-5 d-flex justify-content-around align-items-center mx-auto my-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2"
+                    style="width: 400px;">
+
+                    <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
+                    <div class="col-auto">
+                        
+                        <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
+                    </div>
+
                     <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
-                    <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div>
+                    <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
+
                 </div>
-            
-                <div class="col-3 d-flex justify-content-around align-items-center mx-auto justify-content-start mt-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2" style="width: 300px;">
+
+                <div class="col-3 d-flex justify-content-around align-items-center mx-auto justify-content-start mt-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2"
+                    style="width: 300px;">
                     <span class="fs-5 text-white me-2">Coringa atual: </span>
-                    <img id="dado-atual" src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem atual" width="30" height="30"><span class="fs-5 text-white me-2">X3</span>
+                    <img id="dado-atual" src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem atual"
+                        width="30" height="30"><span class="fs-5 text-white me-2">X3</span>
                 </div>
             </div>
-            
+
 
             <div class="col-sm-2">
                 <div class="card">
@@ -372,7 +383,8 @@
             </div>
         </div>
         <hr>
-        <span class="fs-5 text-white me-2">Sua Vez</span>
+        <span class="fs-4 badge text-bg-success text-wrap mb-1 me-1" style="width: 8rem;">Sua Vez</span><span
+            class="fs-4 badge text-bg-warning text-wrap mb-1 me-1" style="width: 8rem;">Aguarde</span>
         <div class="container-fluid text-center" style="width: 160px;">
             <input class="form-control" type="number" placeholder="Quantidade" aria-label="Quantidade">
         </div>

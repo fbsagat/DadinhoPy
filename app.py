@@ -66,7 +66,7 @@ def ir_jogar_dados():
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         jogadores = lobby_unico.listar_jogadores()
         partida.jogadores = jogadores
-        partida.jogar_dados()
+        partida.iniciar_turno_dados()
         mudar_pagina(1, broadcast=True)
 
 
@@ -88,14 +88,24 @@ def joguei_dados(data):
     turnos, mas somente depois de todos os dados terem sido jogados.
     """
     jogadores = partida.jogadores
-    jogador = [jogador for jogador in jogadores if jogador.client_id == data]
+    jogador = [jogador for jogador in jogadores if jogador.client_id == data][0]
     # print('partida.todos_os_dados', partida.todos_os_dados)
     # print('jogador', jogador)
-    partida.todos_os_dados += jogador[0].dados
+    partida.todos_os_dados += jogador.dados
     # print('partida.todos_os_dados', partida.todos_os_dados)
-    if partida.contar_jogadores() == (len(partida.todos_os_dados) / partida.dados_qtd):
-        time.sleep(random.randint(3, 5))
+    jogadores_qtd = partida.contar_jogadores()
+    emit('meus_dados', {'dados': jogador.dados})
+    if jogadores_qtd == (len(partida.todos_os_dados) / partida.dados_qtd):
+        jogador_inicial = random.randint(0, jogadores_qtd)
+        nomes = [jogador.username for jogador in jogadores]
+        time.sleep(random.randint(3, 4))
+        args = {'jogadores_nomes': nomes, 'jogadores_qtd': jogadores_qtd, 'rodada_n': 0, 'vez_atual': jogador_inicial,
+                'coringa_atual': 0, 'turnos_lista': []}
+        emit("rodada_info", args, broadcast=True)
         mudar_pagina(2, broadcast=True)
+
+    # A PARTIR DE AGORA, ARRUMAR A PÁGINA PARA RECEBER DADOS DE JOGADA E FORMATAR DE ACORDO BASEADAS NAS
+    # INFORMAÇÕES DE args, INICIANDO POR UM JOGADOR SORTEADO(vez_atual) E GERAR NA PÁGINA AS FORMATAÇÕES
 
 
 if __name__ == '__main__':

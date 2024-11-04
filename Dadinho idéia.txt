@@ -55,3 +55,13 @@ Regra quando alguém desconfiar:
 Pedidos adicionais:
 	1. Deixe o jogo visual, onde apenas um mouse possa ser usado, sem necessidade para o jogador de digitar no teclado.
 	2. Faça uma pequena animação dos dados rolando na mesa.
+
+Informações que serão enviadas na tela partida:
+Individual: 'Seus dados' (constante? Não)
+Coletivo: 'Jogadores qtd' (Constante? Sim), 'Coringa atual' (Constante? Sim), 'lista com turnos
+ordenados'(Constante? Sim), 'Rodada num'(Constante? Sim)
+
+Composição: 'jogadores_qtd' = 3 / 'Rodada num' = 0 / 'vez_atual' = 0 / 'Coringa_atual' = 0 /
+lista com turnos ordenados = [[jogador_id, dados_qtd, dado_valor], [...], [...], ...]
+
+Constante: A cada jogada. Não constante: Apenas no carregamento da página.

@@ -1,18 +1,13 @@
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+
+from flask_socketio import emit
 from modelos import Lobby, Partida
 
 lobby_unico = Lobby()
 partida = Partida(lobby=lobby_unico)
 
 
-def mudar_pagina(num, args=None, broadcast=False):
-    if args is None:
-        args = {}  # Inicializa args como um dicionário vazio se não for fornecido
-
-    args_ini = {'numero': num}  # Cria um dicionário inicial com 'numero'
-    args_ini.update(args)  # Atualiza args_ini com o conteúdo de args
-    emit("mudar_pagina", args_ini, broadcast=broadcast)  # Emite o evento com args_ini
+def mudar_pagina(num, broadcast=False):
+    emit("mudar_pagina", {'pag_numero': num}, broadcast=broadcast)
 
 
 def atualizar_lista_usuarios():

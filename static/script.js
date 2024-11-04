@@ -21,7 +21,7 @@ document.addEventListener('keydown', function (event) {
     }
 });
 
-// embaralhar os dados ao iniciar
+// Embaralhar os dados ao iniciar
 window.onload = escolherImagemAleatoria;
 
 const socket = io({ autoConnect: true });
@@ -86,7 +86,7 @@ socket.on("master_def", function (data) {
 });
 
 // Funções para mudança de página
-socket.on("mudar_pagina", function (num) {
+socket.on("mudar_pagina", function (data) {
     {
         const paginas = [
             document.getElementById('tela_jogadores'),
@@ -98,10 +98,35 @@ socket.on("mudar_pagina", function (num) {
         let indicie_atual = 0;
         paginas[indiceAtual].style.display = "none";
         // Atualiza o índice para a próxima página
-        indiceAtual = num.numero % paginas.length; // Ciclo entre 0 e o número de páginas
+        indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
         // Mostra a próxima página
         paginas[indiceAtual].style.display = "block";
     }
+});
+
+// Função para preencher os dados do jogador na página de partida
+socket.on('meus_dados', function (data, index) {
+    const meus_dados = document.getElementById('meus_dados')
+    const span = document.createElement('span')
+    span.className = "fs-5 text-white me-2"
+    span.innerText = "Seus dados: "
+    meus_dados.appendChild(span);
+
+    data.dados.forEach(dados => {
+        const col_dado  = document.createElement('div')
+        col_dado.className = "col-auto"
+
+        const img_dado = document.createElement('img')
+        img_dado.className = "img-fluid me-2"
+        img_dado.alt = `imagem ${index}`;
+        img_dado.width = "30"
+        img_dado.height = "30"
+        img_dado.src = `../static/imagens/dado/${dados}.png`
+
+        meus_dados.appendChild(col_dado);
+        col_dado.appendChild(img_dado);
+    });
+
 });
 
 // Funções após conectar
@@ -184,7 +209,7 @@ function enviar_apelido() {
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
     } else {
-        alert('Preencha o seu nome(pelo menos uma letra fi)')
+        alert('Preencha o seu nome!')
     }
 }
 
@@ -225,8 +250,3 @@ function escolherImagemAleatoria() {
         document.getElementById(`dado${i}`).src = randomImage; // Atualiza o src da tag <img>
     }
 }
-
-// // Função para enviar gatilho ao servidor
-// function iniciarpartida() {
-//     socket.emit('jogar_dados'); // Emite apenas o evento sem dados adicionais
-// }

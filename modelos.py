@@ -28,7 +28,7 @@ class Jogador:
         dados_qtd = 3
         dados = []
         for dado in range(0, dados_qtd):
-            dados.append(random.randint(0, 6))
+            dados.append(random.randint(1, 6))
         self.dados = dados
 
 
@@ -104,23 +104,25 @@ class Partida:
         self.jogadores = []
         self.lobby = lobby
         self.todos_os_dados = []
-        self.primeiro_turno = True
+        self.coringa_atual = 0
+        self.jogaram_dados = False
+        self.primeiro_turno = False  # Diferencia o turno onde não pode desconfiar(primeiro turno apenas)
 
     def __repr__(self):
         txt = f"Partida do lobby {self.lobby} com os jogadores: {self.jogadores}"
         return txt
 
-    def iniciar_partida(self):
-        if self.primeiro_turno is True:
-            self.jogar_dados()
-
-    def jogar_dados(self):
+    def iniciar_turno_dados(self):
+        self.todos_os_dados = []  # limpar dados (temporário)
         for jogador in self.jogadores:
             jogador.jogar_dados()
+        self.jogaram_dados = True
+
+    def iniciar_partida(self):
+        pass
 
     def jogar_turnos(self):
         """Inicia o ciclo de turnos até que alguém desconfie."""
-        primeira_rodada = True
         pass
 
     def contar_jogadores(self):
@@ -133,11 +135,3 @@ class Turno:
     def executar(self):
         """Executa o turno, onde o jogador pode aumentar a aposta ou desconfiar."""
         pass
-
-
-class Dado:
-    """Representa um dado de seis lados."""
-
-    def rolar(self):
-        """Rola o dado e retorna um valor entre 1 e 6."""
-        return random.randint(1, 6)
