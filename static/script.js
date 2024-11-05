@@ -5,6 +5,8 @@ let indiceAtual = 0;
 document.addEventListener('keydown', function (event) {
     // Verifica se a tecla pressionada é "K" (minúscula ou maiúscula)
     if (event.key === TECLA_K || event.key === TECLA_K.toUpperCase()) {
+        const logo = document.getElementById('titulo_img');
+        const logodiv = document.getElementById('div_titulo_img');
         const paginas = [
             document.getElementById('tela_jogadores'),
             document.getElementById('tela_jogar_dados'),
@@ -18,6 +20,14 @@ document.addEventListener('keydown', function (event) {
         indiceAtual = (indiceAtual + 1) % paginas.length; // Ciclo entre 0 e o número de páginas
         // Mostra a próxima página
         paginas[indiceAtual].style.display = "block";
+
+        if (indiceAtual === 2) {
+            logo.style.display = "none"; // Esconde o logotipo pra abrir espaço
+            logodiv.style.height = '5vh';
+        } else {
+            logo.style.display = "block"; // Exibe o logotipo
+            logodiv.style.height = '50vh';
+        }
     }
 });
 
@@ -87,6 +97,8 @@ socket.on("master_def", function (data) {
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
+    const logo = document.getElementById('titulo_img');
+    const logodiv = document.getElementById('div_titulo_img');
     {
         const paginas = [
             document.getElementById('tela_jogadores'),
@@ -101,6 +113,15 @@ socket.on("mudar_pagina", function (data) {
         indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
         // Mostra a próxima página
         paginas[indiceAtual].style.display = "block";
+        if (data.pag_numero === 2) {
+            logo.style.display = "none"; // Apaga o logotipo pra abrir espaço
+            logodiv.style.display = "none";
+            logodiv.style.height = '5vh';
+        } else {
+            logo.style.display = "block"; // Exibe o logotipo
+            logodiv.style.display = "block";
+            logodiv.style.height = '50vh';
+        }
     }
 });
 
@@ -113,14 +134,14 @@ socket.on('meus_dados', function (data, index) {
     meus_dados.appendChild(span);
 
     data.dados.forEach(dados => {
-        const col_dado  = document.createElement('div')
+        const col_dado = document.createElement('div')
         col_dado.className = "col-auto"
 
         const img_dado = document.createElement('img')
         img_dado.className = "img-fluid me-2"
         img_dado.alt = `imagem ${index}`;
-        img_dado.width = "30"
-        img_dado.height = "30"
+        img_dado.width = 30
+        img_dado.height = 30
         img_dado.src = `../static/imagens/dado/${dados}.png`
 
         meus_dados.appendChild(col_dado);
@@ -128,6 +149,143 @@ socket.on('meus_dados', function (data, index) {
     });
 
 });
+
+// Função para preencher os dados na mesa
+socket.on('dados_mesa', function (data) {
+    dados_mesa = document.getElementById('dados_mesa')
+    data = data.total
+    span = document.createElement('span')
+    span.className = 'fs-5 text-white me-2'
+    span.innerText = `${data} dados na mesa`
+    dados_mesa.appendChild(span)
+});
+
+// Função pra preencher o coringa
+socket.on('rodada_info', function (data) {
+    const coringa_n = Number(data.coringa_atual)
+    const coringa_j = String(data.ultimo_coringa)
+    const corin_atual = document.getElementById('corin_atual')
+    corin_atual.innerHTML = ""
+
+    if (coringa_n === 0) {
+        const span3 = document.createElement('span')
+        span3.className = 'fs-6 text-white me-2'
+        span3.innerText = 'O coringa ainda não foi jogado'
+        corin_atual.appendChild(span3)
+    } else {
+        const span1 = document.createElement('span')
+        span1.className = 'fs-5 text-white me-2'
+        span1.innerText = `Coringa atual:`
+        const img1 = document.createElement('img')
+        img1.className = "img-fluid"
+        img1.alt = 'imagem coringa';
+        img1.width = 30
+        img1.height = 30
+        img1.src = '../static/imagens/dado/1.png'
+        const span2 = document.createElement('span')
+        span2.className = 'fs-5 text-white me-2'
+        span2.innerText = `X${coringa_n} (${coringa_j})`
+        corin_atual.appendChild(span1)
+        corin_atual.appendChild(img1)
+        corin_atual.appendChild(span2)
+    }
+})
+
+// Função individual para verificar o jogador da vez no turno                 TERMINEI AQUI !!!
+socket.on('meu_turno', function () {
+    let jog_painel = document.getElementById('painel_jogada');
+    // if (jog_painel) { // Verifique se o elemento foi encontrado
+    //     if (jogador === o_da_vez) {
+    //         card.className = 'card border-primary border-4 text-bg-dark';
+    //         jog_painel.style.display = "block"; // Mostra o painel
+    //     } else {
+    //         card.className = 'card border-secondary border-1 text-bg-dark';
+    //         jog_painel.style.display = "none"; // Oculta o painel
+    //     }
+    // } else {
+    //     console.error("Elemento 'painel_jogada' não encontrado.");
+    // }
+
+})
+
+// função para preencher os cards
+socket.on('rodada_info', function (data) {
+    const principal = document.getElementById('cards');
+
+    const o_da_vez = data.vez_atual;
+    principal.innerHTML = '';
+
+    Object.entries(data.turnos_lista).forEach(([jogador, turnos]) => {
+        // Criação do container principal
+        const divCol = document.createElement('div');
+        divCol.className = 'col-md-2 col-sm-4 col-6 mb-1';
+
+        // Criação do card
+        const card = document.createElement('div');
+        card.className = 'card border-primary border-4 text-bg-dark';
+
+        
+
+        // Criação do cabeçalho do card
+        const cardHeader = document.createElement('div');
+        cardHeader.className = 'card-header';
+        cardHeader.textContent = jogador;
+
+        // Criação do corpo do card
+        const cardBody = document.createElement('div');
+        cardBody.className = 'card-body';
+
+        // Criação da linha dentro do corpo do card
+        const row = document.createElement('div');
+        row.className = 'row d-flex justify-content-center align-items-center text-center';
+
+        // Percorrendo a lista de dois em dois
+        if (data.rodada_n != 0) {
+            for (let i = 0; i < turnos.length; i++) {
+                // Verifica se o próximo índice existe para evitar erros
+                row.appendChild(createDiceSection(`X${turnos[i][0]}`, 'opacity-25', turnos[i][1]));
+            }
+        }
+
+        // Função para criar cada seção de dados
+        function createDiceSection(text, opacityClass, imageIndex) {
+            const col = document.createElement('div');
+            col.className = `col-md-12 mb-1 ${opacityClass}`;
+
+            const diceDiv = document.createElement('div');
+            diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
+
+            const imgDiv = document.createElement('div');
+            const img = document.createElement('img');
+            img.src = `../static/imagens/dado/${imageIndex}.png`;
+            img.className = 'diceImage img-fluid ms-4';
+            img.alt = 'Imagem 1';
+            img.width = 40;
+            img.height = 40;
+            imgDiv.appendChild(img);
+
+            const textDiv = document.createElement('div');
+            textDiv.className = 'mt-2';
+            const heading = document.createElement('h1');
+            heading.className = 'fs-3';
+            heading.textContent = text;
+            textDiv.appendChild(heading);
+
+            diceDiv.appendChild(imgDiv);
+            diceDiv.appendChild(textDiv);
+            col.appendChild(diceDiv);
+            return col;
+        }
+
+        // Montando a estrutura do card
+        cardBody.appendChild(row);
+        card.appendChild(cardHeader);
+        card.appendChild(cardBody);
+        divCol.appendChild(card);
+
+        principal.appendChild(divCol); // Adicionando tudo ao DOM
+    })
+})
 
 // Funções após conectar
 socket.on("connect_start", function (data) {

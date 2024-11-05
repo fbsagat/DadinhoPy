@@ -47,3 +47,13 @@ body {
     z-index: 1000;
     background-color: rgba(255, 255, 255, 0);
 }
+
+/* Reduzindo o espaço entre as colunas */
+.row.no-gutters {
+    margin-left: 0;
+    margin-right: 0;
+}
+.row.no-gutters > [class*="col-"] {
+    padding-left: 1px;
+    padding-right: 1px;
+}

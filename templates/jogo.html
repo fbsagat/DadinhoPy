@@ -13,10 +13,11 @@
     <link rel="stylesheet" href="../static/custom_styles.css">
 </head>
 
-<body class="">
+<body>
 
-    <div class="">
-        <img src="../static/imagens/titulo.png" alt="titulo_dadinho" width="440px" height="200px">
+    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 50vh;">
+        <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
+            style="display: block; width: 45%; height: auto;">
     </div>
 
     <div class="mt-4 container-fluid align-items-center">
@@ -73,353 +74,139 @@
     <!-- TELA PARTIDA INICIO (2) -->
     <div id="tela_partida" class="tela_partida container-fluid text-center" style="display: none;">
 
-        <div class="row justify-content-around">
-
-            <div class="d-flex justify-content-center gap-3">
-                <div id="meus_dados"
-                    class="col-5 d-flex justify-content-around align-items-center mx-auto my-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2"
-                    style="width: 400px;">
-
-                    <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
-                    <div class="col-auto">
-                        
-                        <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
-                    </div>
-
-                    <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
-                    <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
-
-                </div>
-
-                <div class="col-3 d-flex justify-content-around align-items-center mx-auto justify-content-start mt-1 mb-2 text-primary-emphasis bg-dark border border-primary-subtle rounded-3 p-2"
-                    style="width: 300px;">
-                    <span class="fs-5 text-white me-2">Coringa atual: </span>
-                    <img id="dado-atual" src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem atual"
-                        width="30" height="30"><span class="fs-5 text-white me-2">X3</span>
-                </div>
-            </div>
-
-
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada
-                                        Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="diceImage img-fluid px-1"
-                                        alt="Imagem 1" width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada
-                                        Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada
-                                        Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada
-                                        Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-2">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Fábio</h5>
-                        <hr>
-                        <div class="d-flex justify-content-center">
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-primary text-wrap" style="width: 4rem;">
-                                        Jogada
-                                        Atual</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                            <div class="row container text-center">
-                                <div class="col g-1">
-                                    <small class="badge text-bg-secondary text-wrap" style="width: 4rem;">
-                                        Jogada anterior</small>
-                                </div>
-                                <div class="fw-bold">2X</div>
-                                <div class="col g-1">
-                                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                        width="40" height="40">
-                                </div>
-                                <hr class="mt-3">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <hr>
-        <span class="fs-4 badge text-bg-success text-wrap mb-1 me-1" style="width: 8rem;">Sua Vez</span><span
-            class="fs-4 badge text-bg-warning text-wrap mb-1 me-1" style="width: 8rem;">Aguarde</span>
-        <div class="container-fluid text-center" style="width: 160px;">
-            <input class="form-control" type="number" placeholder="Quantidade" aria-label="Quantidade">
-        </div>
-
         <div
             class="d-flex justify-content-between mt-2 bg-info bg-opacity-50 border border-primary border-start-0 rounded-end">
-            <div class="col">
-                <img src="../static/imagens/dado/1.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
+
+            <div id="meus_dados"
+                class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
+                style="width: 350px;">
+
+                <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
+                <div class="col-auto">
+                    <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
+                </div>
+                <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
+                <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
+
             </div>
-            <div class="col">
-                <img src="../static/imagens/dado/2.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
+
+            <div id="dados_mesa"
+                class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
+                style="width: px;">
+
+                <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
+                <div class="col-auto">
+                    <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
+                </div>
+                <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
+                <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
+
             </div>
-            <div class="col">
-                <img src="../static/imagens/dado/3.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
+
+            <div id="corin_atual"
+                class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
+                style="width: 350px;">
+
+                <!-- <span class="fs-5 text-white me-2">Coringa atual: </span>
+                <img src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem atual" width="30" height="30">
+                <span class="fs-5 text-white me-2">Não foi jogado</span> -->
+
             </div>
-            <div class="col">
-                <img src="../static/imagens/dado/4.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
+
+        </div>
+        <div class="row justify-content-around mt-2">
+            <div class="container-fluid">
+                <div id="cards" class="row d-flex justify-content-evenly row no-gutters">
+
+                    <!-- CARD DE EXEMPLO NUM 1 -->
+                    <!-- <div class="col-md-2 col-sm-4 col-6 mb-1">
+                        <div class="card border-primary border-4 text-bg-dark">
+                            <div class="card-header">Fábio</div>
+                            <div class="card-body">
+                                <div class="row d-flex justify-content-center align-items-center text-center">
+
+                                    <div class="col-md-12 mb-1">
+                                        <div
+                                            class="d-flex align-items-center justify-content-evenly border border-2 border-primary rounded">
+                                            <div>
+                                                <img src="../static/imagens/dado/6.png" class="diceImage img-fluid ms-4"
+                                                    alt="Imagem 1" width="40" height="40">
+                                            </div>
+                                            <div class="mt-2">
+                                                <h1 class="fs-3">X4</h1>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-12 mb-1 opacity-50">
+                                        <div class="d-flex align-items-center justify-content-evenly border rounded">
+                                            <div>
+                                                <img src="../static/imagens/dado/4.png" class="diceImage img-fluid ms-4"
+                                                    alt="Imagem 1" width="40" height="40">
+                                            </div>
+                                            <div class="mt-2">
+                                                <h1 class="fs-3">X6</h1>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-12 mb-1 opacity-25">
+                                        <div class="d-flex align-items-center justify-content-evenly border rounded">
+                                            <div>
+                                                <img src="../static/imagens/dado/1.png" class="diceImage img-fluid ms-4"
+                                                    alt="Imagem 1" width="40" height="40">
+                                            </div>
+                                            <div class="mt-2">
+                                                <h1 class="fs-3">X1</h1>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div> -->
+                </div>
             </div>
-            <div class="col">
-                <img src="../static/imagens/dado/5.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
-            </div>
-            <div class="col">
-                <img src="../static/imagens/dado/6.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
-                    height="40">
-            </div>
+
         </div>
 
-        <div class="d-flex justify-content-around mt-2">
-            <input class="btn btn-primary" type="button" value="Apostar">
-            <input class="btn btn-primary" type="button" value="Desconfiar" disabled>
+        <div id="painel_jogada" style="display: none;">
+            <span class="fs-4 badge text-bg-success text-wrap mb-1 me-1" style="width: 8rem;">Sua Vez</span><span
+                class="fs-4 badge text-bg-warning text-wrap mb-1 me-1" style="width: 8rem;">Aguarde</span>
+            <div class="container-fluid text-center" style="width: 160px;">
+                <input class="form-control" type="number" placeholder="Quantidade" aria-label="Quantidade">
+            </div>
+
+            <div
+                class="d-flex justify-content-between mt-2 bg-info bg-opacity-50 border border-primary border-start-0 rounded-end">
+                <div class="col">
+                    <img src="../static/imagens/dado/1.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+                <div class="col">
+                    <img src="../static/imagens/dado/2.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+                <div class="col">
+                    <img src="../static/imagens/dado/3.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+                <div class="col">
+                    <img src="../static/imagens/dado/4.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+                <div class="col">
+                    <img src="../static/imagens/dado/5.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+                <div class="col">
+                    <img src="../static/imagens/dado/6.png" class="img-fluid px-1 mb-1 mt-1" alt="Imagem 1" width="50"
+                        height="40">
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-around mt-2">
+                <input class="btn btn-primary" type="button" value="Apostar">
+                <input class="btn btn-primary" type="button" value="Desconfiar" disabled>
+            </div>
         </div>
 
     </div>

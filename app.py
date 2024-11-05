@@ -53,9 +53,9 @@ def escolher_apelido(data):
     """
     apelido = data["apelido_msg"]
     client_id = request.sid
-
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
-    jogador.username = apelido
+    apelido_n = lobby_unico.verificar_apelido(apelido)
+    jogador.username = apelido_n
     atualizar_lista_usuarios()
 
 
@@ -95,13 +95,24 @@ def joguei_dados(data):
     # print('partida.todos_os_dados', partida.todos_os_dados)
     jogadores_qtd = partida.contar_jogadores()
     emit('meus_dados', {'dados': jogador.dados})
-    if jogadores_qtd == (len(partida.todos_os_dados) / partida.dados_qtd):
-        jogador_inicial = random.randint(0, jogadores_qtd)
+    if partida.verificar_se_todos_ja_jogaram_seus_dados():
         nomes = [jogador.username for jogador in jogadores]
-        time.sleep(random.randint(3, 4))
-        args = {'jogadores_nomes': nomes, 'jogadores_qtd': jogadores_qtd, 'rodada_n': 0, 'vez_atual': jogador_inicial,
-                'coringa_atual': 0, 'turnos_lista': []}
+        # Esta é a lista de turnos a ser enviada para o front, cada jogador deve conter sempre 3 linhas, cada linha diz
+        # a quantidade e o valor do dado jogado, a primeira é o turno atual, as restantes sao turnos passados.
+        # turnos_lista = {'Fabio': [[0, 0], [2, 4], [3, 5]], 'JoséVictor': [[1, 3], [1, 5], [4, 5]],
+        #                 'Felipe': [[0, 0], [4, 6], [5, 6]]}
+        # print('turnos_lista: ', turnos_lista)
+        turnos_lista = {}
+        for jogador in jogadores:
+            turnos_lista[jogador.username] = [[0, 0], [0, 0], [0, 0]]
+        print(turnos_lista)
+
+        jog_inicial = partida.sortear_jogador().username
+        args = {'jogadores_nomes': nomes, 'jogadores_qtd': jogadores_qtd, 'rodada_n': 0, 'vez_atual': jog_inicial,
+                'coringa_atual': 0, 'ultimo_coringa': '', 'turnos_lista': turnos_lista}
+        emit('dados_mesa', {'total': len(partida.todos_os_dados)}, broadcast=True)
         emit("rodada_info", args, broadcast=True)
+        # time.sleep(random.randint(3, 4))
         mudar_pagina(2, broadcast=True)
 
     # A PARTIR DE AGORA, ARRUMAR A PÁGINA PARA RECEBER DADOS DE JOGADA E FORMATAR DE ACORDO BASEADAS NAS

@@ -1,5 +1,5 @@
 from datetime import datetime
-import random
+import secrets, random
 
 
 class Jogador:
@@ -28,7 +28,7 @@ class Jogador:
         dados_qtd = 3
         dados = []
         for dado in range(0, dados_qtd):
-            dados.append(random.randint(1, 6))
+            dados.append(secrets.randbelow(6) + 1)
         self.dados = dados
 
 
@@ -38,6 +38,18 @@ class Lobby:
 
     def __repr__(self):
         return f"Lobby({len(self.jogadores)} jogadores)"
+
+    def verificar_apelido(self, nome):
+        nomes = [jogador.username for jogador in self.jogadores]
+        if nome not in nomes:  # Verifica se o nome é único
+            return nome  # Se for único, retorna o nome original
+            # Se o nome já existe, adiciona um índice até que o nome se torne único
+        indice = 1
+        novo_nome = f"{nome}{indice}"
+        while novo_nome in nomes:
+            indice += 1
+            novo_nome = f"{nome}{indice}"
+        return novo_nome  # Retorna o novo nome único
 
     def definir_master(self):
         # Verifica se já existe um jogador master
@@ -111,6 +123,16 @@ class Partida:
     def __repr__(self):
         txt = f"Partida do lobby {self.lobby} com os jogadores: {self.jogadores}"
         return txt
+
+    def sortear_jogador(self):
+        if self.jogadores:  # Verifica se a lista não está vazia
+            jogador_aleatorio = random.choice(self.jogadores)  # Seleciona um jogador aleatório
+            return jogador_aleatorio
+        else:
+            return None  # Retorna None se a lista estiver vazia
+
+    def verificar_se_todos_ja_jogaram_seus_dados(self):
+        return True if self.contar_jogadores() == (len(self.todos_os_dados) / self.dados_qtd) else False
 
     def iniciar_turno_dados(self):
         self.todos_os_dados = []  # limpar dados (temporário)
