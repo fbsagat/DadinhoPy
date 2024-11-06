@@ -2,7 +2,6 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from funcoes_gerais import *
 from modelos import *
-import time, random
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -25,7 +24,7 @@ def handle_connect():
     master = False if lobby_unico.verificar_jogador_master() else True
     jogador = Jogador.criar_jogador(client_id=client_id, master=master)
     lobby_unico.adicionar_jogador(jogador)
-    emit("connect_start", {"is_master": master})
+    emit("connect_start", {"is_master": master, 'chave_secreta': jogador.chave_secreta})
     atualizar_lista_usuarios()
 
 
@@ -66,7 +65,7 @@ def ir_jogar_dados():
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         jogadores = lobby_unico.listar_jogadores()
         partida.jogadores = jogadores
-        partida.iniciar_turno_dados()
+        partida.jogar_dados()
         mudar_pagina(1, broadcast=True)
 
 
@@ -89,34 +88,28 @@ def joguei_dados(data):
     """
     jogadores = partida.jogadores
     jogador = [jogador for jogador in jogadores if jogador.client_id == data][0]
-    # print('partida.todos_os_dados', partida.todos_os_dados)
-    # print('jogador', jogador)
     partida.todos_os_dados += jogador.dados
-    # print('partida.todos_os_dados', partida.todos_os_dados)
-    jogadores_qtd = partida.contar_jogadores()
     emit('meus_dados', {'dados': jogador.dados})
-    if partida.verificar_se_todos_ja_jogaram_seus_dados():
-        nomes = [jogador.username for jogador in jogadores]
-        # Esta é a lista de turnos a ser enviada para o front, cada jogador deve conter sempre 3 linhas, cada linha diz
-        # a quantidade e o valor do dado jogado, a primeira é o turno atual, as restantes sao turnos passados.
-        # turnos_lista = {'Fabio': [[0, 0], [2, 4], [3, 5]], 'JoséVictor': [[1, 3], [1, 5], [4, 5]],
-        #                 'Felipe': [[0, 0], [4, 6], [5, 6]]}
-        # print('turnos_lista: ', turnos_lista)
-        turnos_lista = {}
-        for jogador in jogadores:
-            turnos_lista[jogador.username] = [[0, 0], [0, 0], [0, 0]]
-        print(turnos_lista)
 
-        jog_inicial = partida.sortear_jogador().username
-        args = {'jogadores_nomes': nomes, 'jogadores_qtd': jogadores_qtd, 'rodada_n': 0, 'vez_atual': jog_inicial,
-                'coringa_atual': 0, 'ultimo_coringa': '', 'turnos_lista': turnos_lista}
-        emit('dados_mesa', {'total': len(partida.todos_os_dados)}, broadcast=True)
-        emit("rodada_info", args, broadcast=True)
+    # Executar isso \/ quando o último jogar os dados
+    if partida.verificar_se_todos_ja_jogaram_seus_dados():
+        partida.iniciar_partida()
         # time.sleep(random.randint(3, 4))
         mudar_pagina(2, broadcast=True)
 
-    # A PARTIR DE AGORA, ARRUMAR A PÁGINA PARA RECEBER DADOS DE JOGADA E FORMATAR DE ACORDO BASEADAS NAS
-    # INFORMAÇÕES DE args, INICIANDO POR UM JOGADOR SORTEADO(vez_atual) E GERAR NA PÁGINA AS FORMATAÇÕES
+
+@socketio.on('apostar')
+def aposta(dados):
+    # PAREI AQUI!
+    # A PARTIR DE AGORA O SERVIDOR DEVE CRIAR UM WHILE, CADA VOLTA CRIA UM TURNO E ADICIONA NA PARTIDA, CADA TURNO
+    # RECEBE INFOS DESTA FUNCAO COM A JOGADA DO JOGADOR DE VEZ, FAZENDO UMA VALIDAÇÃO DE AUTENTICIDADE VALORES
+    # DEPOIS DISSO DAR CONTINUIDADE A PARTIDA
+    print(dados)
+
+
+@socketio.on('desconfiar')
+def aposta(dados):
+    print(dados)
 
 
 if __name__ == '__main__':

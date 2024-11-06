@@ -22,17 +22,22 @@ document.addEventListener('keydown', function (event) {
         paginas[indiceAtual].style.display = "block";
 
         if (indiceAtual === 2) {
-            logo.style.display = "none"; // Esconde o logotipo pra abrir espaço
-            logodiv.style.height = '5vh';
+            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+            logodiv.style.height = '10vh';
+            logo.src = "../static/imagens/titulo_p.png";
+            logo.style.width = '20%';
         } else {
-            logo.style.display = "block"; // Exibe o logotipo
+            // logo.style.display = "block"; // Exibe o logotipo
             logodiv.style.height = '50vh';
+            logo.src = "../static/imagens/titulo.png";
+            logo.style.width = '45%';
         }
     }
 });
 
 // Embaralhar os dados ao iniciar
 window.onload = escolherImagemAleatoria;
+let chave_secreta = '';
 
 const socket = io({ autoConnect: true });
 socket.connect();
@@ -114,13 +119,15 @@ socket.on("mudar_pagina", function (data) {
         // Mostra a próxima página
         paginas[indiceAtual].style.display = "block";
         if (data.pag_numero === 2) {
-            logo.style.display = "none"; // Apaga o logotipo pra abrir espaço
-            logodiv.style.display = "none";
-            logodiv.style.height = '5vh';
+            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+            logodiv.style.height = '10vh';
+            logo.src = "../static/imagens/titulo_p.png";
+            logo.style.width = '20%';
         } else {
-            logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.display = "block";
+            // logo.style.display = "block"; // Exibe o logotipo
             logodiv.style.height = '50vh';
+            logo.src = "../static/imagens/titulo.png";
+            logo.style.width = '45%';
         }
     }
 });
@@ -156,12 +163,12 @@ socket.on('dados_mesa', function (data) {
     data = data.total
     span = document.createElement('span')
     span.className = 'fs-5 text-white me-2'
-    span.innerText = `${data} dados na mesa`
+    span.innerHTML = `Temos <b>${data}</b> dados na mesa`
     dados_mesa.appendChild(span)
 });
 
 // Função pra preencher o coringa
-socket.on('rodada_info', function (data) {
+socket.on('construtor_html', function (data) {
     const coringa_n = Number(data.coringa_atual)
     const coringa_j = String(data.ultimo_coringa)
     const corin_atual = document.getElementById('corin_atual')
@@ -191,28 +198,9 @@ socket.on('rodada_info', function (data) {
     }
 })
 
-// Função individual para verificar o jogador da vez no turno                 TERMINEI AQUI !!!
-socket.on('meu_turno', function () {
-    let jog_painel = document.getElementById('painel_jogada');
-    // if (jog_painel) { // Verifique se o elemento foi encontrado
-    //     if (jogador === o_da_vez) {
-    //         card.className = 'card border-primary border-4 text-bg-dark';
-    //         jog_painel.style.display = "block"; // Mostra o painel
-    //     } else {
-    //         card.className = 'card border-secondary border-1 text-bg-dark';
-    //         jog_painel.style.display = "none"; // Oculta o painel
-    //     }
-    // } else {
-    //     console.error("Elemento 'painel_jogada' não encontrado.");
-    // }
-
-})
-
-// função para preencher os cards
-socket.on('rodada_info', function (data) {
+// Função para construir os cards
+socket.on('construtor_html', function (data) {
     const principal = document.getElementById('cards');
-
-    const o_da_vez = data.vez_atual;
     principal.innerHTML = '';
 
     Object.entries(data.turnos_lista).forEach(([jogador, turnos]) => {
@@ -222,9 +210,9 @@ socket.on('rodada_info', function (data) {
 
         // Criação do card
         const card = document.createElement('div');
-        card.className = 'card border-primary border-4 text-bg-dark';
-
-        
+        card.className = 'card border-secondary border-1 text-bg-dark';
+        card.style.height = '300px'; // Tamanho do card, ajustar no futuro: 300px;
+        card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
         const cardHeader = document.createElement('div');
@@ -241,9 +229,19 @@ socket.on('rodada_info', function (data) {
 
         // Percorrendo a lista de dois em dois
         if (data.rodada_n != 0) {
+
+            let opacidade;
+            // Definindo a opacidade com base no índice
+            if (i === 0) {
+                opacidade = 'opacity-25'; // Para o índice 0, opacidade 25%
+            } else if (i === 1) {
+                opacidade = 'opacity-50'; // Para o índice 1, opacidade 50%
+            } else if (i === 2) {
+                opacidade = 'opacity-100'; // Para o índice 2, opacidade 100%
+            }
             for (let i = 0; i < turnos.length; i++) {
                 // Verifica se o próximo índice existe para evitar erros
-                row.appendChild(createDiceSection(`X${turnos[i][0]}`, 'opacity-25', turnos[i][1]));
+                row.appendChild(createDiceSection(`X${turnos[i][0]}`, opacidade, turnos[i][1]));
             }
         }
 
@@ -287,8 +285,90 @@ socket.on('rodada_info', function (data) {
     })
 })
 
+// Função individual para verificar o jogador da vez no turno
+socket.on('meu_turno', function (data) {
+    const jog_painel = document.getElementById('painel_jogada');
+    const painel_aguarde = document.getElementById('painel_aguarde')
+    jog_painel.style.display = "block"; // Mostra o painel
+    painel_aguarde.style.display = "none"; // Oculta painel aguarde
+    // window.alert('meu_turno')
+})
+
+// Função coletiva para os jogadores que não estão na vez
+socket.on('espera_turno', function (data) {
+    const jog_painel = document.getElementById('painel_jogada');
+    const painel_aguarde = document.getElementById('painel_aguarde')
+    jog_painel.style.display = "none"; // Oculta o painel
+    painel_aguarde.style.display = "block"; // Mostra painel aguarde
+    // window.alert('espera_turno')
+})
+
+// Função coletiva para todos os os jogadores da partida (broadcast)
+socket.on('formatador_coletivo', function (data) {
+    jogadores = data.jogadores_nomes
+    jog_da_vez = data.jogador_inicial_nome
+    jogadores.forEach(jogador => {
+        const card = document.getElementById(`card_${jogador}`);
+        if (jogador === jog_da_vez) {
+            // Aqui para o jogador da vez
+            card.className = 'card border-primary border-4 text-bg-dark';
+
+        } else {
+            // Aqui para os outros jogadores
+            card.className = 'card border-secondary border-1 text-bg-dark';
+        }
+        // Aqui para todos os jogadores
+
+    });
+})
+
+let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
+
+// Adiciona evento para cada imagem
+document.querySelectorAll('.img-button').forEach(button => {
+    button.addEventListener('click', () => {
+        // Desmarca todos os botões
+        document.querySelectorAll('.img-button').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        // Marca o botão clicado
+        button.classList.add('selected');
+        selectedImageValue = button.getAttribute('data-value');
+    });
+});
+
+// Lógica para enviar a aposta
+document.getElementById('apostar').addEventListener('click', () => {
+    const quantidade = document.getElementById('quantidade').value;
+
+    if (selectedImageValue && quantidade) {
+        const data = {
+            chave: chave_secreta,
+            dado: selectedImageValue,
+            quantidade: quantidade
+        };
+
+        // Enviar para o backend (exemplo usando fetch)
+        socket.emit('apostar', { dados: data });
+    } else {
+        alert('Selecione um dado e informe a quantidade!');
+    }
+});
+
+// Lógica para enviar a desconfiança
+document.getElementById('desconfiar').addEventListener('click', () => {
+    const data = {
+        chave: chave_secreta,
+        acao: 'desconfiar'
+    };
+
+    // Enviar para o backend
+    socket.emit('desconfiar', { dados: data });
+});
+
 // Funções após conectar
 socket.on("connect_start", function (data) {
+    chave_secreta = data.chave_secreta;
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
     textInput.disabled = false; // Desativa o input

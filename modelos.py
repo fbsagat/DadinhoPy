@@ -1,10 +1,12 @@
 from datetime import datetime
 import secrets, random
+from flask_socketio import emit
 
 
 class Jogador:
     def __init__(self, client_id, master=False):
         self.client_id = client_id
+        self.chave_secreta = secrets.token_hex(32)
         self.username = None
         self.master = master
         self.pontos = 0
@@ -118,7 +120,8 @@ class Partida:
         self.todos_os_dados = []
         self.coringa_atual = 0
         self.jogaram_dados = False
-        self.primeiro_turno = False  # Diferencia o turno onde não pode desconfiar(primeiro turno apenas)
+        self.prepara_turno = True  # Diferencia o turno onde não pode desconfiar(primeiro turno apenas)
+        self.turnos = []
 
     def __repr__(self):
         txt = f"Partida do lobby {self.lobby} com os jogadores: {self.jogadores}"
@@ -134,21 +137,42 @@ class Partida:
     def verificar_se_todos_ja_jogaram_seus_dados(self):
         return True if self.contar_jogadores() == (len(self.todos_os_dados) / self.dados_qtd) else False
 
-    def iniciar_turno_dados(self):
+    def jogar_dados(self):
         self.todos_os_dados = []  # limpar dados (temporário)
         for jogador in self.jogadores:
             jogador.jogar_dados()
         self.jogaram_dados = True
 
-    def iniciar_partida(self):
-        pass
-
-    def jogar_turnos(self):
-        """Inicia o ciclo de turnos até que alguém desconfie."""
-        pass
-
     def contar_jogadores(self):
         return len(self.jogadores)
+
+    def iniciar_partida(self):
+        if self.prepara_turno:
+            turnos_lista = {}
+            for jogador in self.jogadores:
+                turnos_lista[jogador.username] = [[0, 0], [0, 0], [0, 0]]
+            jog_inicial = self.sortear_jogador()
+            self.jogadores.remove(jog_inicial)
+            nomes = [jogador.username for jogador in self.jogadores]
+
+            emit('dados_mesa', {'total': len(self.todos_os_dados)}, broadcast=True)
+            emit("construtor_html", {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0},
+                 broadcast=True)
+            emit('meu_turno', {'username': jog_inicial.username}, to=jog_inicial.client_id)
+            for jogador in self.jogadores:
+                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
+            emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jog_inicial.username},
+                 broadcast=True)
+        else:
+            desconfiou = False
+            while not desconfiou:
+                self.jogar_turno()
+
+    def jogar_turno(self):
+        """Inicia o ciclo de turnos até que alguém desconfie."""
+        turno = Turno()
+        self.turnos.append(turno)
+        pass
 
 
 class Turno:

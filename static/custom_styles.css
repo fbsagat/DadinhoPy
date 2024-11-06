@@ -57,3 +57,30 @@ body {
     padding-left: 1px;
     padding-right: 1px;
 }
+
+/* Estilo para destacar a imagem selecionada */
+.img-button.selected img {
+    border: 3px solid #007bff; /* Adiciona uma borda azul na imagem selecionada */
+    box-shadow: 0 0 10px rgba(0, 123, 255, 0.5); /* Adiciona uma sombra ao redor da imagem */
+}
+
+/* Adiciona um efeito suave ao passar o mouse sobre os botões */
+.img-button:hover img {
+    transform: scale(1.1); /* Aumenta um pouco o tamanho da imagem */
+    transition: transform 0.3s ease; /* Transição suave */
+}
+
+/* Botões de ação */
+.btn {
+    font-size: 1.2rem;
+    font-weight: bold;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px); /* Dá um pequeno efeito de elevação ao passar o mouse */
+}
+
+.btn:active {
+    transform: translateY(0); /* Retorna ao estado normal ao clicar */
+}
