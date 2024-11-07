@@ -6,7 +6,7 @@ from flask_socketio import emit
 class Jogador:
     def __init__(self, client_id, master=False):
         self.client_id = client_id
-        self.chave_secreta = secrets.token_hex(32)
+        self.chave_secreta = secrets.token_hex(16)
         self.username = None
         self.master = master
         self.pontos = 0
@@ -89,8 +89,12 @@ class Lobby:
                 return jogador
         return None
 
-    def contar_jogadores(self):
-        return len(self.jogadores)
+    def contar_jogadores(self, nome=False):
+        if nome:
+            quantidade = sum(1 for jogador in self.jogadores if jogador.username is not None)
+            return quantidade
+        else:
+            return len(self.jogadores)
 
     def listar_jogadores(self):
         lista = []
@@ -152,7 +156,6 @@ class Partida:
             for jogador in self.jogadores:
                 turnos_lista[jogador.username] = [[0, 0], [0, 0], [0, 0]]
             jog_inicial = self.sortear_jogador()
-            self.jogadores.remove(jog_inicial)
             nomes = [jogador.username for jogador in self.jogadores]
 
             emit('dados_mesa', {'total': len(self.todos_os_dados)}, broadcast=True)
@@ -160,7 +163,8 @@ class Partida:
                  broadcast=True)
             emit('meu_turno', {'username': jog_inicial.username}, to=jog_inicial.client_id)
             for jogador in self.jogadores:
-                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
+                if jogador != jog_inicial:
+                    emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
             emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jog_inicial.username},
                  broadcast=True)
         else:

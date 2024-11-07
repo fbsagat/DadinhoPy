@@ -24,8 +24,10 @@ def handle_connect():
     master = False if lobby_unico.verificar_jogador_master() else True
     jogador = Jogador.criar_jogador(client_id=client_id, master=master)
     lobby_unico.adicionar_jogador(jogador)
-    emit("connect_start", {"is_master": master, 'chave_secreta': jogador.chave_secreta})
-    atualizar_lista_usuarios()
+    emit("connect_start",
+         {"is_master": master, 'chave_secreta': jogador.chave_secreta})
+    if lobby_unico.contar_jogadores(nome=True) > 0:
+        atualizar_lista_usuarios()
 
 
 @socketio.on('disconnect')
@@ -42,7 +44,8 @@ def handle_disconnect():
     if lobby_unico.contar_jogadores() > 0:
         # Definir novo master
         lobby_unico.definir_master()
-    atualizar_lista_usuarios()
+    if lobby_unico.contar_jogadores(nome=True) > 0:
+        atualizar_lista_usuarios()
 
 
 @socketio.on('apelido')
@@ -55,6 +58,7 @@ def escolher_apelido(data):
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     apelido_n = lobby_unico.verificar_apelido(apelido)
     jogador.username = apelido_n
+    emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
     atualizar_lista_usuarios()
 
 

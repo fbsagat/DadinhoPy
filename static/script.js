@@ -38,6 +38,8 @@ document.addEventListener('keydown', function (event) {
 // Embaralhar os dados ao iniciar
 window.onload = escolherImagemAleatoria;
 let chave_secreta = '';
+let nome_jogador = '';
+
 
 const socket = io({ autoConnect: true });
 socket.connect();
@@ -198,7 +200,7 @@ socket.on('construtor_html', function (data) {
     }
 })
 
-// Função para construir os cards
+// Função para construir os cards (parte estática)
 socket.on('construtor_html', function (data) {
     const principal = document.getElementById('cards');
     principal.innerHTML = '';
@@ -211,12 +213,18 @@ socket.on('construtor_html', function (data) {
         // Criação do card
         const card = document.createElement('div');
         card.className = 'card border-secondary border-1 text-bg-dark';
-        card.style.height = '300px'; // Tamanho do card, ajustar no futuro: 300px;
+        card.style.height = '275px'; // Tamanho do card, ajustar no futuro: 275px;
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
         const cardHeader = document.createElement('div');
-        cardHeader.className = 'card-header';
+        if (jogador === nome_jogador) {
+            cardHeader.className = 'card-header text-bg-primary';
+            // window.alert(`${jogador} = ${nome_jogador}`);
+        } else {
+            cardHeader.className = 'card-header';
+            // window.alert(`${jogador} =/= ${nome_jogador}`);
+        }
         cardHeader.textContent = jogador;
 
         // Criação do corpo do card
@@ -285,34 +293,34 @@ socket.on('construtor_html', function (data) {
     })
 })
 
-// Função individual para verificar o jogador da vez no turno
+// Função individual para verificar o jogador da vez no turno e construir formatação dinâmina para ele
 socket.on('meu_turno', function (data) {
     const jog_painel = document.getElementById('painel_jogada');
-    const painel_aguarde = document.getElementById('painel_aguarde')
+    const painel_aguarde = document.getElementById('painel_aguarde');
     jog_painel.style.display = "block"; // Mostra o painel
     painel_aguarde.style.display = "none"; // Oculta painel aguarde
-    // window.alert('meu_turno')
+    // window.alert('meu_turno');
 })
 
-// Função coletiva para os jogadores que não estão na vez
+// Função coletiva para os jogadores que não estão na vez e construir formatação dinâmina para eles
 socket.on('espera_turno', function (data) {
     const jog_painel = document.getElementById('painel_jogada');
-    const painel_aguarde = document.getElementById('painel_aguarde')
+    const painel_aguarde = document.getElementById('painel_aguarde');
     jog_painel.style.display = "none"; // Oculta o painel
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
-    // window.alert('espera_turno')
+    // window.alert('espera_turno');
 })
 
-// Função coletiva para todos os os jogadores da partida (broadcast)
+// Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
 socket.on('formatador_coletivo', function (data) {
-    jogadores = data.jogadores_nomes
-    jog_da_vez = data.jogador_inicial_nome
+    jogadores = data.jogadores_nomes;
+    jog_da_vez = data.jogador_inicial_nome;
     jogadores.forEach(jogador => {
         const card = document.getElementById(`card_${jogador}`);
+
         if (jogador === jog_da_vez) {
             // Aqui para o jogador da vez
             card.className = 'card border-primary border-4 text-bg-dark';
-
         } else {
             // Aqui para os outros jogadores
             card.className = 'card border-secondary border-1 text-bg-dark';
@@ -379,6 +387,10 @@ socket.on("connect_start", function (data) {
         botaapelido.disabled = true; // Desativa o input
     }
 });
+
+socket.on("update_username", function (data) {
+    nome_jogador = data.nome_jogador;
+})
 
 socket.on("jogar_dados_resultado", function (data) {
     const diceImages = [
