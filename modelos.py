@@ -53,17 +53,24 @@ class Lobby:
             novo_nome = f"{nome}{indice}"
         return novo_nome  # Retorna o novo nome único
 
+    def verificar_jogador_master(self):
+        # Verifica se algum jogador é master
+        for jogador in self.jogadores:
+            if jogador.master:
+                return True
+        return False
+
     def definir_master(self):
         # Verifica se já existe um jogador master
         if self.verificar_jogador_master():
             # print("Já existe um jogador master.")
             return
-
-        # Ordena os jogadores por ordem de entrada e define o primeiro como master
-        self.jogadores.sort(key=lambda jogador: jogador.entrou)
-        if self.jogadores:
-            self.jogadores[0].master = True
-            # print(f"O jogador {self.jogadores[0].username} foi definido como master.")
+        else:
+            # Ordena os jogadores por ordem de entrada e define o primeiro como master
+            self.jogadores.sort(key=lambda jogador: jogador.entrou)
+            if self.jogadores:
+                self.jogadores[0].master = True
+                # print(f"O jogador {self.jogadores[0].username} foi definido como master.")
 
     def adicionar_jogador(self, jogador):
         if isinstance(jogador, Jogador):
@@ -101,13 +108,6 @@ class Lobby:
         for jogador in self.jogadores:
             lista.append(jogador)
         return lista
-
-    def verificar_jogador_master(self):
-        # Verifica se algum jogador é master
-        for jogador in self.jogadores:
-            if jogador.master:
-                return True
-        return False
 
     def retornar_master(self):
         for jogador in self.jogadores:

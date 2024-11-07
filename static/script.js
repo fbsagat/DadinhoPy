@@ -48,8 +48,10 @@ socket.connect();
 socket.on("update_user_list", (data) => {
     const userListItems = document.getElementById("lista_de_jogadores");
     userListItems.innerHTML = ""; // Limpa a lista existente
-
-    const rowDiv = document.createElement("div");
+    if (data.users.length === 0) {
+        userListItems.innerHTML = "<small>Aguardando jogadores...</small>";
+    } else {
+        const rowDiv = document.createElement("div");
     rowDiv.className = "row border-bottom";
 
     const jogadoresDiv = document.createElement("div");
@@ -92,6 +94,7 @@ socket.on("update_user_list", (data) => {
     } else {
         iniciar_jogo.disabled = true; // Ativa o botão de iniciar partida
     }
+    }  
 });
 
 // Funções para o "master" do servidor

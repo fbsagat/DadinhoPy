@@ -26,8 +26,7 @@ def handle_connect():
     lobby_unico.adicionar_jogador(jogador)
     emit("connect_start",
          {"is_master": master, 'chave_secreta': jogador.chave_secreta})
-    if lobby_unico.contar_jogadores(nome=True) > 0:
-        atualizar_lista_usuarios()
+    atualizar_lista_usuarios()
 
 
 @socketio.on('disconnect')
@@ -44,8 +43,7 @@ def handle_disconnect():
     if lobby_unico.contar_jogadores() > 0:
         # Definir novo master
         lobby_unico.definir_master()
-    if lobby_unico.contar_jogadores(nome=True) > 0:
-        atualizar_lista_usuarios()
+    atualizar_lista_usuarios()
 
 
 @socketio.on('apelido')
@@ -112,7 +110,7 @@ def aposta(dados):
 
 
 @socketio.on('desconfiar')
-def aposta(dados):
+def desconfiar(dados):
     print(dados)
 
 
