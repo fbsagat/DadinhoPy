@@ -52,49 +52,49 @@ socket.on("update_user_list", (data) => {
         userListItems.innerHTML = "<small>Aguardando jogadores...</small>";
     } else {
         const rowDiv = document.createElement("div");
-    rowDiv.className = "row border-bottom";
+        rowDiv.className = "row border-bottom";
 
-    const jogadoresDiv = document.createElement("div");
-    jogadoresDiv.className = "col-md-6 font-weight-bold";
-    jogadoresDiv.textContent = "Jogadores conectados";
-
-    const pontuacaoDiv = document.createElement("div");
-    pontuacaoDiv.className = "col-md-6 font-weight-bold";
-    pontuacaoDiv.textContent = "Pontuação";
-
-    userListItems.appendChild(rowDiv);
-    rowDiv.appendChild(jogadoresDiv);
-    rowDiv.appendChild(pontuacaoDiv);
-
-    data.users.forEach((user, index) => {
-        const headerRow = document.createElement("div");
-        headerRow.className = "row border-bottom";
-
-        const userItem = document.createElement("div");
-        userItem.className = "col-md-6";
-
-        let master = ''
-        if (data.masters[index] === true) {
-            master = '🏁'
-        }
-        userItem.textContent = `${user} ${master}`;
+        const jogadoresDiv = document.createElement("div");
+        jogadoresDiv.className = "col-md-6 font-weight-bold";
+        jogadoresDiv.textContent = "Jogadores conectados";
 
         const pontuacaoDiv = document.createElement("div");
-        pontuacaoDiv.className = "col-md-6";
-        pontuacaoDiv.textContent = data.pontos[index];
+        pontuacaoDiv.className = "col-md-6 font-weight-bold";
+        pontuacaoDiv.textContent = "Pontuação";
 
-        userListItems.appendChild(headerRow); // Adiciona cada row à lista
-        headerRow.appendChild(userItem); // Adiciona cada usuário à headerRow
-        headerRow.appendChild(pontuacaoDiv); // Adiciona cada pontuação à lista
-    });
+        userListItems.appendChild(rowDiv);
+        rowDiv.appendChild(jogadoresDiv);
+        rowDiv.appendChild(pontuacaoDiv);
 
-    if (data.users.length >= 2) {
-        const iniciar_jogo = document.getElementById('iniciar_jogo');
-        iniciar_jogo.disabled = false; // Ativa o botão de iniciar partida
-    } else {
-        iniciar_jogo.disabled = true; // Ativa o botão de iniciar partida
+        data.users.forEach((user, index) => {
+            const headerRow = document.createElement("div");
+            headerRow.className = "row border-bottom";
+
+            const userItem = document.createElement("div");
+            userItem.className = "col-md-6";
+
+            let master = ''
+            if (data.masters[index] === true) {
+                master = '🏁'
+            }
+            userItem.textContent = `${user} ${master}`;
+
+            const pontuacaoDiv = document.createElement("div");
+            pontuacaoDiv.className = "col-md-6";
+            pontuacaoDiv.textContent = data.pontos[index];
+
+            userListItems.appendChild(headerRow); // Adiciona cada row à lista
+            headerRow.appendChild(userItem); // Adiciona cada usuário à headerRow
+            headerRow.appendChild(pontuacaoDiv); // Adiciona cada pontuação à lista
+        });
+
+        if (data.users.length >= 2) {
+            const iniciar_jogo = document.getElementById('iniciar_jogo');
+            iniciar_jogo.disabled = false; // Ativa o botão de iniciar partida
+        } else {
+            iniciar_jogo.disabled = true; // Ativa o botão de iniciar partida
+        }
     }
-    }  
 });
 
 // Funções para o "master" do servidor
@@ -173,7 +173,7 @@ socket.on('dados_mesa', function (data) {
 });
 
 // Função pra preencher o coringa
-socket.on('construtor_html', function (data) {
+socket.on('atualizar_coringa', function (data) {
     const coringa_n = Number(data.coringa_atual)
     const coringa_j = String(data.ultimo_coringa)
     const corin_atual = document.getElementById('corin_atual')
@@ -203,6 +203,36 @@ socket.on('construtor_html', function (data) {
     }
 })
 
+// Função para criar cada seção de dados
+function createDiceSection(text, opacityClass, imageIndex) {
+    const col = document.createElement('div');
+    col.className = `col-md-12 mb-1 ${opacityClass}`;
+
+    const diceDiv = document.createElement('div');
+    diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
+
+    const imgDiv = document.createElement('div');
+    const img = document.createElement('img');
+    img.src = `../static/imagens/dado/${imageIndex}.png`;
+    img.className = 'diceImage img-fluid ms-4';
+    img.alt = 'Imagem 1';
+    img.width = 40;
+    img.height = 40;
+    imgDiv.appendChild(img);
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'mt-2';
+    const heading = document.createElement('h1');
+    heading.className = 'fs-3';
+    heading.textContent = text;
+    textDiv.appendChild(heading);
+
+    diceDiv.appendChild(imgDiv);
+    diceDiv.appendChild(textDiv);
+    col.appendChild(diceDiv);
+    return col;
+}
+
 // Função para construir os cards (parte estática)
 socket.on('construtor_html', function (data) {
     const principal = document.getElementById('cards');
@@ -215,8 +245,8 @@ socket.on('construtor_html', function (data) {
 
         // Criação do card
         const card = document.createElement('div');
-        card.className = 'card border-secondary border-1 text-bg-dark';
-        card.style.height = '275px'; // Tamanho do card, ajustar no futuro: 275px;
+        card.className = 'card border border-secondary border-1 text-bg-dark';
+        card.style.height = '240px'; // Tamanho do card, ajustar no futuro: 240px;
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
@@ -228,7 +258,9 @@ socket.on('construtor_html', function (data) {
             cardHeader.className = 'card-header';
             // window.alert(`${jogador} =/= ${nome_jogador}`);
         }
-        cardHeader.textContent = jogador;
+
+        cardHeader.textContent = `${jogador} (🎲 x ${data.dados_tt})`;
+        cardHeader.id = `card_hea_${jogador}`
 
         // Criação do corpo do card
         const cardBody = document.createElement('div');
@@ -237,8 +269,8 @@ socket.on('construtor_html', function (data) {
         // Criação da linha dentro do corpo do card
         const row = document.createElement('div');
         row.className = 'row d-flex justify-content-center align-items-center text-center';
+        row.id = `card_row_${jogador}`;
 
-        // Percorrendo a lista de dois em dois
         if (data.rodada_n != 0) {
 
             let opacidade;
@@ -251,41 +283,9 @@ socket.on('construtor_html', function (data) {
                 opacidade = 'opacity-100'; // Para o índice 2, opacidade 100%
             }
             for (let i = 0; i < turnos.length; i++) {
-                // Verifica se o próximo índice existe para evitar erros
                 row.appendChild(createDiceSection(`X${turnos[i][0]}`, opacidade, turnos[i][1]));
             }
         }
-
-        // Função para criar cada seção de dados
-        function createDiceSection(text, opacityClass, imageIndex) {
-            const col = document.createElement('div');
-            col.className = `col-md-12 mb-1 ${opacityClass}`;
-
-            const diceDiv = document.createElement('div');
-            diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
-
-            const imgDiv = document.createElement('div');
-            const img = document.createElement('img');
-            img.src = `../static/imagens/dado/${imageIndex}.png`;
-            img.className = 'diceImage img-fluid ms-4';
-            img.alt = 'Imagem 1';
-            img.width = 40;
-            img.height = 40;
-            imgDiv.appendChild(img);
-
-            const textDiv = document.createElement('div');
-            textDiv.className = 'mt-2';
-            const heading = document.createElement('h1');
-            heading.className = 'fs-3';
-            heading.textContent = text;
-            textDiv.appendChild(heading);
-
-            diceDiv.appendChild(imgDiv);
-            diceDiv.appendChild(textDiv);
-            col.appendChild(diceDiv);
-            return col;
-        }
-
         // Montando a estrutura do card
         cardBody.appendChild(row);
         card.appendChild(cardHeader);
@@ -295,6 +295,29 @@ socket.on('construtor_html', function (data) {
         principal.appendChild(divCol); // Adicionando tudo ao DOM
     })
 })
+
+// função para atualizar um turno
+socket.on('atualizar_turno', function (dados) {
+    const jogador = dados.jogador
+    const lista_turnos = dados.lista_turnos
+    card_row = document.getElementById(`card_row_${jogador}`)
+    card_row.innerHTML = ""
+    lista_turnos.forEach((sublista, index) => {
+        const dado = sublista[0];
+        const dado_qtd = sublista[1];
+        let opacidade;
+
+        // Definindo a opacidade com base no índice
+        if (index === 0) {
+            opacidade = 'opacity-100'; // Para o índice 0, opacidade 25%
+        } else if (index === 1) {
+            opacidade = 'opacity-50'; // Para o índice 1, opacidade 50%
+        } else if (index === 2) {
+            opacidade = 'opacity-25'; // Para o índice 2, opacidade 100%
+        }
+        card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado));
+    })
+});
 
 // Função individual para verificar o jogador da vez no turno e construir formatação dinâmina para ele
 socket.on('meu_turno', function (data) {
@@ -318,18 +341,30 @@ socket.on('espera_turno', function (data) {
 socket.on('formatador_coletivo', function (data) {
     jogadores = data.jogadores_nomes;
     jog_da_vez = data.jogador_inicial_nome;
+    eu = nome_jogador
+
     jogadores.forEach(jogador => {
         const card = document.getElementById(`card_${jogador}`);
 
-        if (jogador === jog_da_vez) {
-            // Aqui para o jogador da vez
-            card.className = 'card border-primary border-4 text-bg-dark';
+        if (jogador === eu) {
+            if (jogador === jog_da_vez) {
+                // // Aqui para o jogador na própria vez, card dele
+                card.className = 'card border border-primary border-4 text-bg-dark';
+            } else {
+                // Aqui para o jogador na espera da vez, card dele
+                card.className = 'card border border-secondary border-1 text-bg-dark';
+            }
+            // Aqui para todos os jogadores sendo eu o da vez
         } else {
-            // Aqui para os outros jogadores
-            card.className = 'card border-secondary border-1 text-bg-dark';
+            if (jogador === jog_da_vez) {
+                // Aqui para o jogador na espera da vez, card do da vez
+                card.className = 'card border border-warning border-2 text-bg-dark';
+            } else {
+                // Aqui para o jogador na própria vez, card do(s) jogaor(es) aguardando
+                card.className = 'card border border-secondary border-1 text-bg-dark';
+            }
+            // Aqui para todos os jogadores não sendo eu o da vez
         }
-        // Aqui para todos os jogadores
-
     });
 })
 
@@ -372,7 +407,6 @@ document.getElementById('desconfiar').addEventListener('click', () => {
         chave: chave_secreta,
         acao: 'desconfiar'
     };
-
     // Enviar para o backend
     socket.emit('desconfiar', { dados: data });
 });
@@ -452,6 +486,11 @@ socket.on("jogar_dados_resultado", function (data) {
     }, rollTime);
 });
 
+socket.on('jogada_invalida', function (data) {
+    txt = data.txtadd
+    window.alert(`Esta jogada é inválida, ${txt}`);
+})
+
 // Função para enviar apelido ao servidor
 function enviar_apelido() {
     const textInput = document.getElementById("apelido");
@@ -495,7 +534,7 @@ function escolherImagemAleatoria() {
         "../static/imagens/dado/6.png"
     ];
 
-    // Loop para atualizar as imagens de dado
+    // Loop para atualizar as imagens de dado no inicio da partida
     for (let i = 1; i <= 3; i++) {
         const randomIndex = Math.floor(Math.random() * diceImages.length); // Escolhe um índice aleatório
         const randomImage = diceImages[randomIndex]; // Seleciona a imagem correspondente

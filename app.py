@@ -96,17 +96,19 @@ def joguei_dados(data):
     # Executar isso \/ quando o último jogar os dados
     if partida.verificar_se_todos_ja_jogaram_seus_dados():
         partida.iniciar_partida()
-        # time.sleep(random.randint(3, 4))
+        # time.sleep(random.randint(3, 4)) ATIVAR NO FINAL -=--------------------------------------------------
         mudar_pagina(2, broadcast=True)
 
 
 @socketio.on('apostar')
 def aposta(dados):
-    # PAREI AQUI!
-    # A PARTIR DE AGORA O SERVIDOR DEVE CRIAR UM WHILE, CADA VOLTA CRIA UM TURNO E ADICIONA NA PARTIDA, CADA TURNO
-    # RECEBE INFOS DESTA FUNCAO COM A JOGADA DO JOGADOR DE VEZ, FAZENDO UMA VALIDAÇÃO DE AUTENTICIDADE VALORES
-    # DEPOIS DISSO DAR CONTINUIDADE A PARTIDA
-    print(dados)
+    chave = dados['dados']['chave'][:]
+    dados = dados['dados']
+    del dados['chave']
+    client_id = request.sid
+    jogador = partida.buscar_jogador_pelo_client_id(client_id)
+    if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
+        partida.registrar_turno(jogador=jogador, dados=dados)
 
 
 @socketio.on('desconfiar')
