@@ -212,11 +212,11 @@ class Turno:
         self.turno_num = turno_numero
         self.do_jogador = jogador
         self.da_partida = partida
-        self.dado = dado
+        self.dado_face = dado
         self.dado_qtd = dado_qtd
 
     def __repr__(self):
-        txt = f"Turno {self.turno_num} de {self.do_jogador.username}, (Face: {self.dado}, Qtd: {self.dado_qtd})"
+        txt = f"Turno {self.turno_num} de {self.do_jogador.username}, (Face: {self.dado_face}, Qtd: {self.dado_qtd})"
         return txt
 
     def proximo_jogador(self, item_atual):
@@ -236,71 +236,120 @@ class Turno:
             return turno
 
     def verificar_validade_da_jogada(self):
-        """ Validar jogada aqui, retorna True se válida ou False de inválida"""
-        print('')
-        print('VERIFICANDO VALIDADE DA JOGADA')
-        turno_anterior = self.obter_turno_anterior_na_partida()
-        print('Turno anterior: ', turno_anterior)
-        print('Turno atual: ', self)
-        if self.turno_num > 1:
-            # Se for o primeiro turno pode passar = True
-            # MEXER NA ATIVAÇÃO DO PARTIDA SEM CORINGA
-            if self.dado == 1:
-                # Se for coringa, verificar se é maior que o coringa anterior
-                print(self.do_jogador.username, 'Atual jogou coringa')
-                cori_anterior = turno_anterior.dado_qtd
-                cori_jogada = self.dado_qtd
-                if cori_jogada > cori_anterior:
-                    return True
-                else:
-                    return False
-            else:
-                if turno_anterior.dado == 1:  # Anterior é coringa
-                    print('Turno anterior é coringa')
-                    # turno anterior é coringa
-                    # Sem atual ser coringa, mas anterior sendo coringa: verificar se é uma aposta dobrada em relação
-                    # à quantidade de coringas jogados na rodada anterior.
-                    if self.dado_qtd >= (turno_anterior.dado_qtd * self.dado_qtd):
-                        return True
-                    else:
-                        return False
-                else:
-                    print('Turno anterior não é coringa')
-                    if self.dado == turno_anterior.dado:  # Mesma face e quantidade atual igual
-                        print('Mesma face')
-                        # Sem ser coringa e sem coringa anterior: verificar se é uma aposta maior que a anterior, ou
-                        # seja, (uma quantidade de dados maior se for a mesma face do dado)
-                        if self.dado_qtd > turno_anterior.dado_qtd:
-                            print('quantidade atual maior que qtd anterior = True')
-                            return True
-                        else:
-                            print('Quantidade atual não é maior que qtd anterior = False')
-                            return False
-                    elif self.dado > turno_anterior.dado:  # Faces diferentes e quantidade atual maior
-                        print('Faces diferentes')
-                        # Sem ser coringa e sem coringa anterior: verificar se é uma quantidade igual o maior de
-                        # uma face maior que a anterior.
-                        if self.dado_qtd >= turno_anterior.dado_qtd:
-                            print('Qtd atual maior que a anterior = True')
-                            return True
-                        else:
-                            print('Quantidade menor não passa na regra = False')
-                            # Quantidade menor não passa na regra.
-                            return False
-                    elif self.dado < turno_anterior.dado and self.dado_qtd > turno_anterior.dado_qtd:
-                        # Face atual menor não passa na regra, exceto se a quantidade seja maior.
-                        print('Face atual menor que a anterior mas quantidade maior = True')
-                        return True
-                    else:
-                        print('Outra possibilidade aqui')
-                        return False
-        print('primeiro turno')
-        return True
+        """ Validar jogada aqui, retorna True se válida ou False de inválida:
+        1. Se for o primeiro turno(self.turno_num == 1): self.da_partida.sem_coringa = False caso o
+        turno_atual_dado_face == 1, depois disso feito retorna false prontamente.
+
+        A partir do segundo turno:
+        Se coringa True (coringa_true_false): Usar variáveis 'coringa_atual_qtd', 'turno_ant_coringa' e
+        'turno_atual_coringa' aqui:
+            1. Se atual jogar coringa, pode ser a qualquer momento, desde que qtd seja maior que qtd do coringa
+            anterior.
+            2. Se jogar num, qtd deve ser maior que qtd do número anterior ou a mesma qtd se a face do dado for maior,
+            se anterior for um coringa, dobrar a quantidade.
+            ...
+        Se coringa False (coringa_true_false), não usar variáveis 'turno_ant_coringa' e 'turno_atual_coringa' e
+        'coringa_atual_qtd' aqui:
+            1. Se jogar 1, pode ser a qualquer momento, desde que qtd seja maior que qtd do número anterior.
+            2. Se jogar num, qtd deve ser maior que qtd do número anterior ou a mesma qtd se a face do dado for maior.
+
+        UTILIZAR AS VARIÁVEIS ABAIXO NA DESCRIÇÃO E NA CRIAÇÃO DO CÓDIGO
+        """
+        print('\nVERIFICANDO VALIDADE DA JOGADA')
+        tur_ant = self.obter_turno_anterior_na_partida()  # Recebe o turno anterior
+
+        coringa_true_false = self.da_partida.sem_coringa
+        coringa_atual_qtd = self.da_partida.coringa_atual_qtd
+
+        turno_ant_dado_face = tur_ant.dado_face
+        turno_ant_dado_qtd = tur_ant.dado_qtd
+        turno_ant_coringa = True if tur_ant.dado_face == 1 and self.da_partida.sem_coringa is False else False
+
+        turno_atual_dado_face = self.dado_fac
+        turno_atual_dado_qtd = self.dado_qtd
+        turno_atual_coringa = True if self.dado_face == 1 and self.da_partida.sem_coringa is False else False
+
+        # /\ /\ /\ /\
+
+        # Código velho \/
+
+        # if self.turno_num > 1:
+        #     # Se for o primeiro turno pode passar = True
+        #     if self.dado_face == 1 and self.da_partida.coringa_atual_qtd == 0:
+        #         return True
+        #     elif self.dado_face == 1:
+        #         # Se for coringa, verificar se é maior que o coringa anterior
+        #         print(self.do_jogador.username, 'Atual jogou coringa')
+        #         cori_anterior_qtd = tur_ant.dado_qtd
+        #         if self.dado_qtd > cori_anterior_qtd:
+        #             print('1')
+        #             return True
+        #         else:
+        #             if (self.dado_qtd > tur_ant.dado_qtd) and (
+        #                     self.dado_face == 0 and tur_ant.dado_face == 0):
+        #                 return True
+        #             else:
+        #                 return False
+        #     else:
+        #         if tur_ant.dado_face == 1:  # Anterior é coringa
+        #             print('Turno anterior é coringa')
+        #             # turno anterior é coringa
+        #             # Sem atual ser coringa, mas anterior sendo coringa: verificar se é uma aposta dobrada em relação
+        #             # à quantidade de coringas jogados na rodada anterior.
+        #             if self.dado_qtd >= (tur_ant.dado_qtd * 2):
+        #                 print('3')
+        #                 return True
+        #             else:
+        #                 print('4')
+        #                 return False
+        #         else:
+        #             print('Turno anterior não é coringa')
+        #             if self.dado_face == tur_ant.dado_face:  # Mesma face e quantidade atual igual
+        #                 print('Mesma face')
+        #                 # Sem ser coringa e sem coringa anterior: verificar se é uma aposta maior que a anterior, ou
+        #                 # seja, (uma quantidade de dados maior se for a mesma face do dado)
+        #                 if self.dado_qtd > tur_ant.dado_qtd:
+        #                     print('quantidade atual maior que qtd anterior = True')
+        #                     return True
+        #                 else:
+        #                     print('Quantidade atual não é maior que qtd anterior = False')
+        #                     return False
+        #             elif self.dado_face > tur_ant.dado_face:  # Faces diferentes e quantidade atual maior
+        #                 print('Faces diferentes')
+        #                 # Sem ser coringa e sem coringa anterior: verificar se é uma quantidade igual o maior de
+        #                 # uma face maior que a anterior.
+        #                 if self.dado_qtd >= tur_ant.dado_qtd:
+        #                     print('Qtd atual maior que a anterior = True')
+        #                     return True
+        #                 else:
+        #                     print('Quantidade menor não passa na regra = False')
+        #                     # Quantidade menor não passa na regra.
+        #                     return False
+        #             elif self.dado_face < tur_ant.dado_face and self.dado_qtd > tur_ant.dado_qtd:
+        #                 # Face atual menor não passa na regra, exceto se a quantidade seja maior.
+        #                 print('Face atual menor que a anterior mas quantidade maior = True')
+        #                 return True
+        #             else:
+        #                 print('Outra possibilidade aqui')
+        #                 return False
+        # else:
+        #     # Se for o primeiro turno
+        #     print('Primeiro turno')
+        #     if self.dado_face == 1:
+        #         print('Coringa foi jogado no primeiro turno: Desativado')
+        #         # Ativação da partida sem coringa: Quando coringa desativado, o dado de face 1 deixa de ser coringa, ou
+        #         # seja, perde a capacidade de valer qualquer número na contagem de dados no final da rodada e modifica
+        #         # a regra de turno, não obrigando mais o próximo jogador a dobrar a aposta, mas apostar como faz com
+        #         # um número de face normal, ou seja, aumentando a aposta, mas não dobrando.
+        #         self.da_partida.sem_coringa = True
+        #         return True
+        # print('primeiro turno')
+        # return True
 
     def executar_turno(self):
         """Executa o turno no front end"""
         turnos = self.do_jogador.turnos[-3:][::-1]
-        lista_turnos = [[turno.dado, turno.dado_qtd] for turno in turnos]
+        lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
         emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos},
              broadcast=True)
         if lista_turnos[0][0] == 1:
