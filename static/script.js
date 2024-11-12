@@ -176,30 +176,38 @@ socket.on('dados_mesa', function (data) {
 socket.on('atualizar_coringa', function (data) {
     const coringa_n = Number(data.coringa_atual)
     const coringa_j = String(data.ultimo_coringa)
+    const conringa_cancelado = data.coringa_cancelado
     const corin_atual = document.getElementById('corin_atual')
     corin_atual.innerHTML = ""
 
-    if (coringa_n === 0) {
+    if (conringa_cancelado) {
         const span3 = document.createElement('span')
-        span3.className = 'fs-6 text-white me-2'
-        span3.innerText = 'O coringa ainda não foi jogado'
+        span3.className = 'fs-5 text-danger me-2'
+        span3.innerText = 'O coringa foi cancelado!'
         corin_atual.appendChild(span3)
     } else {
-        const span1 = document.createElement('span')
-        span1.className = 'fs-5 text-white me-2'
-        span1.innerText = `Coringa atual:`
-        const img1 = document.createElement('img')
-        img1.className = "img-fluid"
-        img1.alt = 'imagem coringa';
-        img1.width = 30
-        img1.height = 30
-        img1.src = '../static/imagens/dado/1.png'
-        const span2 = document.createElement('span')
-        span2.className = 'fs-5 text-white me-2'
-        span2.innerText = `X${coringa_n} (${coringa_j})`
-        corin_atual.appendChild(span1)
-        corin_atual.appendChild(img1)
-        corin_atual.appendChild(span2)
+        if (coringa_n === 0) {
+            const span3 = document.createElement('span')
+            span3.className = 'fs-6 text-white me-2'
+            span3.innerText = 'O coringa ainda não foi jogado'
+            corin_atual.appendChild(span3)
+        } else {
+            const span1 = document.createElement('span')
+            span1.className = 'fs-5 text-white me-2'
+            span1.innerText = `Coringa atual:`
+            const img1 = document.createElement('img')
+            img1.className = "img-fluid"
+            img1.alt = 'imagem coringa';
+            img1.width = 30
+            img1.height = 30
+            img1.src = '../static/imagens/dado/1.png'
+            const span2 = document.createElement('span')
+            span2.className = 'fs-5 text-white me-2'
+            span2.innerText = `X${coringa_n} (${coringa_j})`
+            corin_atual.appendChild(span1)
+            corin_atual.appendChild(img1)
+            corin_atual.appendChild(span2)
+        }
     }
 })
 
