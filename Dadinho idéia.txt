@@ -65,3 +65,11 @@ Composição: 'jogadores_qtd' = 3 / 'Rodada num' = 0 / 'vez_atual' = 0 / 'Coring
 lista com turnos ordenados = [[jogador_id, dados_qtd, dado_valor], [...], [...], ...]
 
 Constante: A cada jogada. Não constante: Apenas no carregamento da página.
+
+lobby > Partidas > Rodadas > turnos
+
+1. No lobby podem existir várias partidas, com pontuação no final de cada uma para o vencedor.
+2. Numa partida podem existir várias rodadas, onde no ínício se jogam os dados e no fim, quando alguém desconfia,
+    alguém perde um dado.
+3. Numa rodada existirão vários turnos, onde pode-se aumentar uma aposta, feito no turno anterior pelo jogador anterior,
+    ou desconfiar, por parte do jogador da vez.
