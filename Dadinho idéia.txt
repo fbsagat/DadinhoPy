@@ -71,5 +71,6 @@ lobby > Partidas > Rodadas > turnos
 1. No lobby podem existir várias partidas, com pontuação no final de cada uma para o vencedor.
 2. Numa partida podem existir várias rodadas, onde no ínício se jogam os dados e no fim, quando alguém desconfia,
     alguém perde um dado.
-3. Numa rodada existirão vários turnos, onde pode-se aumentar uma aposta, feito no turno anterior pelo jogador anterior,
+3. Numa rodada existirão vários turnos, onde pode-se aumentar uma aposta, feita no turno anterior pelo jogador anterior,
     ou desconfiar, por parte do jogador da vez.
+4. Turno é o momento de uma jogada de um jogador.

@@ -205,6 +205,11 @@ class Partida:
             emit('jogada_invalida', {'txtadd': txt}, to=jogador.client_id)
 
 
+class Rodada:
+    def __init__(self):
+        pass
+
+
 class Turno:
     """Representa o turno de um jogador na partida."""
 
