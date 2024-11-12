@@ -241,6 +241,72 @@ function createDiceSection(text, opacityClass, imageIndex) {
     return col;
 }
 
+// Função para construir a tela dos dados (1-6 dados).
+socket.on('construtor_dados', function (data) {
+    const tela_jogar_dados = document.getElementById('tela_jogar_dados')
+
+    const container = document.createElement('div');
+    container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
+    container.style = '--bs-bg-opacity: .3;';
+
+    // Criação do botão Jogar Dados
+    const botao = document.createElement('button');
+    botao.id = 'dadobotao';
+    botao.className = 'btn btn-primary mt-2';
+    botao.textContent = 'Jogar dados';
+    botao.onclick = jogar_dados;  // Função que será chamada ao clicar
+
+    // Adicionando o botão ao container principal
+    container.appendChild(botao);
+
+    // Criação da div interna container para organizar as colunas
+    const containerInterno = document.createElement('div');
+    containerInterno.className = 'container mt-5';
+
+    // Criação da linha de dados
+    const row = document.createElement('div');
+    row.className = 'row d-flex justify-content-evenly';
+
+    // Gerar um número aleatório entre 1 e 6 para a quantidade de dados
+    const quantidadeDeDados = data.quantidade;
+
+    // Loop para criar cada dado dinamicamente
+    for (let i = 1; i <= quantidadeDeDados; i++) {
+        const col = document.createElement('div');
+        col.className = 'col-4 text-center';
+
+        const img = document.createElement('img');
+        img.id = `dado${i}`;
+        img.src = `../static/imagens/dado/${i}.png`;  // Ajuste o caminho da imagem conforme necessário
+        img.className = 'img-fluid mb-1';
+        img.alt = `Imagem ${i}`;
+        img.width = 75;
+        img.height = 75;
+
+        col.appendChild(img);
+        row.appendChild(col);
+    }
+
+    // Adicionando a linha de dados ao container interno
+    containerInterno.appendChild(row);
+
+    // Adicionando o container interno ao container principal
+    container.appendChild(containerInterno);
+
+    // Criação do elemento de áudio
+    const audio = document.createElement('audio');
+    audio.id = 'rollSound';
+    audio.src = '../static/sounds/dice-roll.mp3';
+
+    // Adicionando o elemento de áudio ao container principal
+    container.appendChild(audio);
+
+    // Adicionando o container principal ao corpo do documento
+    document.body.appendChild(container);
+
+    tela_jogar_dados.appendChild(container)
+})
+
 // Função para construir os cards (parte estática)
 socket.on('construtor_html', function (data) {
     const principal = document.getElementById('cards');
@@ -437,7 +503,10 @@ socket.on("update_username", function (data) {
     nome_jogador = data.nome_jogador;
 })
 
-socket.on("jogar_dados_resultado", function (data) {
+socket.on("jogar_dados_resultado", function (data) { 
+    const dados_lista = data.dados_jogador; 
+    const dados_qtd = dados_lista.length;
+
     const diceImages = [
         "../static/imagens/dado/1.png",
         "../static/imagens/dado/2.png",
@@ -447,17 +516,20 @@ socket.on("jogar_dados_resultado", function (data) {
         "../static/imagens/dado/6.png"
     ];
 
-    const dados = [
-        document.getElementById('dado1'),
-        document.getElementById('dado2'),
-        document.getElementById('dado3')
-    ];
+    const dados = [];
+
+    // Loop para adicionar os elementos restantes
+    for (let i = 1; i <= dados_qtd; i++) {  
+        const dadoElement = document.getElementById(`dado${i}`);
+        if (dadoElement) {
+            dados.push(dadoElement);  
+        }
+    }
+
     const rollSound = document.getElementById('rollSound');
 
-    let currentIndex = 0;
     const rollInterval = 100; // Intervalo de troca de imagens em milissegundos
-    let valor = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000;
-    const rollTime = valor; // Tempo total da rolagem em milissegundos
+    const rollTime = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000; // Tempo total da rolagem
 
     // Inicia o som de rolagem
     rollSound.currentTime = 0;
@@ -466,21 +538,18 @@ socket.on("jogar_dados_resultado", function (data) {
     // Inicia a animação de rolagem para todos os dados
     const animation = setInterval(() => {
         dados.forEach(dado => {
-            dado.src = diceImages[currentIndex];
+            // Gera um índice aleatório para cada dado
+            const randomIndex = Math.floor(Math.random() * diceImages.length);
+            dado.src = diceImages[randomIndex];
         });
-        currentIndex = (currentIndex + 1) % diceImages.length;
     }, rollInterval);
 
     // Após o tempo total de rolagem, exibe o resultado final e para a animação
     setTimeout(() => {
         clearInterval(animation);
 
-        // Recebe os resultados finais para cada dado (simulado aqui)
-        const finalResults = [
-            `../static/imagens/dado/${data.dados_jogador[0]}.png`, // Exemplo de resultado final do dado 1
-            `../static/imagens/dado/${data.dados_jogador[1]}.png`, // Exemplo de resultado final do dado 1
-            `../static/imagens/dado/${data.dados_jogador[2]}.png`, // Exemplo de resultado final do dado 1
-        ];
+        // Cria dinamicamente os resultados finais com base em "dados_lista"
+        const finalResults = dados_lista.map(valor => `../static/imagens/dado/${valor}.png`);
 
         // Atualiza as imagens com os resultados finais
         dados.forEach((dado, index) => {
@@ -490,10 +559,13 @@ socket.on("jogar_dados_resultado", function (data) {
         // Para o som
         rollSound.pause();
         rollSound.currentTime = 0;
+
+        // Envia confirmação para o servidor
         socket.emit('joguei_dados', data.jogador);
     }, rollTime);
 });
 
+// Alerta de jogada inválida
 socket.on('jogada_invalida', function (data) {
     txt = data.txtadd
     window.alert(`Esta jogada é inválida, ${txt}`);

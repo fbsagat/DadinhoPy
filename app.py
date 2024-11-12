@@ -68,6 +68,7 @@ def ir_jogar_dados():
         jogadores = lobby_unico.listar_jogadores()
         partida.jogadores = jogadores
         partida.jogar_dados()
+        emit('construtor_dados', {'quantidade': partida.dados_qtd}, broadcast=True)
         mudar_pagina(1, broadcast=True)
 
 

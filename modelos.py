@@ -122,7 +122,7 @@ class Lobby:
 
 class Partida:
     def __init__(self, lobby):
-        self.dados_qtd = 6
+        self.dados_qtd = 5
         self.jogadores = []
         self.lobby = lobby
         self.todos_os_dados = []
