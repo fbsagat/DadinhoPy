@@ -121,7 +121,7 @@ def desconfiar(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
-        print(f'{jogador} desconfiou')
+        jogador.rodada_atual.desconfiar(jogador=jogador)
 
 
 if __name__ == '__main__':

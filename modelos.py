@@ -265,6 +265,13 @@ class Rodada:
                 count += 1
         return True if jogadores_tt == count else False
 
+    def desconfiar(self, jogador):
+        print(f'{jogador} desconfiou')
+        # Pegar todos os dados
+        # Pegar jogada anterior
+        # Verificar se o que foi dito em jogada anterior está batendo com os dados totais da rodada
+        # Se sim, jogador anterior vence partida, se não jogador que desconfiou vence partida.
+
 
 class Turno:
     """
