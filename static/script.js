@@ -395,11 +395,16 @@ socket.on('atualizar_turno', function (dados) {
 
 // Função individual para verificar o jogador da vez no turno e construir formatação dinâmina para ele
 socket.on('meu_turno', function (data) {
+    turno_num = data.turno_num;
     const jog_painel = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
+    const botao = document.getElementById('desconfiar')
     jog_painel.style.display = "block"; // Mostra o painel
     painel_aguarde.style.display = "none"; // Oculta painel aguarde
-    // window.alert('meu_turno');
+    if (turno_num > 0) {
+        const botao = document.getElementById('desconfiar');
+        botao.disabled = false; // Ativa o botão desconfiar
+    }
 })
 
 // Função coletiva para os jogadores que não estão na vez e construir formatação dinâmina para eles
@@ -503,8 +508,8 @@ socket.on("update_username", function (data) {
     nome_jogador = data.nome_jogador;
 })
 
-socket.on("jogar_dados_resultado", function (data) { 
-    const dados_lista = data.dados_jogador; 
+socket.on("jogar_dados_resultado", function (data) {
+    const dados_lista = data.dados_jogador;
     const dados_qtd = dados_lista.length;
 
     const diceImages = [
@@ -519,10 +524,10 @@ socket.on("jogar_dados_resultado", function (data) {
     const dados = [];
 
     // Loop para adicionar os elementos restantes
-    for (let i = 1; i <= dados_qtd; i++) {  
+    for (let i = 1; i <= dados_qtd; i++) {
         const dadoElement = document.getElementById(`dado${i}`);
         if (dadoElement) {
-            dados.push(dadoElement);  
+            dados.push(dadoElement);
         }
     }
 
@@ -561,7 +566,7 @@ socket.on("jogar_dados_resultado", function (data) {
         rollSound.currentTime = 0;
 
         // Envia confirmação para o servidor
-        socket.emit('joguei_dados', nome_jogador);
+        socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
     }, rollTime);
 });
 

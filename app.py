@@ -43,7 +43,6 @@ def handle_disconnect():
     client_id = request.sid
     lobby_unico.remover_jogador(client_id)
     del jogadores_online[client_id]
-    # print(lobby_unico)
     if lobby_unico.contar_jogadores() > 0:
         # Definir novo master
         lobby_unico.definir_master()
@@ -85,22 +84,24 @@ def jogar_dados():
 
 
 @socketio.on('joguei_dados')
-def joguei_dados(data):
+def joguei_dados(dados):
     """
     Esta função é executada por cada jogador da partida quando termina de executar e visualizar o resultado de seus
     dados. Ela deve redirecionar todos os jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
     turnos, mas somente depois de todos os dados terem sido jogados.
     """
     global jogadores_online
+    chave = dados['chave_secreta']
     client_id = request.sid
     jogador = jogadores_online[client_id]
-    emit('meus_dados', {'dados': jogador.dados})
 
-    rodada = jogador.rodada_atual
-    # Executar isso \/ quando o último jogar os dados
-    if rodada.verificar_se_todos_ja_jogaram_seus_dados():
-        # time.sleep(random.randint(3, 4)) ATIVAR NO FINAL -=--------------------------------------------------
-        mudar_pagina(2, broadcast=True)
+    if jogador.chave_secreta == chave:
+        emit('meus_dados', {'dados': jogador.dados})
+        rodada = jogador.rodada_atual
+        # Executar isso \/ quando o último jogar os dados
+        if rodada.verificar_se_todos_ja_jogaram_seus_dados():
+            # time.sleep(random.randint(3, 4)) ATIVAR NO FINAL -=--------------------------------------------------
+            mudar_pagina(2, broadcast=True)
 
 
 @socketio.on('apostar')
@@ -111,14 +112,16 @@ def aposta(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
-        print('aposta')
         jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
-        # lobby_unico.partida.rodada.executar_um_turno(jogador=jogador, dados=dados) ANTIGO
 
 
 @socketio.on('desconfiar')
 def desconfiar(dados):
-    print(dados)
+    chave = dados['dados']['chave']
+    client_id = request.sid
+    jogador = jogadores_online[client_id]
+    if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
+        print(f'{jogador} desconfiou')
 
 
 if __name__ == '__main__':

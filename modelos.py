@@ -58,7 +58,7 @@ class Lobby:
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
 
     def construir_partida(self):
-        print('Lobby: Construindo partida')
+        # print('Lobby: Construindo partida')
         partida_numero = len(self.partidas) + 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores, partida_numero=partida_numero)
         self.partidas.append(partida)
@@ -181,7 +181,7 @@ class Partida:
         return txt
 
     def construir_rodada(self):
-        print('Partida: Construindo rodada')
+        # print('Partida: Construindo rodada')
         rodada_numero = len(self.rodadas) + 1
         rodada = Rodada(partida=self, rodada_numero=rodada_numero)
         self.rodadas.append(rodada)
@@ -228,7 +228,7 @@ class Rodada:
         return txt
 
     def construir_turno(self, jogador, dados):
-        print('Rodada: Construindo turno')
+        # print('Rodada: Construindo turno')
         turno_numero = len(self.turnos) + 1
         dado = int(dados['dado'])
         dado_qtd = int(dados['quantidade'])
@@ -238,13 +238,13 @@ class Rodada:
         jogador.turnos.append(turno)
 
         if turno.verificar_validade_da_jogada():
-            print('TURNO VÁLIDO, EXECUTAR')
+            # print('TURNO VÁLIDO, EXECUTAR')
             if dado == 1:
                 self.coringa_atual_qtd = dado_qtd
                 self.coringa_atual_jogador = jogador
             turno.executar_turno()
         else:
-            print('TURNO INVÁLIDO, DELETAR')
+            # print('TURNO INVÁLIDO, DELETAR')
             txt = 'tente outra jogada.'
             self.turnos.remove(turno)
             jogador.turnos.remove(turno)
@@ -285,7 +285,6 @@ class Turno:
 
     def executar_turno(self):
         """Executa o turno no front end"""
-        print(self)
         turnos = self.do_jogador.turnos[-3:][::-1]
         lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
         emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos},
@@ -293,14 +292,14 @@ class Turno:
 
         if self.da_rodada.com_coringa is True:
             if lista_turnos[0][0] == 1:
-                print('atualizar_coringa cancelado False')
+                # print('atualizar_coringa cancelado False')
                 emit('atualizar_coringa', {
                     'coringa_atual': self.da_rodada.coringa_atual_qtd,
                     'ultimo_coringa': self.da_rodada.coringa_atual_jogador.username,
                     'coringa_cancelado': False},
                      broadcast=True)
         else:
-            print('atualizar_coringa cancelado True')
+            # print('atualizar_coringa cancelado True')
             emit('atualizar_coringa', {'coringa_cancelado': True}, broadcast=True)
 
         nomes = [jogador.username for jogador in self.da_rodada.da_partida.jogadores]
@@ -308,7 +307,7 @@ class Turno:
 
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': proximo.username},
              broadcast=True)
-        emit('meu_turno', {'username': proximo.username}, to=proximo.client_id)
+        emit('meu_turno', {'username': proximo.username, 'turno_num': self.turno_num}, to=proximo.client_id)
 
         for jogador in self.da_rodada.da_partida.jogadores:
             if jogador != proximo:
@@ -353,7 +352,7 @@ class Turno:
         turno_ant_dado_qtd = 0
         turno_ant_dado_face = 0
 
-        print('\nVERIFICANDO VALIDADE DA JOGADA')
+        # print('\nVERIFICANDO VALIDADE DA JOGADA')
         tur_ant = self.obter_turno_anterior_na_partida()  # Recebe o turno anterior
 
         coringa_true = self.da_rodada.com_coringa
@@ -363,27 +362,27 @@ class Turno:
             turno_ant_dado_face = tur_ant.dado_face
             turno_ant_dado_qtd = tur_ant.dado_qtd
             turno_ant_jogada_valor = turno_ant_dado_face * turno_ant_dado_qtd
-            print(
-                f'turno anterior: Face: {turno_ant_dado_face}, Qtd:  {turno_ant_dado_qtd}, valor'
-                f' {turno_ant_jogada_valor}')
+            # print(
+            #     f'turno anterior: Face: {turno_ant_dado_face}, Qtd:  {turno_ant_dado_qtd}, valor'
+            #     f' {turno_ant_jogada_valor}')
 
         turno_atual_dado_face = self.dado_face
         turno_atual_dado_qtd = self.dado_qtd
         turno_atul_jogada_valor = turno_atual_dado_face * turno_atual_dado_qtd
-        print(
-            f'turno atual: Face: {turno_atual_dado_face}, Qtd:  {turno_atual_dado_qtd}, valor'
-            f' {turno_atul_jogada_valor}')
+        # print(
+        #     f'turno atual: Face: {turno_atual_dado_face}, Qtd:  {turno_atual_dado_qtd}, valor'
+        #     f' {turno_atul_jogada_valor}')
 
         # Validações de primeiro turno
         if self.turno_num == 1 and self.dado_face == 1:
-            print('PRIMEIRO TURNO')
+            # print('PRIMEIRO TURNO')
             # Se for o primeiro turno e o dado atual for 1, a partida não tem coringa e turno válida.
             self.da_rodada.com_coringa = False
-            print('Partida sem coringa')
+            # print('Partida sem coringa')
             return True
         if self.turno_num == 1:
-            print('PRIMEIRO TURNO')
-            print('Partida com coringa')
+            # print('PRIMEIRO TURNO')
+            # print('Partida com coringa')
             # Se for o primeiro turno, turno válido.
             return True
 
