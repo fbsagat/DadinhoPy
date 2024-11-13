@@ -561,7 +561,7 @@ socket.on("jogar_dados_resultado", function (data) {
         rollSound.currentTime = 0;
 
         // Envia confirmação para o servidor
-        socket.emit('joguei_dados', data.jogador);
+        socket.emit('joguei_dados', nome_jogador);
     }, rollTime);
 });
 
@@ -585,9 +585,9 @@ function enviar_apelido() {
     }
 }
 
-function ir_jogar_dados() {
-    const bot_iniciar = document.getElementById('ir_jogar_dados')
-    socket.emit('ir_jogar_dados')
+function iniciar_partida() {
+    const bot_iniciar = document.getElementById('iniciar_partida')
+    socket.emit('iniciar_partida')
 }
 
 function jogar_dados() {

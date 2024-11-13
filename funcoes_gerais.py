@@ -1,8 +1,7 @@
 from flask_socketio import emit
-from modelos import Lobby, Partida
+from modelos import Lobby
 
-lobby_unico = Lobby()
-partida = Partida(lobby=lobby_unico)
+lobby_unico = Lobby(lobby_numero=1)
 
 
 def mudar_pagina(num, broadcast=False):

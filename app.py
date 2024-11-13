@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 from funcoes_gerais import *
 from modelos import *
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 socketio = SocketIO(app)
+jogadores_online = {}
 
 
 @app.route("/")
@@ -20,10 +21,12 @@ def handle_connect():
     Ela deve criar uma instância de jogador, e decidir se ele é master, caso não haja algum,
     Ela deve criar ums instância de partida caso não haja alguma também, e inserir o jogador master nela
     """
+    global jogadores_online
     client_id = request.sid
     master = False if lobby_unico.verificar_jogador_master() else True
     jogador = Jogador.criar_jogador(client_id=client_id, master=master)
     lobby_unico.adicionar_jogador(jogador)
+    jogadores_online[jogador.client_id] = jogador
     emit("connect_start",
          {"is_master": master, 'chave_secreta': jogador.chave_secreta})
     atualizar_lista_usuarios()
@@ -33,12 +36,13 @@ def handle_connect():
 def handle_disconnect():
     """
     Esta função é executada no momento da desconexão de um cliente web do servidor.
-    Esta função deve remover o jogador da partida e caso este jogador seja um master e haja mais jogadores no lobby dele,
-    Selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do lobby,
-    caso não seja um master, apenas remover, caso apenas ele no lobby, reiniciar o servidor(por enquanto).
+    Esta função deve remover o jogador da partida e caso este jogador seja um master e haja mais jogadores no lobby
+    dele, Selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do
+     lobby, caso não seja um master, apenas remover, caso apenas ele no lobby, reiniciar o servidor(por enquanto).
     """
     client_id = request.sid
     lobby_unico.remover_jogador(client_id)
+    del jogadores_online[client_id]
     # print(lobby_unico)
     if lobby_unico.contar_jogadores() > 0:
         # Definir novo master
@@ -60,16 +64,13 @@ def escolher_apelido(data):
     atualizar_lista_usuarios()
 
 
-@socketio.on('ir_jogar_dados')
-def ir_jogar_dados():
+@socketio.on('iniciar_partida')
+def iniciar_partida():
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
-        jogadores = lobby_unico.listar_jogadores()
-        partida.jogadores = jogadores
-        partida.jogar_dados()
-        emit('construtor_dados', {'quantidade': partida.dados_qtd}, broadcast=True)
-        mudar_pagina(1, broadcast=True)
+        partida = lobby_unico.construir_partida()
+        partida.construir_rodada()
 
 
 @socketio.on('jogar_dados')
@@ -79,6 +80,7 @@ def jogar_dados():
     """
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
+    jogador.joguei_dados = True
     emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados})
 
 
@@ -86,17 +88,17 @@ def jogar_dados():
 def joguei_dados(data):
     """
     Esta função é executada por cada jogador da partida quando termina de executar e visualizar o resultado de seus
-    dados. Ela deve redirecionar todos so jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
+    dados. Ela deve redirecionar todos os jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
     turnos, mas somente depois de todos os dados terem sido jogados.
     """
-    jogadores = partida.jogadores
-    jogador = [jogador for jogador in jogadores if jogador.client_id == data][0]
-    partida.todos_os_dados += jogador.dados
+    global jogadores_online
+    client_id = request.sid
+    jogador = jogadores_online[client_id]
     emit('meus_dados', {'dados': jogador.dados})
 
+    rodada = jogador.rodada_atual
     # Executar isso \/ quando o último jogar os dados
-    if partida.verificar_se_todos_ja_jogaram_seus_dados():
-        partida.iniciar_partida()
+    if rodada.verificar_se_todos_ja_jogaram_seus_dados():
         # time.sleep(random.randint(3, 4)) ATIVAR NO FINAL -=--------------------------------------------------
         mudar_pagina(2, broadcast=True)
 
@@ -107,9 +109,11 @@ def aposta(dados):
     dados = dados['dados']
     del dados['chave']
     client_id = request.sid
-    jogador = partida.buscar_jogador_pelo_client_id(client_id)
+    jogador = jogadores_online[client_id]
     if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
-        partida.registrar_turno(jogador=jogador, dados=dados)
+        print('aposta')
+        jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
+        # lobby_unico.partida.rodada.executar_um_turno(jogador=jogador, dados=dados) ANTIGO
 
 
 @socketio.on('desconfiar')
