@@ -126,5 +126,14 @@ def desconfiar(dados):
         jogador.rodada_atual.desconfiar(jogador=jogador)
 
 
+@socketio.on('conferencia_final')
+def conferencia_final():
+    client_id = request.sid
+    jogador = jogadores_online[client_id]
+    jogador.rodada_atual.conferiram += 1
+    if jogador.rodada_atual.conferiram == len(jogador.rodada_atual.jogadores):
+        jogador.partida_atual.construir_rodada()
+
+
 if __name__ == '__main__':
     socketio.run(app)

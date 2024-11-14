@@ -12,6 +12,7 @@ class Jogador:
         self.chave_secreta = secrets.token_hex(16)
         self.pontos = 0
         self.dados = []
+        self.dados_qtd = 0
         self.joguei_dados = False
         self.partidas = []
         self.rodadas = []
@@ -34,10 +35,9 @@ class Jogador:
                 f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
 
     def jogar_dados(self, partida):
-        """Rola os três dados e retorna o resultado como uma lista de valores."""
-        dados_qtd = partida.dados_qtd
+        """Rola os seus dados e retorna o resultado como uma lista de valores."""
         dados = []
-        for dado in range(0, dados_qtd):
+        for dado in range(0, self.dados_qtd):
             dados.append(secrets.randbelow(6) + 1)
         self.dados = dados
         return dados
@@ -72,7 +72,6 @@ class Lobby:
         jog_inicial = partida.jogador_sorteado
         nomes = [jogador.username for jogador in partida.jogadores]
 
-        emit('dados_mesa', {'total': partida.dados_qtd * len(partida.jogadores)}, broadcast=True)
         emit("construtor_html",
              {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
               'dados_tt': partida.dados_qtd},
@@ -169,7 +168,7 @@ class Partida:
 
     def __init__(self, do_lobby, jogadores, partida_numero):
         self.partida_num = partida_numero
-        self.dados_qtd = 6
+        self.dados_qtd = 3
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
@@ -181,16 +180,27 @@ class Partida:
         return txt
 
     def construir_rodada(self):
-        # print('Partida: Construindo rodada')
         rodada_numero = len(self.rodadas) + 1
-        rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero)
+        rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
+                        jogador_vez=self.jogador_sorteado)
         self.rodadas.append(rodada)
+        nomes = []
+        jogadores_dados_qtd = []
         for jogador in self.jogadores:
             jogador.rodada_atual = rodada
             jogador.rodadas.append(rodada)
-
+            jogador.dados_qtd = self.dados_qtd if rodada_numero == 1 else jogador.dados_qtd
+            nomes.append(jogador.username)
+            jogadores_dados_qtd.append(jogador.dados_qtd)
         rodada.jogar_dados()
-        emit('construtor_dados', {'quantidade': self.dados_qtd}, broadcast=True)
+        dados_mesa = 0
+        for jogador in self.jogadores:
+            emit('construtor_dados', {'quantidade': jogador.dados_qtd}, to=jogador.client_id)
+            dados_mesa += jogador.dados_qtd
+        if rodada_numero > 1:
+            emit('reset_rodada', {'jogadores_nomes': nomes, 'jogadores_dados_qtd': jogadores_dados_qtd},
+                 broadcast=True)
+            emit('dados_mesa', {'total': dados_mesa}, broadcast=True)
         emit("mudar_pagina", {'pag_numero': 1}, broadcast=True)
         return rodada
 
@@ -211,7 +221,7 @@ class Rodada:
     ele mesmo ou outro jogador perde.
     """
 
-    def __init__(self, partida, jogadores, rodada_numero):
+    def __init__(self, partida, jogadores, rodada_numero, jogador_vez):
         self.rodada_num = rodada_numero
         self.da_partida = partida
         self.jogaram_dados = False
@@ -221,7 +231,8 @@ class Rodada:
         self.com_coringa = True
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
-        self.prepara_turno = True  # Diferencia o turno onde não pode desconfiar(primeiro turno apenas)
+        self.conferiram = 0
+        self.vez_atual = jogador_vez
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]
@@ -268,7 +279,6 @@ class Rodada:
         return True if jogadores_tt == count else False
 
     def desconfiar(self, jogador):
-        print(f'{jogador} desconfiou')
         """
         Pegar todos os dados
         Pegar jogada anterior
@@ -276,35 +286,41 @@ class Rodada:
         rodada(contar os coringas também), se sim, jogador anterior vence partida, se não jogador que desconfiou 
         vence a partida.
         """
+        # print(f'{jogador} desconfiou')
         todos_dados = self.todos_os_dados
-        print(todos_dados)
+        # print(todos_dados)
         ultimo_turno = self.turnos[-1]
-        print(ultimo_turno)
+        # print(ultimo_turno)
         if self.com_coringa:
             for i, dado in enumerate(todos_dados):
                 if dado == 1:
                     todos_dados[i] = ultimo_turno.dado_face
-        print(todos_dados)
+        # print(todos_dados)
         quantidade = todos_dados.count(ultimo_turno.dado_face)
         faces_dado_nomes = {
-            1: "ases",
-            2: "duques",
-            3: "ternos",
-            4: "quadras",
-            5: "quinas",
-            6: "senas"
+            1: "ases" if ultimo_turno.dado_qtd > 1 else "ás",
+            2: "duques" if ultimo_turno.dado_qtd > 1 else "duque",
+            3: "ternos" if ultimo_turno.dado_qtd > 1 else "terno",
+            4: "quadras" if ultimo_turno.dado_qtd > 1 else "quadra",
+            5: "quinas" if ultimo_turno.dado_qtd > 1 else "quina",
+            6: "senas" if ultimo_turno.dado_qtd > 1 else "sena"
         }
         if quantidade >= ultimo_turno.dado_qtd:
-            print(f'{ultimo_turno.do_jogador.username} ganhou!')
+            # print(f'{ultimo_turno.do_jogador.username} ganhou!')
             ganhador = ultimo_turno.do_jogador.username
             perdedor = jogador.username
+            jogador.dados_qtd -= 1
+            self.vez_atual = jogador
             txt = (
                 f'{ganhador} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]} e '
-                f'realmente haviam, {ganhador} ganhou! {perdedor} desconfiou errado e perdeu um dado.')
+                f'realmente havia{"m" if ultimo_turno.dado_qtd > 1 else ""}, {ganhador} ganhou! {perdedor} desconfiou '
+                f'errado e perdeu um dado.')
         else:
-            print(f'{jogador.username} ganhou!')
+            # print(f'{jogador.username} ganhou!')
             ganhador = jogador.username
             perdedor = ultimo_turno.do_jogador.username
+            ultimo_turno.do_jogador.dados_qtd -= 1
+            self.vez_atual = ultimo_turno.do_jogador
             txt = (f'{perdedor} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]}, '
                    f'mas não haviam. {perdedor} perdeu um dado! {ganhador} desconfiou certo!')
         # Mudar para a tela de conferência destacando o ganhador e o perdedor e descrevendo o acontecimento:
@@ -314,9 +330,6 @@ class Rodada:
              {'nomes': nomes, 'dados': dados, 'dado_apostado_face': ultimo_turno.dado_face,
               'com_coringa': self.com_coringa, 'texto': txt}, broadcast=True)
         emit("mudar_pagina", {'pag_numero': 3}, broadcast=True)
-
-        # FAZER DEPOIS: BOTÃO DE OK, QUE INICIARÁ UMA NOVA RODADA, AGORA COM O JOGADOR QUE PERDEU UM DADO COM ELE A
-        # MENOS, DEPOIS QUE TODOS JÁ ESTIVEREM CLICADO NELE.
 
 
 class Turno:
@@ -356,7 +369,12 @@ class Turno:
             emit('atualizar_coringa', {'coringa_cancelado': True}, broadcast=True)
 
         nomes = [jogador.username for jogador in self.da_rodada.da_partida.jogadores]
+
         proximo = self.proximo_jogador(self.do_jogador)  # Aqui o próximo jogador a jogar
+        self.da_rodada.vez_atual = proximo
+        # AMANHÃ: fazer o jogo sortear um jogador no início de uma partida, depois passando pro próximo
+        # normalmente(já faz), quando alguém perder um dado, o jogo deve iniciar uma nova rodada a partir deste jogador
+        # e não continuar de onde parou.
 
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': proximo.username},
              broadcast=True)

@@ -140,6 +140,7 @@ socket.on("mudar_pagina", function (data) {
 // Função para preencher os dados do jogador na página de partida
 socket.on('meus_dados', function (data, index) {
     const meus_dados = document.getElementById('meus_dados')
+    meus_dados.innerHTML = ""
     const span = document.createElement('span')
     span.className = "fs-5 text-white me-2"
     span.innerText = "Seus dados: "
@@ -162,7 +163,7 @@ socket.on('meus_dados', function (data, index) {
 
 });
 
-// Função para preencher os dados na mesa
+// Função para preencher a info sobre os dados na mesa
 socket.on('dados_mesa', function (data) {
     dados_mesa = document.getElementById('dados_mesa')
     data = data.total
@@ -172,7 +173,7 @@ socket.on('dados_mesa', function (data) {
     dados_mesa.appendChild(span)
 });
 
-// Função pra preencher o coringa
+// Função pra preencher a info sobre o coringa
 socket.on('atualizar_coringa', function (data) {
     const coringa_n = Number(data.coringa_atual)
     const coringa_j = String(data.ultimo_coringa)
@@ -244,8 +245,9 @@ function createDiceSection(text, opacityClass, imageIndex) {
 // Função para construir a tela dos dados (1-6 dados).
 socket.on('construtor_dados', function (data) {
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
-
     const container = document.createElement('div');
+
+    tela_jogar_dados.innerHTML = ""
     container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
     container.style = '--bs-bg-opacity: .3;';
 
@@ -334,11 +336,12 @@ socket.on('construtor_html', function (data) {
         }
 
         cardHeader.textContent = `${jogador} (🎲 x ${data.dados_tt})`;
-        cardHeader.id = `card_hea_${jogador}`
+        cardHeader.id = `card_hea_${jogador}`;
 
         // Criação do corpo do card
         const cardBody = document.createElement('div');
         cardBody.className = 'card-body';
+        cardBody.id = `card_bod_${jogador}`;
 
         // Criação da linha dentro do corpo do card
         const row = document.createElement('div');
@@ -416,13 +419,30 @@ socket.on('espera_turno', function (data) {
     // window.alert('espera_turno');
 })
 
+// Função para mudar a quantidade de dados que possui cada jogador na rodada atual, resetar o corpo dos cards, executa a cadaa inicio de rodada
+socket.on('reset_rodada', function (data) {
+    const jogadores = data.jogadores_nomes;
+    const jogadores_dados = data.jogadores_dados_qtd;
+
+    jogadores.forEach((jogador, index) => {
+        const card = document.getElementById(`card_hea_${jogador}`);
+        const c_body = document.getElementById(`card_bod_${jogador}`);
+        if (card) {  // Verifica se o elemento existe
+            card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
+        }
+        if (c_body) {  // Verifica se o elemento existe
+            c_body.innerHTML = '';
+        }
+    });
+});
+
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
 socket.on('formatador_coletivo', function (data) {
-    jogadores = data.jogadores_nomes;
-    jog_da_vez = data.jogador_inicial_nome;
-    eu = nome_jogador
+    const jogadores = data.jogadores_nomes;
+    const jog_da_vez = data.jogador_inicial_nome;
+    const eu = nome_jogador;
 
-    jogadores.forEach(jogador => {
+    jogadores.forEach((index, jogador) => {
         const card = document.getElementById(`card_${jogador}`);
 
         if (jogador === eu) {
@@ -457,6 +477,7 @@ socket.on('cards_conferencia', function (data) {
 
     const cardContainer = document.getElementById("cards_conferencia");
     const texto_v_d = document.getElementById("texto_vitoria_derrota")
+    cardContainer.innerHTML = ''
     texto_v_d.innerText = data.texto;
 
     nomes.forEach((nome, index) => {
@@ -653,20 +674,26 @@ function enviar_apelido() {
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
     } else {
-        alert('Preencha o seu nome!')
+        alert('Preencha o seu nome!');
     }
 }
 
 function iniciar_partida() {
-    const bot_iniciar = document.getElementById('iniciar_partida')
+    const bot_iniciar = document.getElementById('iniciar_partida');
     socket.emit('iniciar_partida')
 }
 
 function jogar_dados() {
     socket.emit('jogar_dados')
-    const bot_iniciar = document.getElementById('jogar_dados')
-    constant = dadobt = document.getElementById('dadobotao')
+    const bot_iniciar = document.getElementById('jogar_dados');
+    constant = dadobt = document.getElementById('dadobotao');
     dadobt.disabled = true; // Desativa o input
+}
+
+function conferencia_final() {
+    const botao = document.getElementById('bot_confe_fim');
+    socket.emit('conferencia_final')
+    botao.disabled = true; // Desativa o input
 }
 
 
