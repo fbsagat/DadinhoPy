@@ -447,6 +447,73 @@ socket.on('formatador_coletivo', function (data) {
     });
 })
 
+// Função para construir os cards na página conferência
+socket.on('cards_conferencia', function (data) {
+    const nomes = data.nomes;
+    const dados = data.dados;
+    const dado_apostado = data.dado_apostado_face;
+    const coringa = data.com_coringa;
+
+
+    const cardContainer = document.getElementById("cards_conferencia");
+    const texto_v_d = document.getElementById("texto_vitoria_derrota")
+    texto_v_d.innerText = data.texto;
+
+    nomes.forEach((nome, index) => {
+        // Criação do card
+        const card = document.createElement("div");
+        card.classList.add("col-sm-3", "mb-3");
+
+        const cardInner = document.createElement("div");
+        cardInner.classList.add("card", "text-bg-secondary");
+
+        const cardBody = document.createElement("div");
+        cardBody.classList.add("card-body");
+
+        const cardTitle = document.createElement("h5");
+        cardTitle.classList.add("card-title");
+        cardTitle.textContent = nome;
+
+        const hr = document.createElement("hr");
+
+        const rowOuter = document.createElement("div");
+        rowOuter.classList.add("row", "d-flex", "justify-content-evenly");
+
+        const rowContainer = document.createElement("div");
+        rowContainer.classList.add("row", "container", "text-center");
+
+        // Adicionar colunas com imagem de dados no container
+        for (let i = 0; i < dados[index].length; i++) {
+            const diceCol = document.createElement("div");
+            diceCol.classList.add("col", "g-1");
+
+            const diceImg = document.createElement("img");
+            diceImg.src = `../static/imagens/dado/${dados[index][i]}.png`;
+            if ((dados[index][i] === dado_apostado) || (dados[index][i] === 1 && coringa)) {
+                diceImg.classList.add("img-fluid", "px-1", "border", "border-danger", "shadow-lg", "rounded");
+            } else {
+                diceImg.classList.add("img-fluid", "px-1");
+            }
+            diceImg.classList.add("img-fluid", "px-1");
+            diceImg.alt = `Imagem ${i + 1}`;
+            diceImg.width = 40;
+            diceImg.height = 40;
+
+            diceCol.appendChild(diceImg);
+            rowContainer.appendChild(diceCol);
+        }
+
+        // Estruturação dos elementos no card
+        rowOuter.appendChild(rowContainer);
+        cardBody.appendChild(cardTitle);
+        cardBody.appendChild(hr);
+        cardBody.appendChild(rowOuter);
+        cardInner.appendChild(cardBody);
+        card.appendChild(cardInner);
+        cardContainer.appendChild(card);
+    });
+})
+
 let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
 
 // Adiciona evento para cada imagem

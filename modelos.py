@@ -169,7 +169,7 @@ class Partida:
 
     def __init__(self, do_lobby, jogadores, partida_numero):
         self.partida_num = partida_numero
-        self.dados_qtd = 3
+        self.dados_qtd = 6
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
@@ -183,7 +183,7 @@ class Partida:
     def construir_rodada(self):
         # print('Partida: Construindo rodada')
         rodada_numero = len(self.rodadas) + 1
-        rodada = Rodada(partida=self, rodada_numero=rodada_numero)
+        rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero)
         self.rodadas.append(rodada)
         for jogador in self.jogadores:
             jogador.rodada_atual = rodada
@@ -211,12 +211,13 @@ class Rodada:
     ele mesmo ou outro jogador perde.
     """
 
-    def __init__(self, partida, rodada_numero):
+    def __init__(self, partida, jogadores, rodada_numero):
         self.rodada_num = rodada_numero
         self.da_partida = partida
         self.jogaram_dados = False
         self.turnos = []
         self.todos_os_dados = []
+        self.jogadores = jogadores
         self.com_coringa = True
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
@@ -254,7 +255,8 @@ class Rodada:
     def jogar_dados(self):
         for jogador in self.da_partida.jogadores:
             dados = jogador.jogar_dados(self.da_partida)
-            self.todos_os_dados.append(dados)
+            for dado in dados:
+                self.todos_os_dados.append(dado)
         self.jogaram_dados = True
 
     def verificar_se_todos_ja_jogaram_seus_dados(self):
@@ -267,10 +269,54 @@ class Rodada:
 
     def desconfiar(self, jogador):
         print(f'{jogador} desconfiou')
-        # Pegar todos os dados
-        # Pegar jogada anterior
-        # Verificar se o que foi dito em jogada anterior está batendo com os dados totais da rodada
-        # Se sim, jogador anterior vence partida, se não jogador que desconfiou vence partida.
+        """
+        Pegar todos os dados
+        Pegar jogada anterior
+        Verificar se o que foi apostado em jogada anterior é igual ou maior que a contagem nos dados totais da 
+        rodada(contar os coringas também), se sim, jogador anterior vence partida, se não jogador que desconfiou 
+        vence a partida.
+        """
+        todos_dados = self.todos_os_dados
+        print(todos_dados)
+        ultimo_turno = self.turnos[-1]
+        print(ultimo_turno)
+        if self.com_coringa:
+            for i, dado in enumerate(todos_dados):
+                if dado == 1:
+                    todos_dados[i] = ultimo_turno.dado_face
+        print(todos_dados)
+        quantidade = todos_dados.count(ultimo_turno.dado_face)
+        faces_dado_nomes = {
+            1: "ases",
+            2: "duques",
+            3: "ternos",
+            4: "quadras",
+            5: "quinas",
+            6: "senas"
+        }
+        if quantidade >= ultimo_turno.dado_qtd:
+            print(f'{ultimo_turno.do_jogador.username} ganhou!')
+            ganhador = ultimo_turno.do_jogador.username
+            perdedor = jogador.username
+            txt = (
+                f'{ganhador} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]} e '
+                f'realmente haviam, {ganhador} ganhou! {perdedor} desconfiou errado e perdeu um dado.')
+        else:
+            print(f'{jogador.username} ganhou!')
+            ganhador = jogador.username
+            perdedor = ultimo_turno.do_jogador.username
+            txt = (f'{perdedor} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]}, '
+                   f'mas não haviam. {perdedor} perdeu um dado! {ganhador} desconfiou certo!')
+        # Mudar para a tela de conferência destacando o ganhador e o perdedor e descrevendo o acontecimento:
+        nomes = [jogador.username for jogador in self.da_partida.jogadores]
+        dados = [jogador.dados for jogador in self.da_partida.jogadores]
+        emit('cards_conferencia',
+             {'nomes': nomes, 'dados': dados, 'dado_apostado_face': ultimo_turno.dado_face,
+              'com_coringa': self.com_coringa, 'texto': txt}, broadcast=True)
+        emit("mudar_pagina", {'pag_numero': 3}, broadcast=True)
+
+        # FAZER DEPOIS: BOTÃO DE OK, QUE INICIARÁ UMA NOVA RODADA, AGORA COM O JOGADOR QUE PERDEU UM DADO COM ELE A
+        # MENOS, DEPOIS QUE TODOS JÁ ESTIVEREM CLICADO NELE.
 
 
 class Turno:
@@ -368,16 +414,14 @@ class Turno:
         if tur_ant:
             turno_ant_dado_face = tur_ant.dado_face
             turno_ant_dado_qtd = tur_ant.dado_qtd
-            turno_ant_jogada_valor = turno_ant_dado_face * turno_ant_dado_qtd
             # print(
-            #     f'turno anterior: Face: {turno_ant_dado_face}, Qtd:  {turno_ant_dado_qtd}, valor'
+            #     f'turno anterior: Face: {turno_ant_dado_face}, Qtd: {turno_ant_dado_qtd}, valor'
             #     f' {turno_ant_jogada_valor}')
 
         turno_atual_dado_face = self.dado_face
         turno_atual_dado_qtd = self.dado_qtd
-        turno_atul_jogada_valor = turno_atual_dado_face * turno_atual_dado_qtd
         # print(
-        #     f'turno atual: Face: {turno_atual_dado_face}, Qtd:  {turno_atual_dado_qtd}, valor'
+        #     f'turno atual: Face: {turno_atual_dado_face}, Qtd: {turno_atual_dado_qtd}, valor'
         #     f' {turno_atul_jogada_valor}')
 
         # Validações de primeiro turno
@@ -407,9 +451,9 @@ class Turno:
                 if turno_atual_dado_qtd > coringa_atual_qtd:
                     return True
             if turno_ant_dado_face == 1 and turno_atual_dado_face > 1:
-                # 3. Se anterior for coringa com atual sendo número: aumentar a aposta: deve ser o dobro, mas sendo
-                # qualquer número.
-                if turno_atual_dado_qtd == (coringa_atual_qtd * 2):
+                # 3. Se anterior for coringa com atual sendo número: aumentar a aposta: deve ser o dobro ou mais, mas
+                # sendo qualquer número.
+                if turno_atual_dado_qtd >= (coringa_atual_qtd * 2):
                     return True
             if turno_ant_dado_face == turno_atual_dado_face:
                 # 4. Ambos coringas: Qtd deve ser maior que coringa_atual_qtd.

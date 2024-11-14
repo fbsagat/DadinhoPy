@@ -242,7 +242,6 @@
                 </div>
             </div>
 
-
         </div>
         <div id="painel_aguarde" style="display: block;">
             <span class="fs-4 badge text-bg-warning text-wrap mb-1 me-1" style="width: 16rem;">Aguarde a sua vez</span>
@@ -253,17 +252,24 @@
     <!-- TELA CONFERENCIA INICIO (3) -->
     <div id="tela_conferencia" class="tela_conferencia container-fluid text-center" style="display: none;">
 
+
+        <div class='container'>
+            <p id="texto_vitoria_derrota"
+                class="text-center fs-6 fw-bold text-success-emphasis bg-primary-subtle border border-primary-subtle rounded-4">
+            </p>
+        </div>
         <div class='container my-4 p-3 mb-2 bg-black text-white border border-light rounded'
             style="--bs-bg-opacity: .3;">
             <h1 class="fw-bold text-primary hero">Conferência</h1>
-            <div class="row d-flex justify-content-around">
-                <div class="col-sm-2">
-                    <div class="card">
+
+            <div class="row d-flex justify-content-around" id="cards_conferencia">
+
+                <!-- <div class="col-sm-3 mb-3">
+                    <div class="card text-bg-secondary">
                         <div class="card-body">
                             <h5 class="card-title">Fábio</h5>
                             <hr>
-                            <div class="d-flex justify-content-center">
-
+                            <div class="row d-flex justify-content-evenly">
                                 <div class="row container text-center">
                                     <div class="col g-1">
                                         <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
@@ -277,20 +283,6 @@
                                         <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
                                             width="40" height="40">
                                     </div>
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-sm-2">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="d-flex justify-content-center">
-
-                                <div class="row container text-center">
                                     <div class="col g-1">
                                         <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
                                             width="40" height="40">
@@ -304,115 +296,11 @@
                                             width="40" height="40">
                                     </div>
                                 </div>
-
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="col-sm-2">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="d-flex justify-content-center">
+                </div> -->
 
-                                <div class="row container text-center">
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-sm-2">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="d-flex justify-content-center">
-
-                                <div class="row container text-center">
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-sm-2">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="d-flex justify-content-center">
-
-                                <div class="row container text-center">
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-sm-2">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="d-flex justify-content-center">
-
-                                <div class="row container text-center">
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>

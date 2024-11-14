@@ -112,6 +112,7 @@ def aposta(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
+        # FALTA VERIFICAR SE É O MOMENTO DESSA JOGADA
         jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 
 
@@ -121,6 +122,7 @@ def desconfiar(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
+        # FALTA VERIFICAR SE É O MOMENTO DESSA JOGADA
         jogador.rodada_atual.desconfiar(jogador=jogador)
 
 
