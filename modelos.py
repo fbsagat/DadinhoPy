@@ -34,7 +34,7 @@ class Jogador:
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
                 f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
 
-    def jogar_dados(self, partida):
+    def jogar_dados(self):
         """Rola os seus dados e retorna o resultado como uma lista de valores."""
         dados = []
         for dado in range(0, self.dados_qtd):
@@ -182,7 +182,7 @@ class Partida:
     def construir_rodada(self):
         rodada_numero = len(self.rodadas) + 1
         rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
-                        jogador_vez=self.jogador_sorteado)
+                        vez_atual=self.jogador_sorteado)
         self.rodadas.append(rodada)
         nomes = []
         jogadores_dados_qtd = []
@@ -221,7 +221,7 @@ class Rodada:
     ele mesmo ou outro jogador perde.
     """
 
-    def __init__(self, partida, jogadores, rodada_numero, jogador_vez):
+    def __init__(self, partida, jogadores, rodada_numero, vez_atual, perdedor=None):
         self.rodada_num = rodada_numero
         self.da_partida = partida
         self.jogaram_dados = False
@@ -232,7 +232,12 @@ class Rodada:
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
         self.conferiram = 0
-        self.vez_atual = jogador_vez
+        self.vez_atual = vez_atual  # Para checagem de requisição web apenas
+        self.perdedor = perdedor  # Na primeira rodada da partida, vai estar vazio, então o programa sorteará o
+        # primeiro desta rodada, a partir da segunda rodada, "perdedor" estará preenchido para que as instâncias
+        # posteriores iniciem as jogadas pelo perdedor.
+        # Vou colocar aqui, no final de cada rodada, o perdedor de um dado, para que na próxima rodada que for criada
+        # na partida (classe mãe), ela não sorteie um jogador para iniciar e sim coloque este na vez.
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]
@@ -255,6 +260,7 @@ class Rodada:
                 self.coringa_atual_qtd = dado_qtd
                 self.coringa_atual_jogador = jogador
             turno.executar_turno()
+            self.proximo_a_jogar()
         else:
             # print('TURNO INVÁLIDO, DELETAR')
             txt = 'tente outra jogada.'
@@ -265,7 +271,7 @@ class Rodada:
 
     def jogar_dados(self):
         for jogador in self.da_partida.jogadores:
-            dados = jogador.jogar_dados(self.da_partida)
+            dados = jogador.jogar_dados()
             for dado in dados:
                 self.todos_os_dados.append(dado)
         self.jogaram_dados = True
@@ -310,7 +316,10 @@ class Rodada:
             ganhador = ultimo_turno.do_jogador.username
             perdedor = jogador.username
             jogador.dados_qtd -= 1
-            self.vez_atual = jogador
+
+            # Salvar este perdedor nesta instancia para ser o iniciante na próxima desta partida
+            self.perdedor = jogador
+
             txt = (
                 f'{ganhador} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]} e '
                 f'realmente havia{"m" if ultimo_turno.dado_qtd > 1 else ""}, {ganhador} ganhou! {perdedor} desconfiou '
@@ -320,16 +329,58 @@ class Rodada:
             ganhador = jogador.username
             perdedor = ultimo_turno.do_jogador.username
             ultimo_turno.do_jogador.dados_qtd -= 1
-            self.vez_atual = ultimo_turno.do_jogador
+
+            # Salvar este perdedor nesta instancia para ser o iniciante na próxima desta partida
+            self.perdedor = ultimo_turno.do_jogador
+
             txt = (f'{perdedor} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]}, '
                    f'mas não haviam. {perdedor} perdeu um dado! {ganhador} desconfiou certo!')
+
+            # AMANHÃ: TROCAR O 'NÃO HAVIAM' POR HAVIAM {DADOS QTD AQUI} DADOS NA MESA.
+
         # Mudar para a tela de conferência destacando o ganhador e o perdedor e descrevendo o acontecimento:
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         dados = [jogador.dados for jogador in self.da_partida.jogadores]
         emit('cards_conferencia',
              {'nomes': nomes, 'dados': dados, 'dado_apostado_face': ultimo_turno.dado_face,
               'com_coringa': self.com_coringa, 'texto': txt}, broadcast=True)
+        self.proximo_a_jogar()
         emit("mudar_pagina", {'pag_numero': 3}, broadcast=True)
+
+    def proximo_a_jogar(self):
+        """
+        Selecionar o próximo jogador a jogar muda em diferentes situações:
+        1. Se o anterior aumentar a posta, o próximo deve ser o posterior na lista.
+        2. Se o anterior desconfiar, o próximo deve ser o que perdeu no turno.
+        """
+        nomes = [jogador.username for jogador in self.da_partida.jogadores]
+
+        # Se temos um perdedor na rodada anterior, o próximo deve ser ele, se não temos, ou seja, primeira rodada da
+        # partida, iniciamos, portanto, com ele.
+        if self.da_partida.rodadas[-1].perdedor in self.da_partida.jogadores:
+            proximo = self.da_partida.rodadas[-1].perdedor
+        else:
+            proximo = self.proximo_jogador_na_lista(self.vez_atual)
+
+        emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': proximo.username},
+             broadcast=True)
+        emit('meu_turno', {'username': proximo.username, 'turno_num': len(self.turnos)}, to=proximo.client_id)
+
+        for jogador in self.da_partida.jogadores:
+            if jogador != proximo:
+                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
+
+        # Atualizamos aqui o próximo da rodada para que o front e o back end saibam disso e ajam corretamente.
+        self.vez_atual = proximo
+
+    def proximo_jogador_na_lista(self, item_atual):
+        lista = self.da_partida.jogadores
+        # Obter o índice do item atual na lista
+        indice_atual = lista.index(item_atual)
+        # Calcular o índice do próximo item de forma circular
+        indice_proximo = (indice_atual + 1) % len(lista)
+        # Retornar o próximo item
+        return lista[indice_proximo]
 
 
 class Turno:
@@ -367,31 +418,6 @@ class Turno:
         else:
             # print('atualizar_coringa cancelado True')
             emit('atualizar_coringa', {'coringa_cancelado': True}, broadcast=True)
-
-        nomes = [jogador.username for jogador in self.da_rodada.da_partida.jogadores]
-
-        proximo = self.proximo_jogador(self.do_jogador)  # Aqui o próximo jogador a jogar
-        self.da_rodada.vez_atual = proximo
-        # AMANHÃ: fazer o jogo sortear um jogador no início de uma partida, depois passando pro próximo
-        # normalmente(já faz), quando alguém perder um dado, o jogo deve iniciar uma nova rodada a partir deste jogador
-        # e não continuar de onde parou.
-
-        emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': proximo.username},
-             broadcast=True)
-        emit('meu_turno', {'username': proximo.username, 'turno_num': self.turno_num}, to=proximo.client_id)
-
-        for jogador in self.da_rodada.da_partida.jogadores:
-            if jogador != proximo:
-                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
-
-    def proximo_jogador(self, item_atual):
-        lista = self.da_rodada.da_partida.jogadores
-        # Obter o índice do item atual na lista
-        indice_atual = lista.index(item_atual)
-        # Calcular o índice do próximo item de forma circular
-        indice_proximo = (indice_atual + 1) % len(lista)
-        # Retornar o próximo item
-        return lista[indice_proximo]
 
     def obter_turno_anterior_na_partida(self):
         if self.turno_num > 1:

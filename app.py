@@ -111,8 +111,9 @@ def aposta(dados):
     del dados['chave']
     client_id = request.sid
     jogador = jogadores_online[client_id]
-    if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
-        # FALTA VERIFICAR SE É O MOMENTO DESSA JOGADA
+    rodada = jogador.rodada_atual
+    if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
+        # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
         jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 
 

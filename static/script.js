@@ -167,6 +167,7 @@ socket.on('meus_dados', function (data, index) {
 socket.on('dados_mesa', function (data) {
     dados_mesa = document.getElementById('dados_mesa')
     data = data.total
+    dados_mesa.innerHTML = ""
     span = document.createElement('span')
     span.className = 'fs-5 text-white me-2'
     span.innerHTML = `Temos <b>${data}</b> dados na mesa`
@@ -419,7 +420,7 @@ socket.on('espera_turno', function (data) {
     // window.alert('espera_turno');
 })
 
-// Função para mudar a quantidade de dados que possui cada jogador na rodada atual, resetar o corpo dos cards, executa a cadaa inicio de rodada
+// Função para mudar a quantidade de dados que possui cada jogador na rodada atual, resetar o corpo dos cards, executa a cada inicio de rodada
 socket.on('reset_rodada', function (data) {
     const jogadores = data.jogadores_nomes;
     const jogadores_dados = data.jogadores_dados_qtd;
@@ -427,12 +428,14 @@ socket.on('reset_rodada', function (data) {
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_hea_${jogador}`);
         const c_body = document.getElementById(`card_bod_${jogador}`);
+        const botao = document.getElementById('bot_confe_fim');
         if (card) {  // Verifica se o elemento existe
             card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
         }
         if (c_body) {  // Verifica se o elemento existe
             c_body.innerHTML = '';
         }
+        botao.disabled = false; // Reativa o input
     });
 });
 
