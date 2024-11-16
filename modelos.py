@@ -234,6 +234,11 @@ class Partida:
             # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado pra ele
             perdedor.dados_qtd -= 1
             if perdedor.dados_qtd == 0:
+                perdedor.joguei_dados = False
+                perdedor.rodadas = []
+                perdedor.turnos = []
+                perdedor.rodada_atual = None
+                perdedor.turno_atual = None
                 self.jogadores.remove(perdedor)
             if len(self.jogadores) < 2:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
