@@ -169,7 +169,7 @@ class Partida:
 
     def __init__(self, do_lobby, jogadores, partida_numero):
         self.partida_num = partida_numero
-        self.dados_qtd = 1
+        self.dados_qtd = 2
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
@@ -244,7 +244,7 @@ class Partida:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
             else:
                 if perdedor in self.jogadores:
-                    print(perdedor.usernme, 'perdeu um dado')
+                    print(perdedor.username, 'perdeu um dado')
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
                 else:
                     print(vencedor.username, 'inicia a rodada por ter tirado ', perdedor.username)
