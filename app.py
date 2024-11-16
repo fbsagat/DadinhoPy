@@ -112,7 +112,11 @@ def aposta(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     rodada = jogador.rodada_atual
+    print('')
+    print(f"{jogador.username} apostou na rodada {rodada}")
+    print('Verificando rodada.vez_atual == jogador: Vez de: ', rodada.vez_atual.username, 'Quem jogou: ', jogador.username)
     if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
+        print('PASSOU')
         # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
         jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 
@@ -122,8 +126,10 @@ def desconfiar(dados):
     chave = dados['dados']['chave']
     client_id = request.sid
     jogador = jogadores_online[client_id]
-    if jogador.chave_secreta == chave:  # Verifica se o jogador que enviou a requisição é o da vez
-        # FALTA VERIFICAR SE É O MOMENTO DESSA JOGADA
+    if jogador.rodada_atual and jogador.rodada_atual.vez_atual == jogador and jogador.chave_secreta == chave and len(
+            jogador.rodada_atual.turnos) > 0:
+        # Verifica se o jogador que enviou a requisição é o da vez
+        # Verificar se já é a partir do segundo turno
         jogador.rodada_atual.desconfiar(jogador=jogador)
 
 

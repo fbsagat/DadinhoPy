@@ -26,6 +26,11 @@ document.addEventListener('keydown', function (event) {
             logodiv.style.height = '10vh';
             logo.src = "../static/imagens/titulo_p.png";
             logo.style.width = '20%';
+        } else if (indiceAtual === 3) {
+            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+            logodiv.style.height = '40vh';
+            logo.src = "../static/imagens/titulo.png";
+            logo.style.width = '35%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
             logodiv.style.height = '50vh';
@@ -128,6 +133,11 @@ socket.on("mudar_pagina", function (data) {
             logodiv.style.height = '10vh';
             logo.src = "../static/imagens/titulo_p.png";
             logo.style.width = '20%';
+        } else if (data.pag_numero === 3) {
+            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+            logodiv.style.height = '40vh';
+            logo.src = "../static/imagens/titulo.png";
+            logo.style.width = '35%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
             logodiv.style.height = '50vh';
@@ -402,7 +412,6 @@ socket.on('meu_turno', function (data) {
     turno_num = data.turno_num;
     const jog_painel = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
-    const botao = document.getElementById('desconfiar')
     jog_painel.style.display = "block"; // Mostra o painel
     painel_aguarde.style.display = "none"; // Oculta painel aguarde
     if (turno_num > 0) {
@@ -420,7 +429,7 @@ socket.on('espera_turno', function (data) {
     // window.alert('espera_turno');
 })
 
-// Função para mudar a quantidade de dados que possui cada jogador na rodada atual, resetar o corpo dos cards, executa a cada inicio de rodada
+// Função que atualiza cada rodada, executa a cada inicio de rodada
 socket.on('reset_rodada', function (data) {
     const jogadores = data.jogadores_nomes;
     const jogadores_dados = data.jogadores_dados_qtd;
@@ -429,6 +438,7 @@ socket.on('reset_rodada', function (data) {
         const card = document.getElementById(`card_hea_${jogador}`);
         const c_body = document.getElementById(`card_bod_${jogador}`);
         const botao = document.getElementById('bot_confe_fim');
+
         if (card) {  // Verifica se o elemento existe
             card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
         }
@@ -436,6 +446,8 @@ socket.on('reset_rodada', function (data) {
             c_body.innerHTML = '';
         }
         botao.disabled = false; // Reativa o input
+        const botao_desc = document.getElementById('desconfiar');
+        botao_desc.disabled = true; // Desativa o input
     });
 });
 
@@ -474,6 +486,9 @@ socket.on('formatador_coletivo', function (data) {
 socket.on('cards_conferencia', function (data) {
     const nomes = data.nomes;
     const dados = data.dados;
+    const ganhador = data.ganhador;
+    const perdedor = data.perdedor;
+    const saiu_da_partida = data.saiu_da_partida;
     const dado_apostado = data.dado_apostado_face;
     const coringa = data.com_coringa;
 
@@ -489,7 +504,15 @@ socket.on('cards_conferencia', function (data) {
         card.classList.add("col-sm-3", "mb-3");
 
         const cardInner = document.createElement("div");
-        cardInner.classList.add("card", "text-bg-secondary");
+        if (nome === ganhador) {
+            cardInner.classList.add("card", "text-bg-secondary", "border-success", "rounded", "border-3");
+        } else if (nome === perdedor && nome != saiu_da_partida) {
+            cardInner.classList.add("card", "text-bg-secondary", "border-warning", "rounded", "border-3");
+        } else if (nome === saiu_da_partida) {
+            cardInner.classList.add("card", "text-bg-secondary", "border-danger", "rounded", "border-3");
+        } else {
+            cardInner.classList.add("card", "text-bg-secondary", "border-secondary", "rounded");
+        }
 
         const cardBody = document.createElement("div");
         cardBody.classList.add("card-body");
@@ -538,20 +561,18 @@ socket.on('cards_conferencia', function (data) {
     });
 })
 
-let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
-
-// Adiciona evento para cada imagem
-document.querySelectorAll('.img-button').forEach(button => {
+document.querySelectorAll('.image-button').forEach(button => {
     button.addEventListener('click', () => {
-        // Desmarca todos os botões
-        document.querySelectorAll('.img-button').forEach(btn => {
+        // Remove a classe 'selected' de todos os botões
+        document.querySelectorAll('.image-button').forEach(btn => {
             btn.classList.remove('selected');
         });
-        // Marca o botão clicado
+
+        // Adiciona a classe 'selected' ao botão clicado
         button.classList.add('selected');
-        selectedImageValue = button.getAttribute('data-value');
     });
 });
+
 
 // Lógica para enviar a aposta
 document.getElementById('apostar').addEventListener('click', () => {
@@ -724,3 +745,37 @@ function escolherImagemAleatoria() {
         document.getElementById(`dado${i}`).src = randomImage; // Atualiza o src da tag <img>
     }
 }
+
+// Seleciona os elementos
+const inputQuantidade = document.getElementById("quantidade");
+const btnIncrease = document.getElementById("increase");
+const btnDecrease = document.getElementById("decrease");
+
+// Incrementa o valor
+btnIncrease.addEventListener("click", () => {
+    const currentValue = parseInt(inputQuantidade.value) || 1;
+    inputQuantidade.value = currentValue + 1;
+});
+
+// Decrementa o valor (não permitindo valores menores que o mínimo)
+btnDecrease.addEventListener("click", () => {
+    const currentValue = parseInt(inputQuantidade.value) || 1;
+    if (currentValue > parseInt(inputQuantidade.min)) {
+        inputQuantidade.value = currentValue - 1;
+    }
+});
+
+let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
+
+// Adiciona evento para cada imagem
+document.querySelectorAll('.image-button').forEach(button => {
+    button.addEventListener('click', () => {
+        // Desmarca todos os botões
+        document.querySelectorAll('.img-button').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        // Marca o botão clicado
+        button.classList.add('selected');
+        selectedImageValue = button.getAttribute('data-value');
+    });
+});
