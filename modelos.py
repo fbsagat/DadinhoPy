@@ -5,7 +5,7 @@ from flask_socketio import emit
 
 
 class Jogador:
-    def __init__(self, client_id, master=False):
+    def __init__(self, client_id, master=False, partida_atual=None, rodada_atual=None, turno_atual=None):
         self.client_id = client_id
         self.username = None
         self.master = master
@@ -17,9 +17,9 @@ class Jogador:
         self.partidas = []
         self.rodadas = []
         self.turnos = []
-        self.partida_atual = Partida
-        self.rodada_atual = Rodada
-        self.turno_atual = Turno
+        self.partida_atual = partida_atual
+        self.rodada_atual = rodada_atual
+        self.turno_atual = turno_atual
         self.entrou = datetime.now()
 
     @classmethod
@@ -228,23 +228,21 @@ class Partida:
             perdedor = self.rodadas[-1].perdedor if hasattr(self.rodadas[-1], 'perdedor') else None
             vencedor = self.rodadas[-1].vencedor if hasattr(self.rodadas[-1], 'vencedor') else None
 
-            print('PERDEDOR da ultima rodada joga nessa: ', perdedor)
-            print('VENCEDOR da ultima rodada joga nessa: ', vencedor)
+            print('PERDEDOR da ultima rodada joga nessa: ', perdedor.username)
+            print('VENCEDOR da ultima rodada joga nessa: ', vencedor.username)
 
             # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado pra ele
             perdedor.dados_qtd -= 1
             if perdedor.dados_qtd == 0:
-                print(self.jogadores)
                 self.jogadores.remove(perdedor)
-            print(self.jogadores)
             if len(self.jogadores) < 2:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
             else:
                 if perdedor in self.jogadores:
-                    print(perdedor, 'perdeu um dado')
+                    print(perdedor.usernme, 'perdeu um dado')
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
                 else:
-                    print(vencedor, 'inicia a rodada por ter tirado ', perdedor)
+                    print(vencedor.username, 'inicia a rodada por ter tirado ', perdedor.username)
                     return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
         else:
             print('SORTEADO joga nessa rodada pois é a primeira: ', self.jogador_sorteado.username)
@@ -257,7 +255,7 @@ class Partida:
         return None
 
     def declarar_vencedor(self, jogador):
-        print(jogador, 'Venceu a partida!')
+        print(jogador.username, 'Venceu a partida!')
         # AGORA ARRUMAR AS RODADAS A PARTIR DO MOMENTO QUE SAI UM JOGADOR
         # CRIAR UM MODO DE ESPECTADOR PARA O JOGADOR QUE SAIU
 
@@ -305,9 +303,9 @@ class Rodada:
                 self.coringa_atual_qtd = dado_qtd
                 self.coringa_atual_jogador = jogador
             turno.executar_turno()
-            print('=== turno.do_jogador: ', turno.do_jogador)
+            print('É o turno de: ', turno.do_jogador.username)
             o_da_vez = self.selecionar_proximo_jogador_na_lista(turno.do_jogador)
-            print('=== o_da_vez: ', o_da_vez)
+            print('Próximo da vez: ', o_da_vez.username)
             self.construir_front_pro_da_vez(o_da_vez)
             self.vez_atual = o_da_vez
         else:
@@ -412,7 +410,7 @@ class Rodada:
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
         Esta função não faz nenhuma validação de jogador da vez, deve ser feita em outro lugar.
         """
-        print('%%% construindo front para: ', jogador_atual)
+        print('Construindo front para: ', jogador_atual.username)
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              broadcast=True)

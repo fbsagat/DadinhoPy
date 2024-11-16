@@ -114,7 +114,7 @@ def aposta(dados):
     rodada = jogador.rodada_atual
     print('')
     print(f"{jogador.username} apostou na rodada {rodada}")
-    print('Verificando rodada.vez_atual == jogador: Vez de: ', rodada.vez_atual.username, 'Quem jogou: ', jogador.username)
+    print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
     if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
         print('PASSOU')
         # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
@@ -137,9 +137,10 @@ def desconfiar(dados):
 def conferencia_final():
     client_id = request.sid
     jogador = jogadores_online[client_id]
-    jogador.rodada_atual.conferiram += 1
-    if jogador.rodada_atual.conferiram == len(jogador.rodada_atual.jogadores):
-        jogador.partida_atual.construir_rodada()
+    if jogador.rodada_atual:
+        jogador.rodada_atual.conferiram += 1
+        if jogador.rodada_atual.conferiram == len(jogador.rodada_atual.jogadores):
+            jogador.partida_atual.construir_rodada()
 
 
 if __name__ == '__main__':
