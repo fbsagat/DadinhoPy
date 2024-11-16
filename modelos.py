@@ -65,25 +65,6 @@ class Lobby:
         for jogador in self.jogadores:
             jogador.partida_atual = partida
             jogador.partidas.append(partida)
-
-        turnos_lista = {}
-        for jogador in partida.jogadores:
-            turnos_lista[jogador.username] = [[0, 0]]
-        jog_inicial = partida.jogador_sorteado
-        nomes = [jogador.username for jogador in partida.jogadores]
-
-        emit("construtor_html",
-             {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
-              'dados_tt': partida.dados_qtd},
-             broadcast=True)
-        emit('dados_mesa', {'total': partida.dados_qtd * len(partida.jogadores)}, broadcast=True)
-        emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, broadcast=True)
-        emit('meu_turno', {'username': jog_inicial.username}, to=jog_inicial.client_id)
-        for jogador in partida.jogadores:
-            if jogador != jog_inicial:
-                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
-        emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jog_inicial.username},
-             broadcast=True)
         return partida
 
     def verificar_apelido(self, nome):
@@ -187,6 +168,23 @@ class Partida:
         if 'final' in verificar and verificar['final']:
             self.declarar_vencedor(verificar['vez_atual'])
         else:
+
+            nomes = [jogador.username for jogador in self.jogadores]
+            turnos_lista = {}
+            for jogador in self.jogadores:
+                turnos_lista[jogador.username] = [[0, 0]]
+            emit("construtor_html",
+                 {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
+                  'dados_tt': self.dados_qtd}, broadcast=True)
+            emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, broadcast=True)
+            emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, broadcast=True)
+            emit('meu_turno', {'username': vez_atual.username}, to=vez_atual.client_id)
+            for jogador in self.jogadores:
+                if jogador != vez_atual:
+                    emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
+            emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': vez_atual.username},
+                 broadcast=True)
+
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
                             vez_atual=vez_atual)
             self.rodadas.append(rodada)
@@ -195,6 +193,7 @@ class Partida:
             jogadores_dados_qtd = []
             for jogador in self.jogadores:
                 jogador.rodada_atual = rodada
+                jogador.turnos = []
                 jogador.rodadas.append(rodada)
                 jogador.dados_qtd = self.dados_qtd if rodada_numero == 1 else jogador.dados_qtd
                 nomes.append(jogador.username)

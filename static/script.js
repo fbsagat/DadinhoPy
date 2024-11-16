@@ -253,7 +253,7 @@ function createDiceSection(text, opacityClass, imageIndex) {
     return col;
 }
 
-// Função para construir a tela dos dados (1-6 dados).
+// Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
@@ -436,14 +436,14 @@ socket.on('reset_rodada', function (data) {
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_hea_${jogador}`);
-        const c_body = document.getElementById(`card_bod_${jogador}`);
+        const c_row = document.getElementById(`card_row_${jogador}`);
         const botao = document.getElementById('bot_confe_fim');
 
         if (card) {  // Verifica se o elemento existe
             card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
         }
-        if (c_body) {  // Verifica se o elemento existe
-            c_body.innerHTML = '';
+        if (c_row) {  // Verifica se o elemento existe
+            c_row.innerHTML = '';
         }
         botao.disabled = false; // Reativa o input
         const botao_desc = document.getElementById('desconfiar');
