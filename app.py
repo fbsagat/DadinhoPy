@@ -65,13 +65,12 @@ def escolher_apelido(data):
 
 
 @socketio.on('iniciar_partida')
-def iniciar_partida():
-    # dados_qtd = int(data['dados_qtd'])
-    # print('dados_qtd', dados_qtd)
+def iniciar_partida(dados):
+    dados_qtd = int(dados['dados_qtd'])
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
-        partida = lobby_unico.construir_partida(dados_qtd=3)
+        partida = lobby_unico.construir_partida(dados_qtd=dados_qtd)
         partida.construir_rodada()
         # print('Iniciando nova partida: ', partida)
 

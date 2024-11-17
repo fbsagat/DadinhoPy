@@ -16,9 +16,9 @@
 <body>
     <canvas id="fireworks"></canvas>
 
-    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 38vh;">
+    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 45vh;">
         <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
-            style="display: block; width: 35%; height: auto;">
+            style="display: block; width: 40%; height: auto;">
     </div>
 
     <div class="mt-4 container-fluid align-items-center">
@@ -38,39 +38,42 @@
                 <small>Aguardando jogadores...</small>
             </div>
 
-            <!-- <form id="diceForm">
-                <fieldset id="diceForm_fieldset" style="display: none;">
-                    <small class="form-label text-light">Número de dados:</legend>
-                    <div class="d-flex justify-content-center gap-3">
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice1" value="1" checked>
-                            <label class="form-check-label text-light" for="dice1">1</label>
+            <div id="diceForm_fieldset" class="container" style="display: none;">
+                <fieldset>
+                    <small class="form-label text-light">Número de dados:</small>
+                        <div class="d-flex justify-content-center gap-3">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice1" value="1"
+                                    checked>
+                                <label class="form-check-label text-light" for="dice1">1</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice2" value="2">
+                                <label class="form-check-label text-light" for="dice2">2</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice3" value="3">
+                                <label class="form-check-label text-light" for="dice3">3</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice4" value="4">
+                                <label class="form-check-label text-light" for="dice4">4</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice5" value="5">
+                                <label class="form-check-label text-light" for="dice5">5</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="diceCount" id="dice6" value="6">
+                                <label class="form-check-label text-light" for="dice6">6</label>
+                            </div>
                         </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice2" value="2">
-                            <label class="form-check-label text-light" for="dice2">2</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice3" value="3">
-                            <label class="form-check-label text-light" for="dice3">3</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice4" value="4">
-                            <label class="form-check-label text-light" for="dice4">4</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice5" value="5">
-                            <label class="form-check-label text-light" for="dice5">5</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice6" value="6">
-                            <label class="form-check-label text-light" for="dice6">6</label>
-                        </div>
-                    </div>
                 </fieldset>
-            </form>         -->
+            </div>
+
             <div class="d-flex justify-content-center mt-1">
-                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
+                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()" style="display: none;"
+                    disabled>Iniciar partida</button>
             </div>
 
         </div>

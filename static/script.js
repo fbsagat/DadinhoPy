@@ -25,17 +25,17 @@ document.addEventListener('keydown', function (event) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
             logodiv.style.height = '10vh';
             logo.src = "../static/imagens/titulo_p.png";
-            logo.style.width = '20%';
+            logo.style.width = '25%';
         } else if (indiceAtual === 3) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '28vh';
+            logodiv.style.height = '45vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '35%';
+            logo.style.width = '40%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '38vh';
+            logodiv.style.height = '45vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '35%';
+            logo.style.width = '40%';
         }
     }
 });
@@ -113,8 +113,10 @@ socket.on('atualizar_pontos', function (data) {
 // Funções para o "master" do servidor
 socket.on("master_def", function (data) {
     if (data.is_master) {
+        const diceForm_fieldset = document.getElementById('diceForm_fieldset');
         const startGameButton = document.getElementById("iniciar_jogo");
-        startGameButton.style.display = "inline-block"; // Exibe o botão "Iniciar Jogo" para o mestre
+        startGameButton.style.display = "block"; // Exibe o botão "Iniciar Jogo" para o mestre
+        diceForm_fieldset.style.display = 'block';
     }
 });
 
@@ -140,17 +142,17 @@ socket.on("mudar_pagina", function (data) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
             logodiv.style.height = '10vh';
             logo.src = "../static/imagens/titulo_p.png";
-            logo.style.width = '20%';
+            logo.style.width = '25%';
         } else if (data.pag_numero === 3) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '28vh';
+            logodiv.style.height = '45vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '35%';
+            logo.style.width = '40%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '38vh';
+            logodiv.style.height = '45vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '35%';
+            logo.style.width = '40%';
         }
     }
 });
@@ -801,7 +803,8 @@ function enviar_apelido() {
 
 function iniciar_partida() {
     const bot_iniciar = document.getElementById('iniciar_partida');
-    socket.emit('iniciar_partida');
+    const diceCount = document.querySelector('input[name="diceCount"]:checked').value;
+    socket.emit('iniciar_partida', { dados_qtd: diceCount });
 }
 
 function jogar_dados() {
