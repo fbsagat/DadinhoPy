@@ -78,7 +78,7 @@ lobby > Partidas > Rodadas > turnos
 
 
 
-
+Validador de nome, colocar mensagem de aviso de nome inválido
 
 
 

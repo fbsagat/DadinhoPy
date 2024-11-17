@@ -2,6 +2,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 from funcoes_gerais import *
 from modelos import *
+import time
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -67,10 +68,11 @@ def escolher_apelido(data):
 @socketio.on('iniciar_partida')
 def iniciar_partida(dados):
     dados_qtd = int(dados['dados_qtd'])
+    valido = validar_numero(dados_qtd)
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
-        partida = lobby_unico.construir_partida(dados_qtd=dados_qtd)
+        partida = lobby_unico.construir_partida(dados_qtd=dados_qtd if valido else 1)
         partida.construir_rodada()
         # print('Iniciando nova partida: ', partida)
 
@@ -103,7 +105,7 @@ def joguei_dados(dados):
         rodada = jogador.rodada_atual
         # Executar isso \/ quando o último jogar os dados
         if rodada.verificar_se_todos_ja_jogaram_seus_dados():
-            # time.sleep(random.randint(3, 4)) ATIVAR NO FINAL -=--------------------------------------------------
+            time.sleep(random.randint(3, 4))
             mudar_pagina(2, broadcast=True)
 
 
