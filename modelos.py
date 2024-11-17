@@ -5,7 +5,7 @@ from flask_socketio import emit
 
 
 class Jogador:
-    def __init__(self, client_id, master=False, partida_atual=None, rodada_atual=None, turno_atual=None):
+    def __init__(self, client_id, master=False, lobby=None, partida_atual=None, rodada_atual=None, turno_atual=None):
         self.client_id = client_id
         self.username = None
         self.master = master
@@ -17,6 +17,7 @@ class Jogador:
         self.partidas = []
         self.rodadas = []
         self.turnos = []
+        self.lobby_atual = lobby
         self.partida_atual = partida_atual
         self.rodada_atual = rodada_atual
         self.turno_atual = turno_atual
@@ -26,9 +27,6 @@ class Jogador:
     def criar_jogador(cls, client_id, master=False):
         """Cria e retorna uma nova instância de Jogador."""
         return cls(client_id=client_id, master=master)
-
-    def atualizar_pontos(self, pontos):
-        self.pontos += pontos
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -53,14 +51,20 @@ class Lobby:
         self.lobby_num = lobby_numero
         self.jogadores = []
         self.partidas = []
+        self.conferiram_vencedor = 0
 
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
 
     def construir_partida(self):
         # print('Lobby: Construindo partida')
+        # nomes = []
+        # for jogador in self.jogadores:
+        #     nomes.append(jogador.username)
+        emit('reset_partida', broadcast=True)
+        self.conferiram_vencedor = 0
         partida_numero = len(self.partidas) + 1
-        partida = Partida(do_lobby=self, jogadores=self.jogadores, partida_numero=partida_numero)
+        partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero)
         self.partidas.append(partida)
         for jogador in self.jogadores:
             jogador.partida_atual = partida
@@ -73,10 +77,10 @@ class Lobby:
             return nome  # Se for único, retorna o nome original
             # Se o nome já existe, adiciona um índice até que o nome se torne único
         indice = 1
-        novo_nome = f"{nome}{indice}"
+        novo_nome = f"{nome}_{indice}"
         while novo_nome in nomes:
             indice += 1
-            novo_nome = f"{nome}{indice}"
+            novo_nome = f"{nome}_{indice}"
         return novo_nome  # Retorna o novo nome único
 
     def verificar_jogador_master(self):
@@ -101,6 +105,7 @@ class Lobby:
     def adicionar_jogador(self, jogador):
         if isinstance(jogador, Jogador):
             self.jogadores.append(jogador)
+            jogador.lobby_atual = self
         # else:
         #     print("Somente objetos do tipo Jogador podem ser adicionados.")
 
@@ -150,7 +155,7 @@ class Partida:
 
     def __init__(self, do_lobby, jogadores, partida_numero):
         self.partida_num = partida_numero
-        self.dados_qtd = 2
+        self.dados_qtd = 1
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
@@ -163,12 +168,24 @@ class Partida:
 
     def construir_rodada(self):
         verificar = self.verificar_partida_anterior()
+
+        print('\nJogadores da partida: ', self.jogadores)
+        print('Jogadores do lobby: ', self.do_lobby.jogadores, '\n')
+
+        # ESPECTADOR \/
+        for lobby_jogador in self.do_lobby.jogadores:
+            if lobby_jogador.client_id not in [jogador.client_id for jogador in self.jogadores]:
+                # print('ESPECTADOR: ', lobby_jogador.username, 'tem', lobby_jogador.dados_qtd, 'dados...')
+                emit('espectador', {'nome': lobby_jogador.username}, to=lobby_jogador.client_id)
+                emit('construtor_dados', {'quantidade': lobby_jogador.dados_qtd, 'espectador': True},
+                     to=lobby_jogador.client_id)
+        # ESPECTADOR /\
+
         vez_atual = verificar['vez_atual']
         rodada_numero = verificar['rodada_numero']
         if 'final' in verificar and verificar['final']:
             self.declarar_vencedor(verificar['vez_atual'])
         else:
-
             nomes = [jogador.username for jogador in self.jogadores]
             turnos_lista = {}
             for jogador in self.jogadores:
@@ -178,17 +195,11 @@ class Partida:
                   'dados_tt': self.dados_qtd}, broadcast=True)
             emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, broadcast=True)
             emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, broadcast=True)
-            emit('meu_turno', {'username': vez_atual.username}, to=vez_atual.client_id)
-            for jogador in self.jogadores:
-                if jogador != vez_atual:
-                    emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
-            emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': vez_atual.username},
-                 broadcast=True)
 
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
                             vez_atual=vez_atual)
             self.rodadas.append(rodada)
-            rodada.construir_front_pro_da_vez(jogador_atual=vez_atual)
+            rodada.atualizar_front_pro_da_vez(jogador_atual=vez_atual)
             nomes = []
             jogadores_dados_qtd = []
             for jogador in self.jogadores:
@@ -200,8 +211,10 @@ class Partida:
                 jogadores_dados_qtd.append(jogador.dados_qtd)
             rodada.jogar_dados()
             dados_mesa = 0
+
             for jogador in self.jogadores:
-                emit('construtor_dados', {'quantidade': jogador.dados_qtd}, to=jogador.client_id)
+                emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': False},
+                     to=jogador.client_id)
                 dados_mesa += jogador.dados_qtd
             if rodada_numero > 1:
                 emit('reset_rodada', {'jogadores_nomes': nomes, 'jogadores_dados_qtd': jogadores_dados_qtd},
@@ -239,6 +252,9 @@ class Partida:
                 perdedor.rodada_atual = None
                 perdedor.turno_atual = None
                 self.jogadores.remove(perdedor)
+                print('self.jogadores.remove(perdedor)', perdedor)
+                print('Perdedor ', perdedor)
+                print('Jogadores ', self.jogadores)
             if len(self.jogadores) < 2:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
             else:
@@ -259,9 +275,14 @@ class Partida:
         return None
 
     def declarar_vencedor(self, jogador):
-        print(jogador.username, 'Venceu a partida!')
-        # AGORA ARRUMAR AS RODADAS A PARTIR DO MOMENTO QUE SAI UM JOGADOR
-        # CRIAR UM MODO DE ESPECTADOR PARA O JOGADOR QUE SAIU
+        jogador.pontos += 1
+        emit('vencedor_da_partida', {'nome': jogador.username}, broadcast=True)
+        emit('botao_vencedor_ativ', to=jogador.client_id)
+        emit("mudar_pagina", {'pag_numero': 4}, broadcast=True)
+        nomes = [jogador.username for jogador in self.do_lobby.jogadores if jogador.username is not None]
+        pontos = [jogador.pontos for jogador in self.do_lobby.jogadores if jogador.username is not None]
+        print(nomes, pontos)
+        emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, broadcast=True)
 
 
 class Rodada:
@@ -282,13 +303,14 @@ class Rodada:
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
         self.conferiram = 0
-        self.vez_atual = vez_atual  # Para checagem de requisição web apenas
+        self.vez_atual = vez_atual
         self.perdedor = perdedor
         self.vencedor = vencedor
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]
-        txt = f"(RODADA {self.rodada_num} da partida {self.da_partida} com os jogadores: {jogadores_nomes})"
+        txt = (f"(RODADA {self.rodada_num} da partida {self.da_partida} com os jogadores: {jogadores_nomes}, "
+               f"perdedor: {self.perdedor}, vencedor: {self.vencedor})")
         return txt
 
     def construir_turno(self, jogador, dados):
@@ -310,7 +332,7 @@ class Rodada:
             print('É o turno de: ', turno.do_jogador.username)
             o_da_vez = self.selecionar_proximo_jogador_na_lista(turno.do_jogador)
             print('Próximo da vez: ', o_da_vez.username)
-            self.construir_front_pro_da_vez(o_da_vez)
+            self.atualizar_front_pro_da_vez(o_da_vez)
             self.vez_atual = o_da_vez
         else:
             # print('TURNO INVÁLIDO, DELETAR')
@@ -409,7 +431,7 @@ class Rodada:
               'com_coringa': self.com_coringa, 'texto': txt}, broadcast=True)
         emit("mudar_pagina", {'pag_numero': 3}, broadcast=True)
 
-    def construir_front_pro_da_vez(self, jogador_atual):
+    def atualizar_front_pro_da_vez(self, jogador_atual):
         """
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
         Esta função não faz nenhuma validação de jogador da vez, deve ser feita em outro lugar.
@@ -420,7 +442,6 @@ class Rodada:
              broadcast=True)
         emit('meu_turno', {'username': jogador_atual.username, 'turno_num': len(self.turnos)},
              to=jogador_atual.client_id)
-
         for jogador in self.da_partida.jogadores:
             if jogador != jogador_atual:
                 emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)

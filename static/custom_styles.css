@@ -53,79 +53,163 @@ body {
     margin-left: 0;
     margin-right: 0;
 }
-.row.no-gutters > [class*="col-"] {
+
+.row.no-gutters>[class*="col-"] {
     padding-left: 1px;
     padding-right: 1px;
 }
 
 /* Ajusta os botões para manter foco apenas na imagem */
 .image-button {
-    background: transparent; /* Fundo transparente */
-    border: none; /* Remove bordas do botão */
-    outline: none; /* Remove bordas ao focar no botão */
-    padding: 0; /* Sem espaçamento extra */
-    cursor: pointer; /* Cursor como botão */
+    background: transparent;
+    /* Fundo transparente */
+    border: none;
+    /* Remove bordas do botão */
+    outline: none;
+    /* Remove bordas ao focar no botão */
+    padding: 0;
+    /* Sem espaçamento extra */
+    cursor: pointer;
+    /* Cursor como botão */
 }
 
 /* Estilo para destacar o botão selecionado */
 .image-button.selected img {
-    padding: 1px; /* Espaçamento interno para criar o "espaço" */
-    border: 3px solid #1d9bf0; /* Borda azul */
-    border-radius: 14px; /* Cantos arredondados */
-    box-shadow: 0 0 20px rgba(29, 155, 240, 0.7), 0 0 10px rgba(255, 255, 255, 0.5); /* Sombra para destaque */
-    transform: scale(1.3); /* Leve aumento de escala */
-    transition: transform 0.2s ease, box-shadow 0.3s ease, border 0.3s ease; /* Suavidade nas transições */
+    padding: 1px;
+    /* Espaçamento interno para criar o "espaço" */
+    border: 3px solid #1d9bf0;
+    /* Borda azul */
+    border-radius: 14px;
+    /* Cantos arredondados */
+    box-shadow: 0 0 20px rgba(29, 155, 240, 0.7), 0 0 10px rgba(255, 255, 255, 0.5);
+    /* Sombra para destaque */
+    transform: scale(1.3);
+    /* Leve aumento de escala */
+    transition: transform 0.2s ease, box-shadow 0.3s ease, border 0.3s ease;
+    /* Suavidade nas transições */
 }
 
 .dado-img {
-    background: transparent; /* Garante transparência total */
-    border: none; /* Remove bordas adicionais */
-    padding: 0; /* Remove qualquer espaçamento interno */
+    background: transparent;
+    /* Garante transparência total */
+    border: none;
+    /* Remove bordas adicionais */
+    padding: 0;
+    /* Remove qualquer espaçamento interno */
 }
 
 /* Adiciona um efeito ao passar o mouse */
 .image-button:hover img {
-    transform: scale(1.10); /* Aumenta o tamanho */
-    filter: brightness(1.2); /* Imagem mais clara */
-    transition: transform 0.4s ease, filter 0.4s ease; /* Transição suave */
+    transform: scale(1.10);
+    /* Aumenta o tamanho */
+    filter: brightness(1.2);
+    /* Imagem mais clara */
+    transition: transform 0.4s ease, filter 0.4s ease;
+    /* Transição suave */
 }
 
 /* Remove as setas de incremento e decremento dos inputs */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
-    -webkit-appearance: none; /* Remove o estilo no Chrome e Safari */
+    -webkit-appearance: none;
+    /* Remove o estilo no Chrome e Safari */
     margin: 0;
 }
 
 /* Remove as setas no Firefox */
 input[type="number"] {
-    -moz-appearance: textfield; /* Remove o estilo no Firefox */
+    -moz-appearance: textfield;
+    /* Remove o estilo no Firefox */
 }
 
 /* Estilo para os botões de incremento e decremento */
-#decrease, #increase {
-    width: 40px; /* Define o tamanho dos botões */
-    height: 40px; /* Garante a altura proporcional */
-    font-size: 1.2rem; /* Ajusta o tamanho da fonte */
-    font-weight: bold; /* Aumenta a espessura da fonte */
-    border-radius: 50%; /* Torna os botões redondos */
+#decrease,
+#increase {
+    width: 40px;
+    /* Define o tamanho dos botões */
+    height: 40px;
+    /* Garante a altura proporcional */
+    font-size: 1.2rem;
+    /* Ajusta o tamanho da fonte */
+    font-weight: bold;
+    /* Aumenta a espessura da fonte */
+    border-radius: 50%;
+    /* Torna os botões redondos */
     display: flex;
     justify-content: center;
     align-items: center;
     padding: 0;
-    background-color: #00274e; /* Cor de fundo clara */
-    border: 2px solid #000000; /* Borda azul */
-    color: #ffffff; /* Cor do texto */
-    transition: background-color 0.3s ease, transform 0.3s ease; /* Transições suaves */
+    background-color: #00274e;
+    /* Cor de fundo clara */
+    border: 2px solid #000000;
+    /* Borda azul */
+    color: #ffffff;
+    /* Cor do texto */
+    transition: background-color 0.3s ease, transform 0.3s ease;
+    /* Transições suaves */
 }
 
-#decrease:hover, #increase:hover {
-    background-color: #0054b4; /* Cor de fundo azul ao passar o mouse */
-    color: #ffffff; /* Texto branco ao passar o mouse */
-    transform: scale(1.1); /* Leve aumento do tamanho */
+#decrease:hover,
+#increase:hover {
+    background-color: #0054b4;
+    /* Cor de fundo azul ao passar o mouse */
+    color: #ffffff;
+    /* Texto branco ao passar o mouse */
+    transform: scale(1.1);
+    /* Leve aumento do tamanho */
 }
 
-#decrease:focus, #increase:focus {
-    outline: none; /* Remove o contorno padrão ao focar */
-    box-shadow: 0 0 5px rgba(0, 123, 255, 0.5); /* Sombra azul suave ao focar */
+#decrease:focus,
+#increase:focus {
+    outline: none;
+    /* Remove o contorno padrão ao focar */
+    box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+    /* Sombra azul suave ao focar */
+}
+
+body {
+    margin: 0;
+    overflow: hidden;
+}
+canvas {
+    position: fixed; /* Fixa o canvas no fundo da página */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1; /* Coloca o canvas atrás de outros elementos */
+}
+
+#h1_vencedor { /* Aplica as animações somente ao h1 com o id "h1_vencedor" */
+    font-family: 'Arial', sans-serif;
+    background: linear-gradient(to right, #ff6a00, #ff3a6b);
+    color: transparent;
+    -webkit-background-clip: text;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.6), 0 0 20px rgba(255, 255, 255, 0.4), 0 0 30px rgba(255, 255, 255, 0.2);
+    opacity: 0; /* Inicialmente invisível */
+    transform: translateY(50px); /* Desloca o texto para baixo */
+    animation: reveal 2s ease-out forwards, glow 1.5s ease-in-out infinite;
+}
+
+@keyframes reveal {
+    0% {
+        opacity: 0;
+        transform: translateY(50px); /* Começa abaixo da tela */
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0); /* Finaliza no centro */
+    }
+}
+
+@keyframes glow {
+    0% {
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.6), 0 0 20px rgba(255, 255, 255, 0.4), 0 0 30px rgba(255, 255, 255, 0.2);
+    }
+    50% {
+        text-shadow: 0 0 20px rgba(255, 255, 255, 1), 0 0 40px rgba(255, 255, 255, 0.8), 0 0 60px rgba(255, 255, 255, 0.6);
+    }
+    100% {
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.6), 0 0 20px rgba(255, 255, 255, 0.4), 0 0 30px rgba(255, 255, 255, 0.2);
+    }
 }

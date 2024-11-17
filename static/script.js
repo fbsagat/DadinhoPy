@@ -28,14 +28,14 @@ document.addEventListener('keydown', function (event) {
             logo.style.width = '20%';
         } else if (indiceAtual === 3) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '40vh';
+            logodiv.style.height = '28vh';
             logo.src = "../static/imagens/titulo.png";
             logo.style.width = '35%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '50vh';
+            logodiv.style.height = '38vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '45%';
+            logo.style.width = '35%';
         }
     }
 });
@@ -86,6 +86,7 @@ socket.on("update_user_list", (data) => {
 
             const pontuacaoDiv = document.createElement("div");
             pontuacaoDiv.className = "col-md-6";
+            pontuacaoDiv.id = `pontos_${user}`;
             pontuacaoDiv.textContent = data.pontos[index];
 
             userListItems.appendChild(headerRow); // Adiciona cada row à lista
@@ -101,6 +102,13 @@ socket.on("update_user_list", (data) => {
         }
     }
 });
+
+socket.on('atualizar_pontos', function (data) {
+    data.nomes.forEach((nome, index) => {
+        pontos = document.getElementById(`pontos_${nome}`);
+        pontos.textContent = data.pontos[index];
+    })
+})
 
 // Funções para o "master" do servidor
 socket.on("master_def", function (data) {
@@ -135,37 +143,37 @@ socket.on("mudar_pagina", function (data) {
             logo.style.width = '20%';
         } else if (data.pag_numero === 3) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '40vh';
+            logodiv.style.height = '28vh';
             logo.src = "../static/imagens/titulo.png";
             logo.style.width = '35%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '50vh';
+            logodiv.style.height = '38vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '45%';
+            logo.style.width = '35%';
         }
     }
 });
 
 // Função para preencher os dados do jogador na página de partida
 socket.on('meus_dados', function (data, index) {
-    const meus_dados = document.getElementById('meus_dados')
-    meus_dados.innerHTML = ""
-    const span = document.createElement('span')
-    span.className = "fs-5 text-white me-2"
-    span.innerText = "Seus dados: "
+    const meus_dados = document.getElementById('meus_dados');
+    meus_dados.innerHTML = "";
+    const span = document.createElement('span');
+    span.className = "fs-5 text-white me-2";
+    span.innerText = "Seus dados: ";
     meus_dados.appendChild(span);
 
     data.dados.forEach(dados => {
-        const col_dado = document.createElement('div')
-        col_dado.className = "col-auto"
+        const col_dado = document.createElement('div');
+        col_dado.className = "col-auto";
 
-        const img_dado = document.createElement('img')
-        img_dado.className = "img-fluid me-2"
+        const img_dado = document.createElement('img');
+        img_dado.className = "img-fluid me-2";
         img_dado.alt = `imagem ${index}`;
-        img_dado.width = 30
-        img_dado.height = 30
-        img_dado.src = `../static/imagens/dado/${dados}.png`
+        img_dado.width = 30;
+        img_dado.height = 30;
+        img_dado.src = `../static/imagens/dado/${dados}.png`;
 
         meus_dados.appendChild(col_dado);
         col_dado.appendChild(img_dado);
@@ -255,69 +263,108 @@ function createDiceSection(text, opacityClass, imageIndex) {
 
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
+    const espectador = data.espectador;
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
-
     tela_jogar_dados.innerHTML = ""
-    container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
-    container.style = '--bs-bg-opacity: .3;';
 
-    // Criação do botão Jogar Dados
-    const botao = document.createElement('button');
-    botao.id = 'dadobotao';
-    botao.className = 'btn btn-primary mt-2';
-    botao.textContent = 'Jogar dados';
-    botao.onclick = jogar_dados;  // Função que será chamada ao clicar
+    if (espectador === false) {
+        container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
+        container.style = '--bs-bg-opacity: .3;';
 
-    // Adicionando o botão ao container principal
-    container.appendChild(botao);
+        // Criação do botão Jogar Dados
+        const botao = document.createElement('button');
+        botao.id = 'dadobotao';
+        botao.className = 'btn btn-primary mt-2';
+        botao.textContent = 'Jogar dados';
+        botao.onclick = jogar_dados;  // Função que será chamada ao clicar
 
-    // Criação da div interna container para organizar as colunas
-    const containerInterno = document.createElement('div');
-    containerInterno.className = 'container mt-5';
+        // Adicionando o botão ao container principal
+        container.appendChild(botao);
 
-    // Criação da linha de dados
-    const row = document.createElement('div');
-    row.className = 'row d-flex justify-content-evenly';
+        // Criação da div interna container para organizar as colunas
+        const containerInterno = document.createElement('div');
+        containerInterno.className = 'container mt-5';
 
-    // Gerar um número aleatório entre 1 e 6 para a quantidade de dados
-    const quantidadeDeDados = data.quantidade;
+        // Criação da linha de dados
+        const row = document.createElement('div');
+        row.className = 'row d-flex justify-content-evenly';
 
-    // Loop para criar cada dado dinamicamente
-    for (let i = 1; i <= quantidadeDeDados; i++) {
-        const col = document.createElement('div');
-        col.className = 'col-4 text-center';
+        // Gerar um número aleatório entre 1 e 6 para a quantidade de dados
+        const quantidadeDeDados = data.quantidade;
 
-        const img = document.createElement('img');
-        img.id = `dado${i}`;
-        img.src = `../static/imagens/dado/${i}.png`;  // Ajuste o caminho da imagem conforme necessário
-        img.className = 'img-fluid mb-1';
-        img.alt = `Imagem ${i}`;
-        img.width = 75;
-        img.height = 75;
+        // Loop para criar cada dado dinamicamente
+        for (let i = 1; i <= quantidadeDeDados; i++) {
+            const col = document.createElement('div');
+            col.className = 'col-4 text-center';
 
-        col.appendChild(img);
-        row.appendChild(col);
+            const img = document.createElement('img');
+            img.id = `dado${i}`;
+            img.src = `../static/imagens/dado/${i}.png`;  // Ajuste o caminho da imagem conforme necessário
+            img.className = 'img-fluid mb-1';
+            img.alt = `Imagem ${i}`;
+            img.width = 75;
+            img.height = 75;
+
+            col.appendChild(img);
+            row.appendChild(col);
+        }
+
+        // Adicionando a linha de dados ao container interno
+        containerInterno.appendChild(row);
+
+        // Adicionando o container interno ao container principal
+        container.appendChild(containerInterno);
+
+        // Criação do elemento de áudio
+        const audio = document.createElement('audio');
+        audio.id = 'rollSound';
+        audio.src = '../static/sounds/dice-roll.mp3';
+
+        // Adicionando o elemento de áudio ao container principal
+        container.appendChild(audio);
+
+        // Adicionando o container principal ao corpo do documento
+        document.body.appendChild(container);
+
+        tela_jogar_dados.appendChild(container)
+    } else {
+        // Cria a div principal
+        const container = document.createElement('div');
+        container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
+        container.style.setProperty('--bs-bg-opacity', '.3');
+
+        // Cria o sub-container centralizado
+        const subContainer = document.createElement('div');
+        subContainer.className = 'container mt-5 d-flex justify-content-center align-items-center';
+
+        // Cria o texto com badge
+        const badge = document.createElement('span');
+        badge.className = 'fs-3 badge text-bg-primary text-wrap mb-2';
+        badge.style.width = '36rem';
+        badge.textContent = 'Aguarde, os dados estão rolando';
+
+        // Adiciona o badge ao sub-container
+        subContainer.appendChild(badge);
+
+        // Cria o spinner
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner-border text-primary';
+        spinner.setAttribute('role', 'status');
+
+        // Adiciona o texto acessível ao spinner
+        const visuallyHidden = document.createElement('span');
+        visuallyHidden.className = 'visually-hidden';
+        visuallyHidden.textContent = 'Loading...';
+        spinner.appendChild(visuallyHidden);
+
+        // Monta o DOM
+        container.appendChild(subContainer);
+        container.appendChild(spinner);
+
+        // Adiciona o container ao body ou a outro container desejado
+        tela_jogar_dados.appendChild(container);
     }
-
-    // Adicionando a linha de dados ao container interno
-    containerInterno.appendChild(row);
-
-    // Adicionando o container interno ao container principal
-    container.appendChild(containerInterno);
-
-    // Criação do elemento de áudio
-    const audio = document.createElement('audio');
-    audio.id = 'rollSound';
-    audio.src = '../static/sounds/dice-roll.mp3';
-
-    // Adicionando o elemento de áudio ao container principal
-    container.appendChild(audio);
-
-    // Adicionando o container principal ao corpo do documento
-    document.body.appendChild(container);
-
-    tela_jogar_dados.appendChild(container)
 })
 
 // Função para construir os cards (parte estática)
@@ -409,24 +456,29 @@ socket.on('atualizar_turno', function (dados) {
 
 // Função individual para verificar o jogador da vez no turno e construir formatação dinâmina para ele
 socket.on('meu_turno', function (data) {
-    turno_num = data.turno_num;
-    const jog_painel = document.getElementById('painel_jogada');
+    let turno_num = data.turno_num;
+    const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
-    jog_painel.style.display = "block"; // Mostra o painel
-    painel_aguarde.style.display = "none"; // Oculta painel aguarde
+
+    if (painel_jogada && painel_aguarde) {
+        painel_jogada.style.display = "block"; // Mostra o painel de jogada
+        painel_aguarde.style.display = "none"; // Oculta painel aguarde
+    }
+
     if (turno_num > 0) {
         const botao = document.getElementById('desconfiar');
-        botao.disabled = false; // Ativa o botão desconfiar
+        if (botao) {
+            botao.disabled = false; // Ativa o botão desconfiar
+        }
     }
 })
 
 // Função coletiva para os jogadores que não estão na vez e construir formatação dinâmina para eles
 socket.on('espera_turno', function (data) {
-    const jog_painel = document.getElementById('painel_jogada');
+    const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
-    jog_painel.style.display = "none"; // Oculta o painel
+    painel_jogada.style.display = "none"; // Oculta o painel de jogada
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
-    // window.alert('espera_turno');
 })
 
 // Função que atualiza cada rodada, executa a cada inicio de rodada
@@ -449,6 +501,18 @@ socket.on('reset_rodada', function (data) {
         const botao_desc = document.getElementById('desconfiar');
         botao_desc.disabled = true; // Desativa o input
     });
+});
+
+// Função que atualiza cada partida, executa a cada inicio de partida
+socket.on('reset_partida', function () {
+    const botao_fogos = document.getElementById('comemorar');
+    const bot_vencedor_fim = document.getElementById('bot_vencedor_fim');
+    const bot_confe_fim = document.getElementById('bot_confe_fim');
+    bot_vencedor_fim.disabled = false; // Reativa o input
+    bot_vencedor_fim.style.display = 'block' // Reativa o input
+    bot_confe_fim.disabled = false; // Reativa o input
+    bot_confe_fim.style.display = 'block'; // Reativa o input
+    botao_fogos.style.display = 'none'; // Desativa o input
 });
 
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
@@ -480,6 +544,22 @@ socket.on('formatador_coletivo', function (data) {
             // Aqui para todos os jogadores não sendo eu o da vez
         }
     });
+})
+
+socket.on('botao_vencedor_ativ', function () {
+    const botao_fogos = document.getElementById('comemorar');
+    botao_fogos.style.display = 'block';
+})
+
+socket.on('vencedor_da_partida', function (data) {
+    const h1_vencedor = document.getElementById('h1_vencedor');
+    h1_vencedor.innerHTML = `Vitória de ${data.nome}<br> Nessa bagaça!!!`;
+})
+
+socket.on('soltar_fogos', function () {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height / 2;
+    createFirework(x, y);
 })
 
 // Função para construir os cards na página conferência
@@ -559,6 +639,23 @@ socket.on('cards_conferencia', function (data) {
         card.appendChild(cardInner);
         cardContainer.appendChild(card);
     });
+})
+
+// Ações a aplicar no jogador que virou espectador, broadcast=False
+socket.on('espectador', function (data) {
+    const painel_jogada = document.getElementById('painel_jogada');
+    const bot_confe_fim = document.getElementById('bot_confe_fim');
+    const painel_aguarde = document.getElementById('painel_aguarde');
+    const meus_dados = document.getElementById('meus_dados');
+    meus_dados.innerHTML = "";
+    const span = document.createElement('span');
+    span.className = "fs-5 text-white me-2";
+    span.innerText = "ESPECTADOR";
+    meus_dados.appendChild(span);
+    bot_confe_fim.style.display = 'none';
+    painel_aguarde.style.display = 'none';
+    painel_jogada.style.display = 'none';
+
 })
 
 document.querySelectorAll('.image-button').forEach(button => {
@@ -704,11 +801,11 @@ function enviar_apelido() {
 
 function iniciar_partida() {
     const bot_iniciar = document.getElementById('iniciar_partida');
-    socket.emit('iniciar_partida')
+    socket.emit('iniciar_partida');
 }
 
 function jogar_dados() {
-    socket.emit('jogar_dados')
+    socket.emit('jogar_dados');
     const bot_iniciar = document.getElementById('jogar_dados');
     constant = dadobt = document.getElementById('dadobotao');
     dadobt.disabled = true; // Desativa o input
@@ -716,14 +813,23 @@ function jogar_dados() {
 
 function conferencia_final() {
     const botao = document.getElementById('bot_confe_fim');
-    socket.emit('conferencia_final')
+    socket.emit('conferencia_final');
     botao.disabled = true; // Desativa o input
 }
 
+function vencedor_final() {
+    const botao = document.getElementById('bot_vencedor_fim');
+    socket.emit('vencedor_final');
+    botao.disabled = true; // Desativa o input
+}
+
+document.getElementById('comemorar').addEventListener('click', () => {
+    socket.emit('foguetear_click');
+});
 
 function verificr_enter(event, button) {
     if (event.key === 'Enter' && button === 'button') {
-        enviar_apelido()
+        enviar_apelido();
     }
 }
 
@@ -779,3 +885,56 @@ document.querySelectorAll('.image-button').forEach(button => {
         selectedImageValue = button.getAttribute('data-value');
     });
 });
+
+const canvas = document.getElementById('fireworks');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let particles = [];
+
+function createFirework(x, y) {
+    const colors = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33A8'];
+    const numParticles = 50;
+
+    for (let i = 0; i < numParticles; i++) {
+        particles.push({
+            x: x,
+            y: y,
+            angle: Math.random() * 2 * Math.PI,
+            speed: Math.random() * 5 + 2,
+            radius: Math.random() * 2 + 1,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            life: 100
+        });
+    }
+}
+
+function updateParticles() {
+    particles = particles.filter(p => p.life > 0);
+    particles.forEach(p => {
+        p.x += Math.cos(p.angle) * p.speed;
+        p.y += Math.sin(p.angle) * p.speed;
+        p.life -= 2;
+        p.radius *= 0.98; // Decay the radius
+    });
+}
+
+function drawParticles() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.closePath();
+    });
+}
+
+function animate() {
+    updateParticles();
+    drawParticles();
+    requestAnimationFrame(animate);
+}
+
+animate();

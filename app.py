@@ -54,22 +54,26 @@ def escolher_apelido(data):
     """
     Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo
     """
-    apelido = data["apelido_msg"]
-    client_id = request.sid
-    jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
-    apelido_n = lobby_unico.verificar_apelido(apelido)
-    jogador.username = apelido_n
-    emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
-    atualizar_lista_usuarios()
+    apelido = validar_input(data["apelido_msg"])
+    if apelido:
+        client_id = request.sid
+        jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
+        apelido_n = lobby_unico.verificar_apelido(apelido)
+        jogador.username = apelido_n
+        emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
+        atualizar_lista_usuarios()
 
 
 @socketio.on('iniciar_partida')
 def iniciar_partida():
+    # dados_qtd = int(data['dados_qtd'])
+    # print('dados_qtd', dados_qtd)
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         partida = lobby_unico.construir_partida()
         partida.construir_rodada()
+        print('Iniciando nova partida: ', partida)
 
 
 @socketio.on('jogar_dados')
@@ -112,13 +116,14 @@ def aposta(dados):
     client_id = request.sid
     jogador = jogadores_online[client_id]
     rodada = jogador.rodada_atual
-    print('')
-    print(f"{jogador.username} apostou na rodada {rodada}")
-    print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
-    if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
-        print('PASSOU')
-        # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
-        jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
+    if rodada:
+        print('')
+        print(f"{jogador.username} apostou na rodada {rodada}")
+        print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
+        if jogador.chave_secreta == chave and rodada.vez_atual == jogador:
+            print('PASSOU')
+            # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
+            jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 
 
 @socketio.on('desconfiar')
@@ -141,6 +146,24 @@ def conferencia_final():
         jogador.rodada_atual.conferiram += 1
         if jogador.rodada_atual.conferiram == len(jogador.rodada_atual.jogadores):
             jogador.partida_atual.construir_rodada()
+
+
+@socketio.on('vencedor_final')
+def vencedor_final():
+    client_id = request.sid
+    jogador = jogadores_online[client_id]
+    jogador.lobby_atual.conferiram_vencedor += 1
+    if jogador.lobby_atual.conferiram_vencedor == len(jogador.lobby_atual.jogadores):
+        mudar_pagina(0, broadcast=True)
+
+
+@socketio.on('foguetear_click')
+def foguetear():
+    client_id = request.sid
+    jogador = jogadores_online[client_id]
+    if jogador.rodada_atual:
+        if jogador == jogador.rodada_atual.vencedor:
+            emit('soltar_fogos', broadcast=True)
 
 
 if __name__ == '__main__':

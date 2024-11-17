@@ -14,10 +14,11 @@
 </head>
 
 <body>
+    <canvas id="fireworks"></canvas>
 
-    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 50vh;">
+    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 38vh;">
         <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
-            style="display: block; width: 45%; height: auto;">
+            style="display: block; width: 35%; height: auto;">
     </div>
 
     <div class="mt-4 container-fluid align-items-center">
@@ -30,24 +31,56 @@
                     onkeydown="verificr_enter(event, 'button')" placeholder="Escreva seu nome..." maxlength="10">
                 <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()" disabled>Pronto</button>
             </div>
-            <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded" id="lista_de_jogadores"
-                style="--bs-bg-opacity: .3; width: 400px;">
+
+            <div class="container my-4 p-3 bg-dark text-light border border-info rounded gamer-container"
+                id="lista_de_jogadores"
+                style="--bs-bg-opacity: .8; width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
                 <small>Aguardando jogadores...</small>
             </div>
-            <div class="center-button mt-4">
-                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()" style="display: none;"
-                    disabled>Iniciar partida
-                </button>
+
+            <!-- <form id="diceForm">
+                <fieldset id="diceForm_fieldset" style="display: none;">
+                    <small class="form-label text-light">Número de dados:</legend>
+                    <div class="d-flex justify-content-center gap-3">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice1" value="1" checked>
+                            <label class="form-check-label text-light" for="dice1">1</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice2" value="2">
+                            <label class="form-check-label text-light" for="dice2">2</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice3" value="3">
+                            <label class="form-check-label text-light" for="dice3">3</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice4" value="4">
+                            <label class="form-check-label text-light" for="dice4">4</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice5" value="5">
+                            <label class="form-check-label text-light" for="dice5">5</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="diceCount" id="dice6" value="6">
+                            <label class="form-check-label text-light" for="dice6">6</label>
+                        </div>
+                    </div>
+                </fieldset>
+            </form>         -->
+            <div class="d-flex justify-content-center mt-1">
+                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
             </div>
+
         </div>
         <!-- TELA JOGADORES FIM -->
         <!-- TELA JOGAR DADOS INICIO (1) -->
         <div id="tela_jogar_dados" class="tela_jogar_dados container-fluid text-center" style="display: none;">
 
+            <!-- Tela dados -->
             <!-- <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded"
                 style="--bs-bg-opacity: .3;">
-
-
                 <button id="dadobotao" class="btn btn-primary mt-2" onclick="jogar_dados()">Jogar dados</button>
                 <div class="container mt-5">
                     <div class="row d-flex justify-content-evenly">
@@ -78,8 +111,20 @@
                     </div>
                 </div>
                 <audio id="rollSound" src="../static/sounds/dice-roll.mp3"></audio>
-
             </div> -->
+            <!-- Fim da Tela dados -->
+            <!-- Tela espectador -->
+            <!-- <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded"
+                style="--bs-bg-opacity: .3;">
+                <div class="container mt-5 d-flex justify-content-center align-items-center">
+                    <span class="fs-3 badge text-bg-primary text-wrap mb-2" style="width: 36rem;">Aguarde, os dados
+                        estão rolando</span>
+                </div>
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div> -->
+            <!-- Fim da Tela espectador -->
         </div>
     </div>
     <!-- TELA JOGAR DADOS FIM -->
@@ -180,7 +225,7 @@
 
         </div>
         <br>
-        <div id="painel_jogada" style="display: block;">
+        <div id="painel_jogada" style="display: none;">
 
             <div class="container-fluid text-center">
                 <span class="fs-4 badge text-bg-primary text-wrap mb-3" style="width: 12rem;">É a sua vez</span>
@@ -240,7 +285,8 @@
 
             <div class="container-fluid text-center">
                 <div class="d-flex justify-content-center align-items-center">
-                    <input id="desconfiar" class="btn btn-warning mx-2" type="button" value="Desconfiar" disabled>
+                    <input id="desconfiar" class="btn btn-warning mx-2" type="button" value="Desconfiar" disabled
+                        style="width: 130px;">
                     <div class="d-flex align-items-center justify-content-center">
                         <!-- Botão de diminuir -->
                         <button id="decrease" class="btn btn-outline-secondary" type="button">▼</button>
@@ -251,13 +297,16 @@
                         <!-- Botão de aumentar -->
                         <button id="increase" class="btn btn-outline-secondary" type="button">▲</button>
                     </div>
-                    <input id="apostar" class="btn btn-success mx-2" type="button" value="Apostar">
+                    <input id="apostar" class="btn btn-success mx-2" type="button" value="Apostar"
+                        style="width: 130px;">
                 </div>
             </div>
 
         </div>
-        <div id="painel_aguarde" style="display: none;">
-            <span class="fs-4 badge text-bg-warning text-wrap mb-1 me-1" style="width: 16rem;">Aguarde a sua vez</span>
+        <!-- ESSA MERDA NÃO QUER SUMIR -->
+        <div class="d-flex justify-content-center align-items-center">
+            <span id="painel_aguarde" class="fs-4 badge text-bg-warning text-wrap mb-1 me-1"
+                style="width: 16rem; display: none;">Aguarde a sua vez</span>
         </div>
 
     </div>
@@ -316,31 +365,32 @@
 
             </div>
         </div>
-        <button id="bot_confe_fim" class="btn btn-primary mt-2" onclick="conferencia_final()">Ok</button>
+        <div class="d-flex justify-content-center align-items-center">
+            <button id="bot_confe_fim" class="btn btn-primary mt-2" onclick="conferencia_final()"
+                style="width: 80px; display: block;">Ok</button>
+        </div>
     </div>
     <!-- TELA CONFERENCIA FIM -->
     <!-- TELA VITORIA INICIO (4) -->
     <div id="tela_vitoria" class="tela_vitoria container-fluid text-center" style="display: none;">
-        <h1 class="display-4 fw-bold text-primary hero">Vitória de Fábio!!!</h1>
+        <h1 id="h1_vencedor" class="display-4 fw-bold text-center hero mb-5" style="font-size: 4rem;">
+        </h1>
+        <div class="d-flex flex-column justify-content-center align-items-center">
+            <button id="comemorar" class="btn btn-success mt-3" style="z-index: 10; display: none;">Comemorar!</button>
+            <button id="bot_vencedor_fim" class="btn btn-primary mt-3" onclick="vencedor_final()"
+                style="width: 80px; display: block;">Ok</button>
+        </div>
+
     </div>
     <!-- TELA VITORIA FIM -->
     </div>
 
     <script src="/static/script.js">
     </script>
-    <script src="/static/pag1.js">
-    </script>
-    <script src="/static/pag2.js">
-    </script>
-    <script src="/static/pag3.js">
-    </script>
-    <script src="/static/pag4.js">
-    </script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous">
         </script>
-
 </body>
 
 </html>
