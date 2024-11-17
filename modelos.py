@@ -169,8 +169,8 @@ class Partida:
     def construir_rodada(self):
         verificar = self.verificar_partida_anterior()
 
-        print('\nJogadores da partida: ', self.jogadores)
-        print('Jogadores do lobby: ', self.do_lobby.jogadores, '\n')
+        # print('\nJogadores da partida: ', self.jogadores)
+        # print('Jogadores do lobby: ', self.do_lobby.jogadores, '\n')
 
         # ESPECTADOR \/
         for lobby_jogador in self.do_lobby.jogadores:
@@ -234,14 +234,14 @@ class Partida:
         """
         rodada_numero = len(self.rodadas) + 1
         if rodada_numero > 1:
-            print('rodada numero', rodada_numero, "> 1")
+            # print('rodada numero', rodada_numero, "> 1")
 
             # Pegar o perdedor e o vencedor da última partida
             perdedor = self.rodadas[-1].perdedor if hasattr(self.rodadas[-1], 'perdedor') else None
             vencedor = self.rodadas[-1].vencedor if hasattr(self.rodadas[-1], 'vencedor') else None
 
-            print('PERDEDOR da ultima rodada joga nessa: ', perdedor.username)
-            print('VENCEDOR da ultima rodada joga nessa: ', vencedor.username)
+            # print('PERDEDOR da ultima rodada joga nessa: ', perdedor.username)
+            # print('VENCEDOR da ultima rodada joga nessa: ', vencedor.username)
 
             # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado pra ele
             perdedor.dados_qtd -= 1
@@ -252,20 +252,20 @@ class Partida:
                 perdedor.rodada_atual = None
                 perdedor.turno_atual = None
                 self.jogadores.remove(perdedor)
-                print('self.jogadores.remove(perdedor)', perdedor)
-                print('Perdedor ', perdedor)
-                print('Jogadores ', self.jogadores)
+                # print('self.jogadores.remove(perdedor)', perdedor)
+                # print('Perdedor ', perdedor)
+                # print('Jogadores ', self.jogadores)
             if len(self.jogadores) < 2:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
             else:
                 if perdedor in self.jogadores:
-                    print(perdedor.username, 'perdeu um dado')
+                    # print(perdedor.username, 'perdeu um dado')
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
                 else:
-                    print(vencedor.username, 'inicia a rodada por ter tirado ', perdedor.username)
+                    # print(vencedor.username, 'inicia a rodada por ter tirado ', perdedor.username)
                     return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
         else:
-            print('SORTEADO joga nessa rodada pois é a primeira: ', self.jogador_sorteado.username)
+            # print('SORTEADO joga nessa rodada pois é a primeira: ', self.jogador_sorteado.username)
             return {'vez_atual': self.jogador_sorteado, 'rodada_numero': rodada_numero}
 
     def buscar_jogador_pelo_client_id(self, client_id):
@@ -281,7 +281,7 @@ class Partida:
         emit("mudar_pagina", {'pag_numero': 4}, broadcast=True)
         nomes = [jogador.username for jogador in self.do_lobby.jogadores if jogador.username is not None]
         pontos = [jogador.pontos for jogador in self.do_lobby.jogadores if jogador.username is not None]
-        print(nomes, pontos)
+        # print(nomes, pontos)
         emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, broadcast=True)
 
 
@@ -329,9 +329,9 @@ class Rodada:
                 self.coringa_atual_qtd = dado_qtd
                 self.coringa_atual_jogador = jogador
             turno.executar_turno()
-            print('É o turno de: ', turno.do_jogador.username)
+            # print('É o turno de: ', turno.do_jogador.username)
             o_da_vez = self.selecionar_proximo_jogador_na_lista(turno.do_jogador)
-            print('Próximo da vez: ', o_da_vez.username)
+            # print('Próximo da vez: ', o_da_vez.username)
             self.atualizar_front_pro_da_vez(o_da_vez)
             self.vez_atual = o_da_vez
         else:
@@ -436,7 +436,7 @@ class Rodada:
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
         Esta função não faz nenhuma validação de jogador da vez, deve ser feita em outro lugar.
         """
-        print('Construindo front para: ', jogador_atual.username)
+        # print('Construindo front para: ', jogador_atual.username)
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              broadcast=True)

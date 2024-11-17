@@ -73,7 +73,7 @@ def iniciar_partida():
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         partida = lobby_unico.construir_partida()
         partida.construir_rodada()
-        print('Iniciando nova partida: ', partida)
+        # print('Iniciando nova partida: ', partida)
 
 
 @socketio.on('jogar_dados')
@@ -117,11 +117,11 @@ def aposta(dados):
     jogador = jogadores_online[client_id]
     rodada = jogador.rodada_atual
     if rodada:
-        print('')
-        print(f"{jogador.username} apostou na rodada {rodada}")
-        print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
+        # print('')
+        # print(f"{jogador.username} apostou na rodada {rodada}")
+        # print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
         if jogador.chave_secreta == chave and rodada.vez_atual == jogador:
-            print('PASSOU')
+            # print('PASSOU')
             # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
             jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 

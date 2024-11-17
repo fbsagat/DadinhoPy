@@ -17,7 +17,6 @@ def atualizar_lista_usuarios():
     o_master = lobby_unico.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
-    print(pontos)
     emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, broadcast=True)
 
 
