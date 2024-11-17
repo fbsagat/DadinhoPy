@@ -56,7 +56,7 @@ class Lobby:
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
 
-    def construir_partida(self):
+    def construir_partida(self, dados_qtd):
         # print('Lobby: Construindo partida')
         # nomes = []
         # for jogador in self.jogadores:
@@ -64,7 +64,8 @@ class Lobby:
         emit('reset_partida', broadcast=True)
         self.conferiram_vencedor = 0
         partida_numero = len(self.partidas) + 1
-        partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero)
+        partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
+                          dados_qtd=dados_qtd)
         self.partidas.append(partida)
         for jogador in self.jogadores:
             jogador.partida_atual = partida
@@ -153,9 +154,9 @@ class Partida:
     Representa o momento em que todos os jogadores estão no jogo, até o momento em que sobra um ganhador.
     """
 
-    def __init__(self, do_lobby, jogadores, partida_numero):
+    def __init__(self, do_lobby, jogadores, partida_numero, dados_qtd):
         self.partida_num = partida_numero
-        self.dados_qtd = 1
+        self.dados_qtd = dados_qtd
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby

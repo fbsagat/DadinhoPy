@@ -71,7 +71,7 @@ def iniciar_partida():
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
-        partida = lobby_unico.construir_partida()
+        partida = lobby_unico.construir_partida(dados_qtd=3)
         partida.construir_rodada()
         # print('Iniciando nova partida: ', partida)
 
