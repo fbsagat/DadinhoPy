@@ -519,14 +519,12 @@ socket.on('reset_partida', function () {
 
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
 socket.on('formatador_coletivo', function (data) {
-    window.alert('formatador_coletivo')
     const jogadores = data.jogadores_nomes;
     const jog_da_vez = data.jogador_inicial_nome;
     const eu = nome_jogador;
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_${jogador}`);
-        window.alert(`Jogador da vez: ${jogador}, eu ${eu}`)
 
         if (jogador === eu) {
             if (jogador === jog_da_vez) {
