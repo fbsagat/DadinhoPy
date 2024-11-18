@@ -38,14 +38,13 @@ def handle_disconnect():
     """
     Esta função é executada no momento da desconexão de um cliente web do servidor.
     Esta função deve remover o jogador da partida e caso este jogador seja um master e haja mais jogadores no lobby
-    dele, Selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do
-     lobby, caso não seja um master, apenas remover, caso apenas ele no lobby, reiniciar o servidor(por enquanto).
+    dele, selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do
+     lobby, caso não seja um master, apenas remover, caso apenas ele no lobby, reinicia tudo.
     """
     client_id = request.sid
     lobby_unico.remover_jogador(client_id)
     del jogadores_online[client_id]
     if lobby_unico.contar_jogadores() > 0:
-        # Definir novo master
         lobby_unico.definir_master()
     atualizar_lista_usuarios()
 
@@ -53,20 +52,26 @@ def handle_disconnect():
 @socketio.on('apelido')
 def escolher_apelido(data):
     """
-    Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo
+    Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo, antes faz umas validações.
     """
-    apelido = validar_input(data["apelido_msg"])
+    validar_apelido = validar_input(data["apelido_msg"])
+    apelido = data["apelido_msg"] if validar_apelido else 'NOME_BUGADO'
     if apelido:
         client_id = request.sid
         jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
-        apelido_n = lobby_unico.verificar_apelido(apelido)
-        jogador.username = apelido_n
-        emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
-        atualizar_lista_usuarios()
+        if jogador.partida_atual is None and jogador.rodada_atual is None and jogador.turno_atual is None:
+            apelido_n = lobby_unico.verificar_apelido(apelido)
+            jogador.username = apelido_n
+            emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
+            atualizar_lista_usuarios()
 
 
 @socketio.on('iniciar_partida')
 def iniciar_partida(dados):
+    """
+    Esta função inicia uma nova partida, é executada perlo master do lobby,
+    :param dados: Vem do front, é o número de dados que cada jogador recebe para jogar.
+    """
     dados_qtd = int(dados['dados_qtd'])
     valido = validar_numero(dados_qtd)
     client_id = request.sid
@@ -74,13 +79,13 @@ def iniciar_partida(dados):
     if jogador.master is True and lobby_unico.contar_jogadores() >= 2:
         partida = lobby_unico.construir_partida(dados_qtd=dados_qtd if valido else 1)
         partida.construir_rodada()
-        # print('Iniciando nova partida: ', partida)
 
 
 @socketio.on('jogar_dados')
 def jogar_dados():
     """
-    Esta função envia os números dos dados aos jogadores, cada jogador recebe seus respectivos dados sorteados
+    Esta função envia os números dos dados sorteados aos jogadores, cada jogador recebe seus
+    respectivos dados sorteados.
     """
     client_id = request.sid
     jogador = lobby_unico.buscar_jogador_pelo_client_id(client_id)
@@ -105,12 +110,16 @@ def joguei_dados(dados):
         rodada = jogador.rodada_atual
         # Executar isso \/ quando o último jogar os dados
         if rodada.verificar_se_todos_ja_jogaram_seus_dados():
-            time.sleep(random.randint(3, 4))
+            time.sleep(random.randint(4, 5))
             mudar_pagina(2, broadcast=True)
 
 
 @socketio.on('apostar')
 def aposta(dados):
+    """
+    Função executada pelo jogador quando ele faz uma aposta, mas antes verifica se o jogador está em uma rodada e se
+    ele é o da vez no turno.
+    """
     chave = dados['dados']['chave'][:]
     dados = dados['dados']
     del dados['chave']
@@ -118,29 +127,31 @@ def aposta(dados):
     jogador = jogadores_online[client_id]
     rodada = jogador.rodada_atual
     if rodada:
-        # print('')
-        # print(f"{jogador.username} apostou na rodada {rodada}")
-        # print('Verificar se é o da vez: Vez de:', rodada.vez_atual.username, 'Quem jogou:', jogador.username)
         if jogador.chave_secreta == chave and rodada.vez_atual == jogador:
-            # print('PASSOU')
-            # Se o jogador está em uma rodada / Se o jogador é realmente o dono do username / Se é a vez dele na rodada
             jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados)
 
 
 @socketio.on('desconfiar')
 def desconfiar(dados):
+    """
+    Função executada pelo jogador quando ele desconfia de uma aposta, mas antes verifica se o jogador está em uma
+    rodada e se ele é o da vez no turno.
+    :param dados: Chave do jogador para verificação de autenticidade.
+    """
     chave = dados['dados']['chave']
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.rodada_atual and jogador.rodada_atual.vez_atual == jogador and jogador.chave_secreta == chave and len(
             jogador.rodada_atual.turnos) > 0:
-        # Verifica se o jogador que enviou a requisição é o da vez
-        # Verificar se já é a partir do segundo turno
         jogador.rodada_atual.desconfiar(jogador=jogador)
 
 
 @socketio.on('conferencia_final')
 def conferencia_final():
+    """
+    Quanto todos os participantes da rodada clicam em ok, na conferência final da rodada, esta função engatilha
+    uma nova rodada na partida.
+    """
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.rodada_atual:
@@ -151,6 +162,10 @@ def conferencia_final():
 
 @socketio.on('vencedor_final')
 def vencedor_final():
+    """
+    Quanto todos os participantes da rodada clicam em ok, na tela de vencedor, esta função engatilha
+    uma nova partida no lobby.
+    """
     client_id = request.sid
     jogador = jogadores_online[client_id]
     jogador.lobby_atual.conferiram_vencedor += 1
@@ -160,6 +175,9 @@ def vencedor_final():
 
 @socketio.on('foguetear_click')
 def foguetear():
+    """
+    Função que torna os fogos de comemoração compartilhados com todos na partida.
+    """
     client_id = request.sid
     jogador = jogadores_online[client_id]
     if jogador.rodada_atual:

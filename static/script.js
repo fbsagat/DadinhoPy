@@ -1,44 +1,45 @@
-// Definindo uma constante para a tecla "K"
-const TECLA_K = 'k';
 let indiceAtual = 0;
-// Função para capturar a tecla "K"
-document.addEventListener('keydown', function (event) {
-    // Verifica se a tecla pressionada é "K" (minúscula ou maiúscula)
-    if (event.key === TECLA_K || event.key === TECLA_K.toUpperCase()) {
-        const logo = document.getElementById('titulo_img');
-        const logodiv = document.getElementById('div_titulo_img');
-        const paginas = [
-            document.getElementById('tela_jogadores'),
-            document.getElementById('tela_jogar_dados'),
-            document.getElementById('tela_partida'),
-            document.getElementById('tela_conferencia'),
-            document.getElementById('tela_vitoria')
-        ]
-        let indicie_atual = 0;
-        paginas[indiceAtual].style.display = "none";
-        // Atualiza o índice para a próxima página
-        indiceAtual = (indiceAtual + 1) % paginas.length; // Ciclo entre 0 e o número de páginas
-        // Mostra a próxima página
-        paginas[indiceAtual].style.display = "block";
 
-        if (indiceAtual === 2) {
-            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '10vh';
-            logo.src = "../static/imagens/titulo_p.png";
-            logo.style.width = '25%';
-        } else if (indiceAtual === 3) {
-            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '45vh';
-            logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '40%';
-        } else {
-            // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '45vh';
-            logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '40%';
-        }
-    }
-});
+// // Função para capturar a tecla "K"
+// // Definindo uma constante para a tecla "K"
+// const TECLA_K = 'k';
+// document.addEventListener('keydown', function (event) {
+//     // Verifica se a tecla pressionada é "K" (minúscula ou maiúscula)
+//     if (event.key === TECLA_K || event.key === TECLA_K.toUpperCase()) {
+//         const logo = document.getElementById('titulo_img');
+//         const logodiv = document.getElementById('div_titulo_img');
+//         const paginas = [
+//             document.getElementById('tela_jogadores'),
+//             document.getElementById('tela_jogar_dados'),
+//             document.getElementById('tela_partida'),
+//             document.getElementById('tela_conferencia'),
+//             document.getElementById('tela_vitoria')
+//         ]
+//         let indicie_atual = 0;
+//         paginas[indiceAtual].style.display = "none";
+//         // Atualiza o índice para a próxima página
+//         indiceAtual = (indiceAtual + 1) % paginas.length; // Ciclo entre 0 e o número de páginas
+//         // Mostra a próxima página
+//         paginas[indiceAtual].style.display = "block";
+
+//         if (indiceAtual === 2) {
+//             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+//             logodiv.style.height = '10vh';
+//             logo.src = "../static/imagens/titulo_p.png";
+//             logo.style.width = '25%';
+//         } else if (indiceAtual === 3) {
+//             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+//             logodiv.style.height = '45vh';
+//             logo.src = "../static/imagens/titulo.png";
+//             logo.style.width = '40%';
+//         } else {
+//             // logo.style.display = "block"; // Exibe o logotipo
+//             logodiv.style.height = '45vh';
+//             logo.src = "../static/imagens/titulo.png";
+//             logo.style.width = '40%';
+//         }
+//     }
+// });
 
 // Embaralhar os dados ao iniciar
 window.onload = escolherImagemAleatoria;

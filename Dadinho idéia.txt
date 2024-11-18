@@ -74,26 +74,3 @@ lobby > Partidas > Rodadas > turnos
 3. Numa rodada existirão vários turnos, onde pode-se aumentar uma aposta, feita no turno anterior pelo jogador anterior,
     ou desconfiar, por parte do jogador da vez.
 4. Turno é o momento de uma jogada de um jogador.
-
-
-
-
-Validador de nome, colocar mensagem de aviso de nome inválido
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

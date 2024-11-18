@@ -23,14 +23,14 @@ class Jogador:
         self.turno_atual = turno_atual
         self.entrou = datetime.now()
 
+    def __repr__(self):
+        return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
+                f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
+
     @classmethod
     def criar_jogador(cls, client_id, master=False):
         """Cria e retorna uma nova instância de Jogador."""
         return cls(client_id=client_id, master=master)
-
-    def __repr__(self):
-        return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
-                f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
 
     def jogar_dados(self):
         """Rola os seus dados e retorna o resultado como uma lista de valores."""
@@ -57,12 +57,11 @@ class Lobby:
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
 
     def construir_partida(self, dados_qtd):
-        # print('Lobby: Construindo partida')
-        # nomes = []
-        # for jogador in self.jogadores:
-        #     nomes.append(jogador.username)
-        emit('reset_partida', broadcast=True)
-        self.conferiram_vencedor = 0
+        """
+        Constrói uma partida em um lobby.
+        :param dados_qtd: A quantidade de dados para cada jogador nesta partida.
+        """
+        emit('reset_partida', broadcast=True)  # Arruma algumas coisas da partida anterior no front-end
         partida_numero = len(self.partidas) + 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
                           dados_qtd=dados_qtd)
@@ -70,9 +69,14 @@ class Lobby:
         for jogador in self.jogadores:
             jogador.partida_atual = partida
             jogador.partidas.append(partida)
+            emit('desativar_username_edit', to=jogador.client_id)
         return partida
 
     def verificar_apelido(self, nome):
+        """
+        Faz umas validações de nomes.
+        :param nome: Nome que vem do front-end.
+        """
         nomes = [jogador.username for jogador in self.jogadores]
         if nome not in nomes:  # Verifica se o nome é único
             return nome  # Se for único, retorna o nome original
@@ -85,42 +89,44 @@ class Lobby:
         return novo_nome  # Retorna o novo nome único
 
     def verificar_jogador_master(self):
-        # Verifica se algum jogador é master
+        """
+        Verifica se algum jogador é master.
+        """
         for jogador in self.jogadores:
             if jogador.master:
                 return True
         return False
 
     def definir_master(self):
-        # Verifica se já existe um jogador master
+        """
+        Define um novo master caso precise.
+        """
         if self.verificar_jogador_master():
-            # print("Já existe um jogador master.")
             return
         else:
-            # Ordena os jogadores por ordem de entrada e define o primeiro como master
             self.jogadores.sort(key=lambda jogador: jogador.entrou)
             if self.jogadores:
                 self.jogadores[0].master = True
-                # print(f"O jogador {self.jogadores[0].username} foi definido como master.")
 
     def adicionar_jogador(self, jogador):
+        """
+        Adiciona um jogador novo no lobby.
+        """
         if isinstance(jogador, Jogador):
             self.jogadores.append(jogador)
             jogador.lobby_atual = self
-        # else:
-        #     print("Somente objetos do tipo Jogador podem ser adicionados.")
 
     def remover_jogador(self, client_id):
+        """
+        Remove um jogador do lobby.
+        """
         if not isinstance(client_id, str):
-            # print("Erro: client_id deve ser uma string.")
             return
         else:
             for jogador in self.jogadores:
                 if jogador.client_id == client_id:
                     self.jogadores.remove(jogador)
-                    # print(f"Jogador com client_id {client_id} removido.")
                     return
-            # print(f"Jogador com client_id {client_id} não encontrado.")
 
     def buscar_jogador_pelo_client_id(self, client_id):
         for jogador in self.jogadores:
@@ -168,27 +174,31 @@ class Partida:
         return txt
 
     def construir_rodada(self):
+        """
+        Constrói uma nova rodada numa partida.
+        """
+        # verifica a partida anterior, caso exista, para tomar decisões para a partida nova sendo criada.
         verificar = self.verificar_partida_anterior()
 
-        # print('\nJogadores da partida: ', self.jogadores)
-        # print('Jogadores do lobby: ', self.do_lobby.jogadores, '\n')
-
         # ESPECTADOR \/
+        # transforma(muda algumas coisas no front-end), o jogador em espectador quando ele perde todos os dados.
         for lobby_jogador in self.do_lobby.jogadores:
             if lobby_jogador.client_id not in [jogador.client_id for jogador in self.jogadores]:
-                # print('ESPECTADOR: ', lobby_jogador.username, 'tem', lobby_jogador.dados_qtd, 'dados...')
                 emit('espectador', {'nome': lobby_jogador.username}, to=lobby_jogador.client_id)
                 emit('construtor_dados', {'quantidade': lobby_jogador.dados_qtd, 'espectador': True},
                      to=lobby_jogador.client_id)
         # ESPECTADOR /\
 
+        # Terminar a rodada caso só tenha um jogador com dado(s) sobrando.
         vez_atual = verificar['vez_atual']
         rodada_numero = verificar['rodada_numero']
         if 'final' in verificar and verificar['final']:
+            # Declara este jogador o vencedor da partida.
             self.declarar_vencedor(verificar['vez_atual'])
         else:
-            nomes = [jogador.username for jogador in self.jogadores]
+            # Caso ainda tenhas dois ou mais, continua tudo:
             turnos_lista = {}
+            # Prepara o front-end
             for jogador in self.jogadores:
                 turnos_lista[jogador.username] = [[0, 0]]
             emit("construtor_html",
@@ -197,9 +207,11 @@ class Partida:
             emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, broadcast=True)
             emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, broadcast=True)
 
+            # cria a rodada.
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
                             vez_atual=vez_atual)
             self.rodadas.append(rodada)
+            # Arruma o front pro jogador da vez na rodada.
             rodada.atualizar_front_pro_da_vez(jogador_atual=vez_atual)
             nomes = []
             jogadores_dados_qtd = []
@@ -210,6 +222,7 @@ class Partida:
                 jogador.dados_qtd = self.dados_qtd if rodada_numero == 1 else jogador.dados_qtd
                 nomes.append(jogador.username)
                 jogadores_dados_qtd.append(jogador.dados_qtd)
+            # Jogando os dados da galera
             rodada.jogar_dados()
             dados_mesa = 0
 
@@ -230,43 +243,33 @@ class Partida:
 
     def verificar_partida_anterior(self):
         """
-        Esta funçào toma as decisões de quem será o próximo jogador a jogar na rodada criada baseado nas informações
-        da rodada anterior, ou caso não exista, ou sej, é a primeira rodada.
+        Esta função toma as decisões de quem será o próximo jogador a jogar na rodada criada baseado nas informações
+        da rodada anterior, ou caso não exista, ou seja, é a primeira rodada, sortear um jogador.
         """
         rodada_numero = len(self.rodadas) + 1
+        # Se não for a primeira rodada, escolher alguém para iniciar.
         if rodada_numero > 1:
-            # print('rodada numero', rodada_numero, "> 1")
-
-            # Pegar o perdedor e o vencedor da última partida
             perdedor = self.rodadas[-1].perdedor if hasattr(self.rodadas[-1], 'perdedor') else None
             vencedor = self.rodadas[-1].vencedor if hasattr(self.rodadas[-1], 'vencedor') else None
-
-            # print('PERDEDOR da ultima rodada joga nessa: ', perdedor.username)
-            # print('VENCEDOR da ultima rodada joga nessa: ', vencedor.username)
-
-            # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado pra ele
+            # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado para ele
             perdedor.dados_qtd -= 1
             if perdedor.dados_qtd == 0:
+                # Fazer tudo isso com o perdedor da partida, ou seja, com nenhum dado.
                 perdedor.joguei_dados = False
                 perdedor.rodadas = []
                 perdedor.turnos = []
                 perdedor.rodada_atual = None
                 perdedor.turno_atual = None
                 self.jogadores.remove(perdedor)
-                # print('self.jogadores.remove(perdedor)', perdedor)
-                # print('Perdedor ', perdedor)
-                # print('Jogadores ', self.jogadores)
             if len(self.jogadores) < 2:
                 return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
             else:
                 if perdedor in self.jogadores:
-                    # print(perdedor.username, 'perdeu um dado')
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
                 else:
-                    # print(vencedor.username, 'inicia a rodada por ter tirado ', perdedor.username)
                     return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
+        # Se for a primeira rodada, sortear.
         else:
-            # print('SORTEADO joga nessa rodada pois é a primeira: ', self.jogador_sorteado.username)
             return {'vez_atual': self.jogador_sorteado, 'rodada_numero': rodada_numero}
 
     def buscar_jogador_pelo_client_id(self, client_id):
@@ -276,13 +279,18 @@ class Partida:
         return None
 
     def declarar_vencedor(self, jogador):
+        """
+        Jogar todos para a tela do vencedor e fazer uma farofa pro vencedor lá kkk.
+        Dar um ponto pro vencedor.
+        """
         jogador.pontos += 1
         emit('vencedor_da_partida', {'nome': jogador.username}, broadcast=True)
         emit('botao_vencedor_ativ', to=jogador.client_id)
         emit("mudar_pagina", {'pag_numero': 4}, broadcast=True)
         nomes = [jogador.username for jogador in self.do_lobby.jogadores if jogador.username is not None]
         pontos = [jogador.pontos for jogador in self.do_lobby.jogadores if jogador.username is not None]
-        # print(nomes, pontos)
+
+        # Atualizar pontos na tela inicial.
         emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, broadcast=True)
 
 
@@ -315,7 +323,9 @@ class Rodada:
         return txt
 
     def construir_turno(self, jogador, dados):
-        # print('Rodada: Construindo turno')
+        """
+        Constrói um turno na rodada para o jogador da vez.
+        """
         turno_numero = len(self.turnos) + 1
         dado = int(dados['dado'])
         dado_qtd = int(dados['quantidade'])
@@ -325,18 +335,14 @@ class Rodada:
         jogador.turnos.append(turno)
 
         if turno.verificar_validade_da_jogada():
-            # print('TURNO VÁLIDO, EXECUTAR')
             if dado == 1:
                 self.coringa_atual_qtd = dado_qtd
                 self.coringa_atual_jogador = jogador
             turno.executar_turno()
-            # print('É o turno de: ', turno.do_jogador.username)
             o_da_vez = self.selecionar_proximo_jogador_na_lista(turno.do_jogador)
-            # print('Próximo da vez: ', o_da_vez.username)
             self.atualizar_front_pro_da_vez(o_da_vez)
             self.vez_atual = o_da_vez
         else:
-            # print('TURNO INVÁLIDO, DELETAR')
             txt = 'tente outra jogada.'
             self.turnos.remove(turno)
             jogador.turnos.remove(turno)
@@ -366,16 +372,12 @@ class Rodada:
         rodada(contar os coringas também), se sim, jogador anterior vence partida, se não jogador que desconfiou 
         vence a partida.
         """
-        # print(f'{jogador} desconfiou')
         todos_dados = self.todos_os_dados
-        # print(todos_dados)
         ultimo_turno = self.turnos[-1]
-        # print(ultimo_turno)
         if self.com_coringa:
             for i, dado in enumerate(todos_dados):
                 if dado == 1:
                     todos_dados[i] = ultimo_turno.dado_face
-        # print(todos_dados)
         quantidade = todos_dados.count(ultimo_turno.dado_face)
         faces_dado_nomes = {
             1: "ases" if ultimo_turno.dado_qtd > 1 else "ás",
@@ -388,9 +390,7 @@ class Rodada:
 
         saiu = ''
         if quantidade >= ultimo_turno.dado_qtd:
-            # print(f'{ultimo_turno.do_jogador.username} ganhou!')
             vencedor = ultimo_turno.do_jogador.username
-            perdedor = jogador.username
             perdedor = jogador.username
             self.vencedor = ultimo_turno.do_jogador
             self.perdedor = jogador
@@ -404,7 +404,6 @@ class Rodada:
                 f'realmente havia{"m" if ultimo_turno.dado_qtd > 1 else ""}, {vencedor} ganhou! {perdedor} desconfiou '
                 f'errado e perdeu um dado.{txt_add_1}')
         else:
-            # print(f'{jogador.username} ganhou!')
             vencedor = jogador.username
             perdedor = ultimo_turno.do_jogador.username
             self.vencedor = jogador
@@ -435,9 +434,8 @@ class Rodada:
     def atualizar_front_pro_da_vez(self, jogador_atual):
         """
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
-        Esta função não faz nenhuma validação de jogador da vez, deve ser feita em outro lugar.
+        Esta função não faz nenhuma validação de jogador da vez, deve ser feita em 'app.py'.
         """
-        # print('Construindo front para: ', jogador_atual.username)
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              broadcast=True)
@@ -449,11 +447,8 @@ class Rodada:
 
     def selecionar_proximo_jogador_na_lista(self, jogador_atual):
         lista_jogadores = self.da_partida.jogadores
-        # Obter o índice do item atual na lista
         indice_atual = lista_jogadores.index(jogador_atual)
-        # Calcular o índice do próximo item de forma circular
         indice_proximo = (indice_atual + 1) % len(lista_jogadores)
-        # Retornar o próximo item
         return lista_jogadores[indice_proximo]
 
 
@@ -476,6 +471,7 @@ class Turno:
 
     def executar_turno(self):
         """Executa o turno no front end"""
+        # Mostrar sempre os 3 últimos.
         turnos = self.do_jogador.turnos[-3:][::-1]
         lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
         emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos},
@@ -483,13 +479,11 @@ class Turno:
 
         if self.da_rodada.com_coringa is True:
             if lista_turnos[0][0] == 1:
-                # print('atualizar_coringa cancelado False')
                 emit('atualizar_coringa', {
                     'coringa_atual': self.da_rodada.coringa_atual_qtd,
                     'ultimo_coringa': self.da_rodada.coringa_atual_jogador.username,
                     'coringa_cancelado': False}, broadcast=True)
         else:
-            # print('atualizar_coringa cancelado True')
             emit('atualizar_coringa', {'coringa_cancelado': True}, broadcast=True)
 
     def obter_turno_anterior_na_partida(self):
@@ -522,7 +516,7 @@ class Turno:
         turno_ant_dado_qtd = 0
         turno_ant_dado_face = 0
 
-        # print('\nVERIFICANDO VALIDADE DA JOGADA')
+        # VERIFICANDO VALIDADE DA JOGADA
         tur_ant = self.obter_turno_anterior_na_partida()  # Recebe o turno anterior
 
         coringa_true = self.da_rodada.com_coringa
@@ -531,26 +525,20 @@ class Turno:
         if tur_ant:
             turno_ant_dado_face = tur_ant.dado_face
             turno_ant_dado_qtd = tur_ant.dado_qtd
-            # print(
-            #     f'turno anterior: Face: {turno_ant_dado_face}, Qtd: {turno_ant_dado_qtd}, valor'
-            #     f' {turno_ant_jogada_valor}')
 
         turno_atual_dado_face = self.dado_face
         turno_atual_dado_qtd = self.dado_qtd
-        # print(
-        #     f'turno atual: Face: {turno_atual_dado_face}, Qtd: {turno_atual_dado_qtd}, valor'
-        #     f' {turno_atul_jogada_valor}')
 
         # Validações de primeiro turno
         if self.turno_num == 1 and self.dado_face == 1:
-            # print('PRIMEIRO TURNO')
+            # PRIMEIRO TURNO
             # Se for o primeiro turno e o dado atual for 1, a partida não tem coringa e turno válida.
             self.da_rodada.com_coringa = False
-            # print('Partida sem coringa')
+            # Partida sem coringa
             return True
         if self.turno_num == 1:
-            # print('PRIMEIRO TURNO')
-            # print('Partida com coringa')
+            # PRIMEIRO TURNO
+            # Partida com coringa
             # Se for o primeiro turno, turno válido.
             return True
 
