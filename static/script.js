@@ -1408,6 +1408,18 @@ if (botao_som) {
     });
 }
 
+// Volume dos efeitos sonoros (0 a 100), persistido entre sessões.
+let volume_som = Number(localStorage.getItem('dadinho_volume_som') || '100');
+const slider_volume_som = document.getElementById('volume_som');
+if (slider_volume_som) {
+    slider_volume_som.value = volume_som;
+    slider_volume_som.addEventListener('input', () => {
+        volume_som = Number(slider_volume_som.value);
+        localStorage.setItem('dadinho_volume_som', String(volume_som));
+        aplicar_volume_som();
+    });
+}
+
 // --- Sistema de ajuda: tutorial + dicas durante a partida ---
 // Preferência de dicas do jogador, persistida entre sessões. Valor padrão: ligado.
 let dicas_ativadas = localStorage.getItem('dadinho_dicas') !== 'off';
@@ -1568,6 +1580,14 @@ document.addEventListener('keydown', (event) => {
 
 aplicar_estado_dicas();
 
+// Aplica o volume escolhido a todos os efeitos já carregados.
+function aplicar_volume_som() {
+    const ganho = volume_som / 100;
+    Object.values(sons).forEach((audio) => {
+        audio.volume = ganho;
+    });
+}
+
 // Toca um efeito sonoro do jogo a partir de static/sons/. Os arquivos são
 // carregados sob demanda e reutilizados (cache em 'sons').
 function tocar_som(nome) {
@@ -1580,6 +1600,7 @@ function tocar_som(nome) {
     }
     if (!sons[nome]) {
         sons[nome] = new Audio(`../static/sons/${arquivo}`);
+        sons[nome].volume = volume_som / 100;
         sons[nome].load();
     }
     const audio = sons[nome];
@@ -1600,6 +1621,7 @@ function tocar_fanfarra() {
     }
     const agora = contexto_audio.currentTime;
     const notas = [523.25, 659.25, 783.99, 1046.5];
+    const ganho_relativo = volume_som / 100;
     notas.forEach((freq, i) => {
         const osc = contexto_audio.createOscillator();
         const ganho = contexto_audio.createGain();
@@ -1607,7 +1629,7 @@ function tocar_fanfarra() {
         osc.frequency.value = freq;
         const inicio = agora + i * 0.14;
         ganho.gain.setValueAtTime(0.0001, inicio);
-        ganho.gain.exponentialRampToValueAtTime(0.22, inicio + 0.03);
+        ganho.gain.exponentialRampToValueAtTime(0.22 * ganho_relativo, inicio + 0.03);
         ganho.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.55);
         osc.connect(ganho).connect(contexto_audio.destination);
         osc.start(inicio);
@@ -1633,7 +1655,7 @@ function tocar_estouro() {
     filtro.type = 'lowpass';
     filtro.frequency.value = 2000;
     const ganho = contexto_audio.createGain();
-    ganho.gain.value = 0.22;
+    ganho.gain.value = 0.22 * (volume_som / 100);
     fonte.connect(filtro).connect(ganho).connect(contexto_audio.destination);
     fonte.start(agora);
 }
@@ -1649,6 +1671,18 @@ function tocar_estouro() {
 // O som da música é controlado por um botão próprio, independente dos efeitos.
 // ---------------------------------------------------------------------------
 let musica_ativada = localStorage.getItem('dadinho_musica') === 'on';
+
+// Volume da música (0 a 100), persistido entre sessões. Padrão: 50 (metade).
+let volume_musica = Number(localStorage.getItem('dadinho_volume_musica') || '50');
+const slider_volume_musica = document.getElementById('volume_musica');
+if (slider_volume_musica) {
+    slider_volume_musica.value = volume_musica;
+    slider_volume_musica.addEventListener('input', () => {
+        volume_musica = Number(slider_volume_musica.value);
+        localStorage.setItem('dadinho_volume_musica', String(volume_musica));
+        aplicar_volume_musica();
+    });
+}
 
 // Lê um inteiro em 'variable-length quantity' do MIDI.
 function ler_varint(view, estado) {
@@ -2090,6 +2124,13 @@ async function renderizar_musica(buffer) {
     return await offline.startRendering();
 }
 
+// Aplica o volume escolhido à música em reprodução (ou guarda para a próxima).
+function aplicar_volume_musica() {
+    if (ganho_musica) {
+        ganho_musica.gain.value = volume_musica / 100;
+    }
+}
+
 let ganho_musica = null;
 let fonte_musica = null;
 let buffer_musica = null;
@@ -2122,7 +2163,7 @@ async function iniciar_musica() {
     }
     if (!ganho_musica) {
         ganho_musica = contexto_audio.createGain();
-        ganho_musica.gain.value = 0.5;
+        ganho_musica.gain.value = volume_musica / 100;
         ganho_musica.connect(contexto_audio.destination);
     }
     fonte_musica = contexto_audio.createBufferSource();

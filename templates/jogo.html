@@ -23,10 +23,20 @@
     <div class="position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end" style="z-index: 50;">
         <select id="seletor_idioma" class="form-select form-select-sm bg-dark text-light border-light"
             style="width: auto;" aria-label="Idioma"></select>
-        <button id="botao_som" class="btn btn-sm btn-outline-light"
-            data-i18n-title="ui.botao_som" title="Efeitos sonoros ligados/desligados">🔊</button>
-        <button id="botao_musica" class="btn btn-sm btn-outline-light"
-            data-i18n-title="ui.botao_musica" title="Música ligada/desligada">🎵</button>
+        <div class="d-flex align-items-center gap-2">
+            <button id="botao_som" class="btn btn-sm btn-outline-light"
+                data-i18n-title="ui.botao_som" title="Efeitos sonoros ligados/desligados">🔊</button>
+            <input type="range" id="volume_som" class="form-range" min="0" max="100" value="100"
+                style="width: 90px;" data-i18n-aria-label="ui.volume_som"
+                aria-label="Volume dos efeitos sonoros">
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <button id="botao_musica" class="btn btn-sm btn-outline-light"
+                data-i18n-title="ui.botao_musica" title="Música ligada/desligada">🎵</button>
+            <input type="range" id="volume_musica" class="form-range" min="0" max="100" value="50"
+                style="width: 90px;" data-i18n-aria-label="ui.volume_musica"
+                aria-label="Volume da música">
+        </div>
     </div>
 
     <div class="position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">

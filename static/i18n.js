@@ -35,6 +35,8 @@ I18N_DICIONARIOS.en = {
     // Botões fixos / narrador
     'ui.botao_som': 'Sound effects on/off',
     'ui.botao_musica': 'Music on/off',
+    'ui.volume_som': 'Sound effects volume',
+    'ui.volume_musica': 'Music volume',
     'ui.botao_tutorial': 'How to play (tutorial)',
     'ui.botao_dicas': 'Turn tips on/off',
     'ui.narrador.titulo': '🎙️ Narrator',
@@ -395,6 +397,8 @@ I18N_DICIONARIOS.en = {
 I18N_DICIONARIOS['pt-BR'] = {
     'ui.botao_som': 'Efeitos sonoros ligados/desligados',
     'ui.botao_musica': 'Música ligada/desligada',
+    'ui.volume_som': 'Volume dos efeitos sonoros',
+    'ui.volume_musica': 'Volume da música',
     'ui.botao_tutorial': 'Como jogar (tutorial)',
     'ui.botao_dicas': 'Ligar/desligar dicas',
     'ui.narrador.titulo': '🎙️ Narrador',
@@ -732,6 +736,8 @@ I18N_DICIONARIOS['pt-BR'] = {
 I18N_DICIONARIOS.es = {
     'ui.botao_som': 'Efectos de sonido activados/desactivados',
     'ui.botao_musica': 'Música activada/desactivada',
+    'ui.volume_som': 'Volumen de los efectos de sonido',
+    'ui.volume_musica': 'Volumen de la música',
     'ui.botao_tutorial': 'Cómo jugar (tutorial)',
     'ui.botao_dicas': 'Activar/desactivar consejos',
     'ui.narrador.titulo': '🎙️ Narrador',
@@ -1069,6 +1075,8 @@ I18N_DICIONARIOS.es = {
 I18N_DICIONARIOS.fr = {
     'ui.botao_som': 'Effets sonores activés/désactivés',
     'ui.botao_musica': 'Musique activée/désactivée',
+    'ui.volume_som': 'Volume des effets sonores',
+    'ui.volume_musica': 'Volume de la musique',
     'ui.botao_tutorial': 'Comment jouer (tutoriel)',
     'ui.botao_dicas': 'Activer/désactiver les astuces',
     'ui.narrador.titulo': '🎙️ Narrateur',
@@ -1406,6 +1414,8 @@ I18N_DICIONARIOS.fr = {
 I18N_DICIONARIOS['zh-CN'] = {
     'ui.botao_som': '音效开/关',
     'ui.botao_musica': '音乐开/关',
+    'ui.volume_som': '音效音量',
+    'ui.volume_musica': '音乐音量',
     'ui.botao_tutorial': '怎么玩（教程）',
     'ui.botao_dicas': '开启/关闭提示',
     'ui.narrador.titulo': '🎙️ 解说',
