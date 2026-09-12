@@ -3,8 +3,10 @@ let chave_secreta = '';
 let nome_jogador = '';
 let sala_atual = getParamSala();
 
-
-const socket = io({ autoConnect: true, query: { sala: sala_atual } });
+// Envia a chave guardada anteriormente (via sessionStorage) para o servidor
+// reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
+const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
+const socket = io({ autoConnect: true, query: { sala: sala_atual, chave_secreta: chave_resumo } });
 socket.connect();
 
 function getParamSala() {
@@ -335,7 +337,8 @@ socket.on('construtor_dados', function (data) {
         // Cria o texto com badge
         const badge = document.createElement('span');
         badge.className = 'fs-3 badge text-bg-primary text-wrap mb-2';
-        badge.style.width = '36rem';
+        badge.style.width = 'auto';
+        badge.style.maxWidth = '90%';
         badge.textContent = 'Aguarde, os dados estão rolando';
 
         // Adiciona o badge ao sub-container
@@ -374,7 +377,7 @@ socket.on('construtor_html', function (data) {
         // Criação do card
         const card = document.createElement('div');
         card.className = 'card border border-secondary border-1 text-bg-dark';
-        card.style.height = '240px'; // Tamanho do card, ajustar no futuro: 240px;
+        card.style.minHeight = '200px'; // Altura mínima do card; cresce com o conteúdo no mobile.
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
@@ -492,6 +495,15 @@ socket.on('reset_partida', function () {
     bot_confe_fim.disabled = false; // Reativa o input
     bot_confe_fim.style.display = 'block'; // Reativa o input
     botao_fogos.style.display = 'none'; // Desativa o input
+    // Limpa resíduos da partida anterior (vitória/conferência) no DOM.
+    const h1_vencedor = document.getElementById('h1_vencedor');
+    if (h1_vencedor) {
+        h1_vencedor.innerHTML = '';
+    }
+    const texto_v_d = document.getElementById("texto_vitoria_derrota");
+    if (texto_v_d) {
+        texto_v_d.innerText = '';
+    }
 });
 
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
@@ -672,6 +684,7 @@ document.getElementById('desconfiar').addEventListener('click', () => {
 // Funções após conectar
 socket.on("connect_start", function (data) {
     chave_secreta = data.chave_secreta;
+    sessionStorage.setItem('dadinho_chave', chave_secreta);
     if (data.sala) {
         sala_atual = data.sala;
         const badge = document.getElementById('sala_atual');
@@ -679,10 +692,35 @@ socket.on("connect_start", function (data) {
             badge.textContent = '#' + data.sala;
         }
     }
+    if (data.username) {
+        // Reconexão retomada: devolve o apelido pro jogador.
+        nome_jogador = data.username;
+        const apelidoInput = document.getElementById('apelido');
+        if (apelidoInput && !apelidoInput.value) {
+            apelidoInput.value = data.username;
+        }
+    }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
     textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
     botaapelido.disabled = false;
+});
+
+// Indicadores de conexão/reconexão (heartbeat visual).
+socket.on('connect', function () {
+    const status = document.getElementById('status_conexao');
+    if (status) {
+        status.textContent = '● Conectado';
+        status.className = 'd-block mb-2 text-success';
+    }
+});
+
+socket.on('disconnect', function () {
+    const status = document.getElementById('status_conexao');
+    if (status) {
+        status.textContent = '⚠ Reconectando...';
+        status.className = 'd-block mb-2 text-warning';
+    }
 });
 
 socket.on("update_username", function (data) {

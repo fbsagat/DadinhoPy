@@ -3,8 +3,8 @@ body {
     /* Fundo escuro */
     color: #ffffff;
     /* Texto branco */
-    height: 100vh;
-    /* Altura total da viewport */
+    min-height: 100vh;
+    /* Altura mínima da viewport */
     display: flex;
     /* Flexbox para centralização */
     flex-direction: column;
@@ -12,7 +12,9 @@ body {
     align-items: center;
     /* Centraliza horizontalmente */
     margin: 0;
-    overflow: hidden;
+    overflow-x: hidden;
+    /* Evita rolagem horizontal; vertical liberada p/ telas pequenas */
+    overflow-y: auto;
 }
 
 .custom-list {
@@ -209,5 +211,34 @@ canvas {
     }
     100% {
         text-shadow: 0 0 10px rgba(255, 255, 255, 0.6), 0 0 20px rgba(255, 255, 255, 0.4), 0 0 30px rgba(255, 255, 255, 0.2);
+    }
+}
+
+/* Fase 4: ajustes de exibição em telas pequenas (mobile/tablet).
+   Os estilos inline de dimensões (JS/HTML) são sobrescritos via !important. */
+@media (max-width: 768px) {
+    #div_titulo_img {
+        height: 22vh !important;
+    }
+
+    #titulo_img {
+        width: 65% !important;
+    }
+
+    #h1_vencedor {
+        font-size: 2.2rem !important;
+    }
+
+    #quantidade {
+        width: 100px !important;
+    }
+
+    #desconfiar,
+    #apostar {
+        width: 110px !important;
+    }
+
+    #painel_aguarde {
+        width: 90% !important;
     }
 }

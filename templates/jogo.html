@@ -30,6 +30,7 @@
                 <small class="text-light d-block mb-2">Sala atual: <span id="sala_atual"
                         class="badge text-bg-info">#padrao</span>
                 </small>
+                <small id="status_conexao" class="text-success d-block mb-2"></small>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
                     <input type="text" id="input_sala" class="form-control text-center" style="width: 160px;"
                         maxlength="24" placeholder="Código da sala" onkeydown="verificar_enter(event, 'sala')">
@@ -47,7 +48,7 @@
 
             <div class="container my-4 p-3 bg-dark text-light border border-info rounded gamer-container"
                 id="lista_de_jogadores"
-                style="--bs-bg-opacity: .8; width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
+                style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
                 <small>Aguardando jogadores...</small>
             </div>
 
@@ -98,21 +99,21 @@
     <div id="tela_partida" class="tela_partida container-fluid text-center" style="display: none;">
 
         <div
-            class="d-flex justify-content-between mt-2 bg-info bg-opacity-50 border border-primary border-start-0 rounded-end">
+            class="d-flex justify-content-between flex-wrap mt-2 bg-info bg-opacity-50 border border-primary border-start-0 rounded-end">
 
             <div id="meus_dados"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
-                style="width: 375px;">
+                style="flex: 1 1 200px; min-width: 0;">
             </div>
 
             <div id="dados_mesa"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
-                style="width: 375px;">
+                style="flex: 1 1 200px; min-width: 0;">
             </div>
 
             <div id="corin_atual"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
-                style="width: 375px;">
+                style="flex: 1 1 200px; min-width: 0;">
             </div>
 
         </div>
@@ -183,7 +184,7 @@
             </div>
 
             <div class="container-fluid text-center">
-                <div class="d-flex justify-content-center align-items-center">
+                <div class="d-flex justify-content-center align-items-center flex-wrap gap-2">
                     <input id="desconfiar" class="btn btn-warning mx-2" type="button" value="Desconfiar" disabled
                         style="width: 130px;">
                     <div class="d-flex align-items-center justify-content-center">
