@@ -9,7 +9,7 @@
 
 ## Commands
 - Run the server: `python app.py` (use the `.venv`; run from repo root). Opens on http://localhost:5000 by default. Local dev only — deployment targets Vercel, not a LAN reachable host.
-- No tests, no linter, no formatter, no CI. There is nothing to run for verification; manually test via two browser tabs.
+- No linter, no formatter, no CI. Verification: `python verificar.py` (Fase 10; from repo root, use the `.venv`) — roda `py_compile`, `node --check` do `script.js`, boot `VERCEL=1` respondendo 200, round-trip/migração de serialização e integração `flask_socketio.test_client` cobrindo Fases 6/7. Simulação headless dos bots: `python simular_ia.py`. Complementar sempre com o teste manual em dois browser tabs.
 
 ## Conventions
 - Code comments, docstrings, variable/socket-event names, and commit messages are in **Brazilian Portuguese (pt-BR)**. Follow this in new code. `app.py:20-23` is the style to match.

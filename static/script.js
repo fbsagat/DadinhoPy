@@ -4,6 +4,16 @@ let nome_jogador = '';
 let sala_atual = getParamSala();
 let sou_master = false;
 
+// Imagens dos dados (1-6): constante global reutilizada na animação de rolagem.
+const diceImages = [
+    "../static/imagens/dado/1.png",
+    "../static/imagens/dado/2.png",
+    "../static/imagens/dado/3.png",
+    "../static/imagens/dado/4.png",
+    "../static/imagens/dado/5.png",
+    "../static/imagens/dado/6.png"
+];
+
 // Envia a chave guardada anteriormente (via sessionStorage) para o servidor
 // reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
 const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
@@ -142,7 +152,7 @@ function entrar_sala() {
     const input = document.getElementById('input_sala');
     const codigo = input.value.trim();
     if (!codigo) {
-        alert('Digite o código da sala!');
+        mostrar_alerta('Digite o código da sala!', 'aviso');
         return;
     }
     ir_para_sala(codigo);
@@ -243,12 +253,12 @@ socket.on('partidas_listadas', function (data) {
 });
 
 socket.on('sala_cheia', function () {
-    alert('Esta sala está cheia (limite de jogadores atingido).');
-    ir_para_sala('padrao');
+    mostrar_alerta('Esta sala está cheia (limite de jogadores atingido).', 'aviso')
+        .then(() => ir_para_sala('padrao'));
 });
 
 socket.on('iniciar_negado', function (data) {
-    alert(`Não é possível iniciar: ${data.motivo}`);
+    mostrar_alerta(`Não é possível iniciar: ${data.motivo}`, 'aviso');
 });
 
 const apelidoSalvo = sessionStorage.getItem('dadinho_apelido');
@@ -497,36 +507,33 @@ socket.on("mudar_pagina", function (data) {
         limpar_narrador();
         parar_celebracao();
     }
-    {
-        const paginas = [
-            document.getElementById('tela_jogadores'),
-            document.getElementById('tela_jogar_dados'),
-            document.getElementById('tela_partida'),
-            document.getElementById('tela_conferencia'),
-            document.getElementById('tela_vitoria')
-        ]
-        let indicie_atual = 0;
-        paginas[indiceAtual].style.display = "none";
-        // Atualiza o índice para a próxima página
-        indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
-        // Mostra a próxima página
-        paginas[indiceAtual].style.display = "block";
-        if (data.pag_numero === 2) {
-            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '10vh';
-            logo.src = "../static/imagens/titulo_p.png";
-            logo.style.width = '25%';
-        } else if (data.pag_numero === 3) {
-            // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '26vh';
-            logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '34%';
-        } else {
-            // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '24vh';
-            logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '34%';
-        }
+    const paginas = [
+        document.getElementById('tela_jogadores'),
+        document.getElementById('tela_jogar_dados'),
+        document.getElementById('tela_partida'),
+        document.getElementById('tela_conferencia'),
+        document.getElementById('tela_vitoria')
+    ]
+    paginas[indiceAtual].style.display = "none";
+    // Atualiza o índice para a próxima página
+    indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
+    // Mostra a próxima página
+    paginas[indiceAtual].style.display = "block";
+    if (data.pag_numero === 2) {
+        // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+        logodiv.style.height = '10vh';
+        logo.src = "../static/imagens/titulo_p.png";
+        logo.style.width = '25%';
+    } else if (data.pag_numero === 3) {
+        // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
+        logodiv.style.height = '26vh';
+        logo.src = "../static/imagens/titulo.png";
+        logo.style.width = '34%';
+    } else {
+        // logo.style.display = "block"; // Exibe o logotipo
+        logodiv.style.height = '24vh';
+        logo.src = "../static/imagens/titulo.png";
+        logo.style.width = '34%';
     }
     mostrar_dica(data.pag_numero);
 });
@@ -572,21 +579,21 @@ socket.on('dados_mesa', function (data) {
 socket.on('atualizar_coringa', function (data) {
     const coringa_n = Number(data.coringa_atual)
     const coringa_j = String(data.ultimo_coringa)
-    const conringa_cancelado = data.coringa_cancelado
-    const corin_atual = document.getElementById('corin_atual')
-    corin_atual.innerHTML = ""
+    const coringa_cancelado = data.coringa_cancelado
+    const coringa_atual_el = document.getElementById('corin_atual')
+    coringa_atual_el.innerHTML = ""
 
-    if (conringa_cancelado) {
+    if (coringa_cancelado) {
         const span3 = document.createElement('span')
         span3.className = 'fs-5 text-danger me-2'
         span3.innerText = 'O coringa foi cancelado!'
-        corin_atual.appendChild(span3)
+        coringa_atual_el.appendChild(span3)
     } else {
         if (coringa_n === 0) {
             const span3 = document.createElement('span')
             span3.className = 'fs-6 text-white me-2'
             span3.innerText = 'O coringa ainda não foi jogado'
-            corin_atual.appendChild(span3)
+            coringa_atual_el.appendChild(span3)
         } else {
             const span1 = document.createElement('span')
             span1.className = 'fs-5 text-white me-2'
@@ -600,9 +607,9 @@ socket.on('atualizar_coringa', function (data) {
             const span2 = document.createElement('span')
             span2.className = 'fs-5 text-white me-2'
             span2.innerText = `X${coringa_n} (${coringa_j})`
-            corin_atual.appendChild(span1)
-            corin_atual.appendChild(img1)
-            corin_atual.appendChild(span2)
+            coringa_atual_el.appendChild(span1)
+            coringa_atual_el.appendChild(img1)
+            coringa_atual_el.appendChild(span2)
         }
     }
 })
@@ -1057,7 +1064,7 @@ document.getElementById('apostar').addEventListener('click', () => {
         // Enviar para o backend (exemplo usando fetch)
         socket.emit('apostar', { dados: data });
     } else {
-        alert('Selecione um dado e informe a quantidade!');
+        mostrar_alerta('Selecione um dado e informe a quantidade!', 'aviso');
     }
 });
 
@@ -1123,15 +1130,6 @@ socket.on("jogar_dados_resultado", function (data) {
     const dados_lista = data.dados_jogador;
     const dados_qtd = dados_lista.length;
 
-    const diceImages = [
-        "../static/imagens/dado/1.png",
-        "../static/imagens/dado/2.png",
-        "../static/imagens/dado/3.png",
-        "../static/imagens/dado/4.png",
-        "../static/imagens/dado/5.png",
-        "../static/imagens/dado/6.png"
-    ];
-
     const dados = [];
 
     // Loop para adicionar os elementos restantes
@@ -1180,7 +1178,7 @@ socket.on("jogar_dados_resultado", function (data) {
 // Alerta de jogada inválida
 socket.on('jogada_invalida', function (data) {
     const txt = data.txtadd
-    window.alert(`Esta jogada é inválida, ${txt}`);
+    mostrar_alerta(`Esta jogada é inválida, ${txt}`, 'erro');
 })
 
 // Fase 9: alguém caiu no meio da partida. Agenda um pedido ao servidor para
@@ -1202,7 +1200,7 @@ function enviar_apelido() {
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
     } else {
-        alert('Preencha o seu nome!');
+        mostrar_alerta('Preencha o seu nome!', 'aviso');
     }
 }
 
@@ -1304,6 +1302,63 @@ const overlay_tutorial = document.getElementById('tutorial_overlay');
 const painel_dicas = document.getElementById('painel_dicas');
 const switch_tutorial = document.getElementById('tutorial_dicas_switch');
 
+// Modal de alerta reutilizável (substitui window.alert): evita o padrão do
+// navegador e mantém a identidade visual do app. Retorna uma Promise resolvida
+// quando o jogador fecha, permitindo encadear ações (ex.: redirecionar).
+const alerta_overlay = document.getElementById('alerta_overlay');
+const alerta_icone = document.getElementById('alerta_icone');
+const alerta_titulo = document.getElementById('alerta_titulo');
+const alerta_mensagem = document.getElementById('alerta_mensagem');
+let _alerta_resolver = null;
+
+const ALERTA_ESTILOS = {
+    aviso: { icone: '⚠️', titulo: 'Atenção' },
+    erro: { icone: '⛔', titulo: 'Ops!' },
+    info: { icone: 'ℹ️', titulo: 'Aviso' },
+    sucesso: { icone: '✅', titulo: 'Tudo certo' },
+};
+
+function mostrar_alerta(mensagem, tipo) {
+    const chave = ALERTA_ESTILOS[tipo] ? tipo : 'aviso';
+    const estilo = ALERTA_ESTILOS[chave];
+    if (!alerta_overlay) {
+        window.alert(mensagem);
+        return Promise.resolve();
+    }
+    alerta_icone.textContent = estilo.icone;
+    alerta_titulo.textContent = estilo.titulo;
+    alerta_mensagem.textContent = mensagem;
+    alerta_overlay.dataset.tipo = chave;
+    alerta_overlay.style.display = 'flex';
+    return new Promise(function (resolve) {
+        _alerta_resolver = resolve;
+        const botao = document.getElementById('alerta_ok');
+        if (botao) {
+            botao.focus();
+        }
+    });
+}
+
+function fechar_alerta() {
+    if (!alerta_overlay || alerta_overlay.style.display === 'none') {
+        return;
+    }
+    alerta_overlay.style.display = 'none';
+    if (_alerta_resolver) {
+        const resolver = _alerta_resolver;
+        _alerta_resolver = null;
+        resolver();
+    }
+}
+
+if (alerta_overlay) {
+    alerta_overlay.addEventListener('click', (event) => {
+        if (event.target === alerta_overlay) {
+            fechar_alerta();
+        }
+    });
+}
+
 function aplicar_estado_dicas() {
     if (!botao_dicas) {
         return;
@@ -1375,6 +1430,7 @@ if (overlay_tutorial) {
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+        fechar_alerta();
         fechar_tutorial();
     }
 });
@@ -1459,7 +1515,7 @@ function tocar_estouro() {
 // A composição é original, inspirada em jogos de tabuleiro de SNES/Mega Drive.
 // O som da música é controlado por um botão próprio, independente dos efeitos.
 // ---------------------------------------------------------------------------
-let musica_ativada = localStorage.getItem('dadinho_musica') !== 'off';
+let musica_ativada = localStorage.getItem('dadinho_musica') === 'on';
 
 // Lê um inteiro em 'variable-length quantity' do MIDI.
 function ler_varint(view, estado) {

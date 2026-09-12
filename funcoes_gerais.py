@@ -1,5 +1,5 @@
 from flask_socketio import emit
-from modelos import Lobby
+from modelos import Lobby, sala_room
 import re
 import secrets
 import store
@@ -68,13 +68,6 @@ def tem_cooldown(client_id, segundos):
             return True
         _cooldowns[client_id] = agora
         return False
-
-
-def sala_room(sala_id):
-    """
-    Retorna o nome da room no Socket.IO para um id de sala.
-    """
-    return f"sala_{sala_id}"
 
 
 def normalizar_sala(sala_id):
@@ -205,7 +198,7 @@ def enviar_snapshot_sala(lobby, jogador):
             for j in partida.jogadores
         }
         emit('construtor_html',
-             {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista, 'coringa_atual': rodada.coringa_atual_qtd,
+             {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista,
               'dados_tt': partida.dados_qtd}, to=jogador.client_id)
         # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
         # construtor_html usa a base (partida.dados_qtd), então corrige os cards
@@ -265,7 +258,7 @@ def atualizar_lista_usuarios(lobby):
     Atualiza a lista de usuários na tela de entrada de jogadores da sala.
     Também envia o estado da sala de espera: nome, status, configurações e prontidão.
     """
-    lista = lobby.listar_jogadores()
+    lista = lobby.jogadores
     usernames = [jogador.username for jogador in lista if jogador.username is not None]
     pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
     masters = [jogador.master for jogador in lista if jogador.username is not None]
@@ -370,22 +363,3 @@ def validar_input(texto, tamanho_minimo=1, tamanho_maximo=12, permitir_espacos=T
         return False
 
     return True
-
-
-def validar_numero(numero):
-    """
-    Valida se o número está entre 1 e 6 e se é seguro para processamento.
-    :param numero: O número a ser validado.
-    :return: True se o número for válido, False caso contrário.
-    """
-    # Verifica se é um número inteiro
-    if not isinstance(numero, int):
-        # print("Erro: O valor fornecido não é um número inteiro.")
-        return False
-    # Validação: Verifica se está no intervalo permitido
-    if 1 <= numero <= 6:
-        # print(f"Número válido: {numero}")
-        return True
-    else:
-        # print("Erro: Número fora do intervalo permitido! Deve ser entre 1 e 6.")
-        return False

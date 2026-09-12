@@ -1,6 +1,6 @@
 # TODO — Dadinho
 
-<!-- Fases 0 a 9, 11 e 12 concluídas. Fase 10 aberta: limpeza/organização e tooling. -->
+<!-- Fases 0 a 12 concluídas. -->
 
 Plano em fases para o objetivo atual: **subir o jogo na Vercel, com múltiplas salas, casual only** (sem contas, sem ranking, sem VPS).
 
@@ -12,7 +12,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 7** — Robustez serverless e segurança dos handlers. ✅ concluída
 - **Fase 8** — Performance e escala do store (Upstash). ✅ concluída
 - **Fase 9** — UX e melhorias de negócio. ✅ concluída
-- **Fase 10** — Limpeza, organização e tooling.
+- **Fase 10** — Limpeza, organização e tooling. ✅ concluída
 - **Fase 11** — Jogadores IA (4 níveis). ✅ concluída
 
 ---
@@ -188,16 +188,23 @@ Notas/limitações registradas (aceitos para o público casual):
 
 Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (com `desconectado_em`); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo gerador/evento de código, `rodada_n` real, grace (desconexão marca → reconexão limpa → expurgo remove → vencedor declarado → sala sem ativos removida) e espectador pela busca. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase9.py` e `teste_fase9b.py` (Fase 7 revalidada com `teste_fase7.py`).
 
-## Fase 10 — Limpeza, organização e tooling
+## Fase 10 — Limpeza, organização e tooling ✅ concluída
 
 Objetivo: pagar dívida técnica e dar verificação automatizada ao projeto (hoje sem teste/lint/CI).
 
-- [ ] **S2 — Remover código morto:** `validar_numero` (usar na Fase 6 ou remover), `Partida.contar_jogadores`, `Rodada.jogaram_dados` (só serializado), `Lobby.listar_jogadores`, `Jogador.criar_jogador` (wrapper trivial), `sala_room()` duplicado (`funcoes_gerais.py:9` vs `Lobby.sala_room`), chaves `rodada_n`/`coringa_atual` não usadas de `construtor_html`.
-- [ ] **S4 — `emit` explícito com `to=`** em toda a cadeia (`jogar_dados_resultado` `app.py:238` e `meus_dados` `app.py:254` hoje dependem do default "somente ao originador" — deixar explícito).
-- [ ] **S5 — Decorator/helper** para o boilerplate `achar_jogador` + guard de chave repetido em ~10 handlers.
-- [ ] **S3 — Mecanismo de migração** por `versao` em `Lobby.para_dict`/`de_dict` (hoje `versao: 3` é gravado e nunca validado).
-- [ ] **S7 — Limpezas JS:** variável morta `indicie_atual` (`script.js:341`), bloco `{}` solto no `mudar_pagina`, `diceImages` como constante global, typos `conringa_cancelado`/`corin_atual` (`script.js:408-409`).
-- [ ] **Script único de verificação** no repo (`py_compile` + `node --check` + boot `VERCEL=1` respondendo 200 + integração `flask_socketio.test_client` cobrindo Fase 6/7) — consolidar os scripts heap de `Temp` no projeto.
+- [x] **S2 — Remover código morto:** `validar_numero` (usar na Fase 6 ou remover), `Partida.contar_jogadores`, `Rodada.jogaram_dados` (só serializado), `Lobby.listar_jogadores`, `Jogador.criar_jogador` (wrapper trivial), `sala_room()` duplicado (`funcoes_gerais.py:9` vs `Lobby.sala_room`), chaves `rodada_n`/`coringa_atual` não usadas de `construtor_html`.
+- [x] **S4 — `emit` explícito com `to=`** em toda a cadeia (`jogar_dados_resultado` `app.py:238` e `meus_dados` `app.py:254` hoje dependem do default "somente ao originador" — deixar explícito).
+- [x] **S5 — Decorator/helper** para o boilerplate `achar_jogador` + guard de chave repetido em ~10 handlers.
+- [x] **S3 — Mecanismo de migração** por `versao` em `Lobby.para_dict`/`de_dict` (hoje `versao: 3` é gravado e nunca validado).
+- [x] **S7 — Limpezas JS:** variável morta `indicie_atual` (`script.js:341`), bloco `{}` solto no `mudar_pagina`, `diceImages` como constante global, typos `conringa_cancelado`/`corin_atual` (`script.js:408-409`).
+- [x] **Script único de verificação** no repo (`py_compile` + `node --check` + boot `VERCEL=1` respondendo 200 + integração `flask_socketio.test_client` cobrindo Fase 6/7) — consolidar os scripts heap de `Temp` no projeto.
+
+Extras no caminho (não listados originalmente):
+- `sala_room()` virou uma função única em `modelos.py` (fonte do prefixo `sala_`); `Lobby.sala_room` delega e `funcoes_gerais` importa, eliminando a duplicata.
+- A migração de versão é aplicada em `Lobby.de_dict` (`_migrar` sobe de v1/v2 até `VERSAO_ATUAL`); formato mais novo não é rebaixado. `Rodada.jogaram_dados` saiu da serialização sem exigir migração (leitura usa defaults).
+- O helper de autenticação (`autenticar`) também centraliza o guard de master; `escolher_apelido`/`verificar_desconectados` usam `extrair_chave=None` (eventos sem chave).
+
+Verificação (local, `.venv`): `python verificar.py` (script único, no repo) — `py_compile` de todos os módulos, `node --check static/script.js`, boot `VERCEL=1` com `GET /` = 200, round-trip de serialização + migrações v1→v3/v2→v3, e integração via `flask_socketio.test_client` cobrindo B3/B6/B1/B7/B2/B4 (Fase 6) e A3/A6/V3/V2/A4/A5 + partida completa (Fase 7). Também `python simular_ia.py --partidas 20 --dados 3` (hierarquia 4>3>2>1 preservada).
 
 ## Fase 11 — Jogadores IA (4 níveis) ✅ concluída
 

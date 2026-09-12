@@ -228,6 +228,43 @@ def evento_leitura(func):
     return wrapper
 
 
+def _chave_simples(dados):
+    """Extrai a chave secreta do payload no formato padrão {'chave': ...}."""
+    return dados.get('chave', '')
+
+
+def _chave_aninhada(dados):
+    """Extrai a chave do payload de aposta/desconfiança: {'dados': {'chave': ...}}."""
+    internos = dados.get('dados')
+    if not isinstance(internos, dict):
+        return ''
+    return internos.get('chave', '')
+
+
+def autenticar(exigir_master=False, extrair_chave=_chave_simples):
+    """
+    Centraliza o boilerplate de autenticação dos handlers de jogador (Fase 10, S5):
+    localiza (lobby, jogador) pelo sid, valida a chave secreta extraída do payload
+    (passe `extrair_chave=None` para eventos sem chave) e, opcionalmente, exige que
+    o jogador seja o master. Em falha, aborta silenciosamente; no sucesso injeta
+    (dados, lobby, jogador) na assinatura do handler decorado.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(dados=None, *args, **kwargs):
+            dados = dados if isinstance(dados, dict) else {}
+            lobby, jogador = achar_jogador(request.sid)
+            if jogador is None or lobby is None:
+                return
+            if exigir_master and not jogador.master:
+                return
+            if extrair_chave is not None and jogador.chave_secreta != extrair_chave(dados):
+                return
+            return func(dados, lobby, jogador, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
 @app.route("/")
 def index():
     return render_template("jogo.html")
@@ -287,7 +324,7 @@ def handle_connect():
                     leave_room(lobby.sala_room(), sid=client_id)
                     return
                 master = False if lobby.verificar_jogador_master() else True
-                jogador = Jogador.criar_jogador(client_id=client_id, master=master)
+                jogador = Jogador(client_id=client_id, master=master)
                 lobby.adicionar_jogador(jogador)
 
         registrar_cliente(client_id, sala_id)
@@ -363,38 +400,28 @@ def handle_disconnect():
 
 @socketio.on('apelido')
 @evento_mutavel
-def escolher_apelido(data):
+@autenticar(extrair_chave=None)
+def escolher_apelido(dados, lobby, jogador):
     """
     Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo, antes faz umas validações.
     """
-    client_id = request.sid
-    _, jogador = achar_jogador(client_id)
-    if jogador is None:
-        return
     if jogador.partida_atual is None and jogador.rodada_atual is None and jogador.turno_atual is None:
-        apelido = (data or {}).get("apelido_msg", '')
-        apelido_n = jogador.lobby_atual.verificar_apelido(apelido if validar_input(apelido) else 'NOME_BUGADO')
+        apelido = dados.get("apelido_msg", '')
+        apelido_n = lobby.verificar_apelido(apelido if validar_input(apelido) else 'NOME_BUGADO')
         jogador.username = apelido_n
-        emit("update_username", {'nome_jogador': jogador.username}, to=client_id)
-        atualizar_lista_usuarios(jogador.lobby_atual)
+        emit("update_username", {'nome_jogador': jogador.username}, to=jogador.client_id)
+        atualizar_lista_usuarios(lobby)
 
 
 @socketio.on('iniciar_partida')
 @evento_mutavel
-def iniciar_partida(dados):
+@autenticar(exigir_master=True)
+def iniciar_partida(dados, lobby, jogador):
     """
     Esta função inicia uma nova partida, é executada pelo master do lobby da sala.
     Só libera quando todos os jogadores (não-master) estiverem prontos e houver ao menos 2.
     :param dados: Vem do front, é o número de dados que cada jogador recebe para jogar.
     """
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or jogador.master is not True:
-        return
-    # Fase 7 (A3): não confia só no flag master — exige a chave secreta também.
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if 'dados_qtd' in dados:
         try:
             lobby.definir_config({'dados_qtd': int(dados.get('dados_qtd', 1))})
@@ -402,7 +429,7 @@ def iniciar_partida(dados):
             pass
     pode, motivo = lobby.pode_iniciar()
     if not pode:
-        emit('iniciar_negado', {'motivo': motivo}, to=client_id)
+        emit('iniciar_negado', {'motivo': motivo}, to=jogador.client_id)
         return
     # Verificação ativa: resolve a entropia e fixa a seed ANTES de criar a partida.
     seed_info = lobby.finalizar_seed()
@@ -416,18 +443,12 @@ def iniciar_partida(dados):
 
 @socketio.on('configurar_partida')
 @evento_mutavel
-def configurar_partida(dados):
+@autenticar(exigir_master=True)
+def configurar_partida(dados, lobby, jogador):
     """
     Aplica as configurações da partida definidas pelo master na sala de espera
     (nome, quantidade de dados, máximo de jogadores, coringa, pública).
     """
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or not jogador.master:
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if lobby.status != 'espera':
         return
     if lobby.definir_config(dados.get('config', {})):
@@ -436,18 +457,12 @@ def configurar_partida(dados):
 
 @socketio.on('ficar_pronto')
 @evento_mutavel
-def ficar_pronto(dados):
+@autenticar()
+def ficar_pronto(dados, lobby, jogador):
     """
     Alterna a prontidão do jogador na sala de espera. O jogo só inicia quando
     todos os jogadores (não-master) estiverem prontos.
     """
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None:
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if lobby.status != 'espera':
         return
     jogador.pronto = not jogador.pronto
@@ -456,20 +471,14 @@ def ficar_pronto(dados):
 
 @socketio.on('comprometer_seed')
 @evento_mutavel
-def comprometer_seed(dados):
+@autenticar()
+def comprometer_seed(dados, lobby, jogador):
     """
     Verificação de integridade (provably fair): o cliente envia o nonce gerado
     localmente + o compromisso SHA-256 dele na sala de espera. O servidor valida
     a coerência e publica o compromisso para todos (base da auditoria).
     """
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None:
-        return
     if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
         return
     if lobby.registrar_compromisso(jogador, dados.get('nonce'), dados.get('compromisso')):
         emit('seed_compromissos', lobby.info_publica_seed(), to=lobby.sala_room())
@@ -478,31 +487,20 @@ def comprometer_seed(dados):
 
 @socketio.on('solicitar_auditoria')
 @evento_mutavel
-def solicitar_auditoria(dados):
+@autenticar()
+def solicitar_auditoria(dados, lobby, jogador):
     """Reenvia o payload de auditoria da partida atual (ex.: reconexão na tela 4)."""
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None:
-        return
-    if jogador.chave_secreta != (dados or {}).get('chave', ''):
-        return
     partida = jogador.partida_atual
     if partida is None or not partida.seed_info:
         return
-    emit('auditoria_partida', partida.montar_auditoria(), to=client_id)
+    emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id)
 
 
 @socketio.on('adicionar_ia')
 @evento_mutavel
-def adicionar_ia(dados):
+@autenticar(exigir_master=True)
+def adicionar_ia(dados, lobby, jogador):
     """O master adiciona bots à sala de espera (níveis 1-4, Fase 11)."""
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or not jogador.master:
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if lobby.status != 'espera':
         return
     if ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1)):
@@ -511,15 +509,9 @@ def adicionar_ia(dados):
 
 @socketio.on('completar_com_ias')
 @evento_mutavel
-def completar_com_ias(dados):
+@autenticar(exigir_master=True)
+def completar_com_ias(dados, lobby, jogador):
     """O master preenche as vagas restantes da sala com bots (Fase 11)."""
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or not jogador.master:
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if lobby.status != 'espera':
         return
     if ia.completar_bots(lobby, dados.get('nivel', 2)):
@@ -528,15 +520,9 @@ def completar_com_ias(dados):
 
 @socketio.on('remover_ia')
 @evento_mutavel
-def remover_ia(dados):
+@autenticar(exigir_master=True)
+def remover_ia(dados, lobby, jogador):
     """O master remove bots da sala de espera, por nível ou todos (Fase 11)."""
-    dados = dados or {}
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or not jogador.master:
-        return
-    if jogador.chave_secreta != dados.get('chave', ''):
-        return
     if lobby.status != 'espera':
         return
     if ia.remover_bots(lobby, dados.get('nivel')) > 0:
@@ -574,125 +560,104 @@ def criar_sala(dados=None):
 
 @socketio.on('verificar_desconectados')
 @evento_mutavel
-def verificar_desconectados(dados):
+@autenticar(extrair_chave=None)
+def verificar_desconectados(dados, lobby, jogador):
     """
     Os clientes agendam este evento após receberem 'jogador_desconectado'
     (Fase 9): garante que alguém expurgue, após a janela de graça, quem caiu no
     meio da partida e não voltou — sem depender de timer no servidor.
     achar_jogador já faz o expurgo; aqui só persistimos se algo saiu.
     """
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None:
-        return
     if _purgar_desconectados(lobby):
         atualizar_lista_usuarios(lobby)
 
 
 @socketio.on('jogar_dados')
 @evento_mutavel
-def jogar_dados(dados):
+@autenticar()
+def jogar_dados(dados, lobby, jogador):
     """
     Esta função envia os números dos dados sorteados aos jogadores, cada jogador recebe seus
     respectivos dados sorteados.
     """
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or jogador.rodada_atual is None:
-        return
-    # Fase 7 (A3): autentica o dono do sid.
-    if jogador.chave_secreta != (dados or {}).get('chave', ''):
+    if jogador.rodada_atual is None:
         return
     # Fase 7 (A6): idempotência explícita por rodada — já rolou não rola de novo.
     if jogador.joguei_dados:
         return
     jogador.joguei_dados = True
-    emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados})
+    # Fase 10 (S4): escopo explícito — o resultado é só de quem rolou.
+    emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+         to=jogador.client_id)
     salvar_sala(lobby)
 
 
 @socketio.on('joguei_dados')
 @evento_mutavel
-def joguei_dados(dados):
+@autenticar(extrair_chave=lambda d: d.get('chave_secreta', ''))
+def joguei_dados(dados, lobby, jogador):
     """
     Esta função é executada por cada jogador da partida quando termina de executar e visualizar o resultado de seus
     dados. Ela deve redirecionar todos os jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
     turnos, mas somente depois de todos os dados terem sido jogados.
     """
-    chave = (dados or {}).get('chave_secreta', '')
-    client_id = request.sid
-    _, jogador = achar_jogador(client_id)
-
-    if jogador is not None and jogador.rodada_atual is not None and jogador.chave_secreta == chave:
-        emit('meus_dados', {'dados': jogador.dados})
-        rodada = jogador.rodada_atual
-        lobby = jogador.lobby_atual
-        # Executar isso \/ quando o último jogar os dados
-        if rodada.verificar_se_todos_ja_jogaram_seus_dados():
-            lobby.pagina = 2
-            mudar_pagina(2, sala=lobby.sala_id)
-        ia.processar(lobby)
-        salvar_sala(lobby)
+    if jogador.rodada_atual is None:
+        return
+    # Fase 10 (S4): escopo explícito — os dados são só de quem confirmou.
+    emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id)
+    rodada = jogador.rodada_atual
+    # Executar isso \/ quando o último jogar os dados
+    if rodada.verificar_se_todos_ja_jogaram_seus_dados():
+        lobby.pagina = 2
+        mudar_pagina(2, sala=lobby.sala_id)
+    ia.processar(lobby)
+    salvar_sala(lobby)
 
 
 @socketio.on('apostar')
 @evento_mutavel
-def aposta(dados):
+@autenticar(extrair_chave=_chave_aninhada)
+def aposta(dados, lobby, jogador):
     """
     Função executada pelo jogador quando ele faz uma aposta, mas antes verifica se o jogador está em uma rodada e se
     ele é o da vez no turno.
     """
-    dados_n = (dados or {}).get('dados', {})
-    if not isinstance(dados_n, dict):
+    internos = dados.get('dados')
+    if not isinstance(internos, dict):
         return
-    chave = dados_n.get('chave', '')
-    dados_aposta = dados_n.copy()
+    dados_aposta = internos.copy()
     dados_aposta.pop('chave', None)
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or not chave:
-        return
     rodada = jogador.rodada_atual
-    if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
-        jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados_aposta)
+    if rodada and rodada.vez_atual == jogador:
+        rodada.construir_turno(jogador=jogador, dados=dados_aposta)
         ia.processar(lobby)
         salvar_sala(lobby)
 
 
 @socketio.on('desconfiar')
 @evento_mutavel
-def desconfiar(dados):
+@autenticar(extrair_chave=_chave_aninhada)
+def desconfiar(dados, lobby, jogador):
     """
     Função executada pelo jogador quando ele desconfia de uma aposta, mas antes verifica se o jogador está em uma
     rodada e se ele é o da vez no turno.
-    :param dados: Chave do jogador para verificação de autenticidade.
     """
-    chave = (((dados or {}).get('dados')) or {}).get('chave', '')
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or not chave:
-        return
-    if jogador.rodada_atual and jogador.rodada_atual.vez_atual == jogador and jogador.chave_secreta == chave and len(
-            jogador.rodada_atual.turnos) > 0:
-        jogador.rodada_atual.desconfiar(jogador=jogador)
+    rodada = jogador.rodada_atual
+    if rodada and rodada.vez_atual == jogador and len(rodada.turnos) > 0:
+        rodada.desconfiar(jogador=jogador)
         ia.processar(lobby)
         salvar_sala(lobby)
 
 
 @socketio.on('conferencia_final')
 @evento_mutavel
-def conferencia_final(dados):
+@autenticar()
+def conferencia_final(dados, lobby, jogador):
     """
     Quanto todos os participantes da rodada clicam em ok, na conferência final da rodada, esta função engatilha
     uma nova rodada na partida.
     """
-    chave = (dados or {}).get('chave', '')
-    client_id = request.sid
-    lobby, jogador = achar_jogador(client_id)
-    if jogador is None or jogador.rodada_atual is None or jogador.partida_atual is None:
-        return
-    # Fase 7 (A3): autentica o dono do sid.
-    if jogador.chave_secreta != chave:
+    if jogador.rodada_atual is None or jogador.partida_atual is None:
         return
     if jogador.confirmou_rodada:
         return
@@ -707,22 +672,14 @@ def conferencia_final(dados):
 
 @socketio.on('vencedor_final')
 @evento_mutavel
-def vencedor_final(dados):
+@autenticar()
+def vencedor_final(dados, lobby, jogador):
     """
     Quanto todos os participantes da rodada clicam em ok, na tela de vencedor, esta função engatilha
     uma nova partida no lobby.
     """
-    chave = (dados or {}).get('chave', '')
-    client_id = request.sid
-    _, jogador = achar_jogador(client_id)
-    if jogador is None or jogador.lobby_atual is None:
-        return
-    # Fase 7 (A3): autentica o dono do sid.
-    if jogador.chave_secreta != chave:
-        return
     if jogador.confirmou_vencedor:
         return
-    lobby = jogador.lobby_atual
     jogador.confirmou_vencedor = True
     lobby.conferiram_vencedor += 1
     if lobby.conferiram_vencedor == len(lobby.jogadores):
@@ -735,25 +692,19 @@ def vencedor_final(dados):
 
 @socketio.on('foguetear_click')
 @evento_mutavel
-def foguetear(dados):
+@autenticar()
+def foguetear(dados, lobby, jogador):
     """
     Função que torna os fogos de comemoração compartilhados com todos na partida.
     """
-    client_id = request.sid
-    _, jogador = achar_jogador(client_id)
-    if jogador is None:
-        return
-    # Fase 7 (A3): autentica o dono do sid.
-    if jogador.chave_secreta != (dados or {}).get('chave', ''):
-        return
     partida = jogador.partida_atual
     rodada = jogador.rodada_atual
     # Fase 6 (B4): partida encerrada por desconexão não define rodada.vencedor,
     # mas sim partida.vencedor_final — o vencedor precisa poder comemorar.
     if rodada is not None and rodada.vencedor == jogador:
-        emit('soltar_fogos', to=jogador.lobby_atual.sala_room())
+        emit('soltar_fogos', to=lobby.sala_room())
     elif partida is not None and partida.vencedor_final == jogador:
-        emit('soltar_fogos', to=jogador.lobby_atual.sala_room())
+        emit('soltar_fogos', to=lobby.sala_room())
 
 
 if __name__ == '__main__':

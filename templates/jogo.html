@@ -504,6 +504,18 @@
     </div>
     <!-- TUTORIAL FIM -->
 
+    <!-- MODAL DE ALERTA INICIO -->
+    <div id="alerta_overlay" class="alerta-overlay" role="alertdialog" aria-modal="true"
+        aria-labelledby="alerta_titulo" aria-describedby="alerta_mensagem">
+        <div class="alerta-modal">
+            <div id="alerta_icone" class="alerta-icone">⚠️</div>
+            <h4 id="alerta_titulo" class="alerta-titulo">Atenção</h4>
+            <p id="alerta_mensagem" class="alerta-mensagem"></p>
+            <button id="alerta_ok" class="btn btn-info" type="button" onclick="fechar_alerta()">Ok</button>
+        </div>
+    </div>
+    <!-- MODAL DE ALERTA FIM -->
+
     <!-- PAINEL DE DICAS INICIO -->
     <div id="painel_dicas" class="painel-dicas" role="status">
         <span id="dicas_texto" class="flex-grow-1"></span>

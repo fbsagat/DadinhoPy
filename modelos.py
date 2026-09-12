@@ -6,6 +6,45 @@ import narrador
 import seed
 
 
+def sala_room(sala_id):
+    """Nome da room do Socket.IO a partir do id de uma sala (fonte única do prefixo)."""
+    return f"sala_{sala_id}"
+
+
+# Versão do formato serializado do Lobby (store distribuído). Sempre que a
+# serialização mudar de forma incompatível, incremente e registre a migração
+# correspondente em MIGRACOES (Fase 10, S3).
+VERSAO_ATUAL = 3
+
+
+def _migrar_v1_para_v2(dados):
+    """v1 -> v2 (Fase 5): sala de espera ganha nome/status/página/config/prontidão."""
+    dados.setdefault('nome', None)
+    dados.setdefault('status', 'espera')
+    dados.setdefault('pagina', 0)
+    dados.setdefault('config', {})
+    for jogador in dados.get('jogadores', []) or []:
+        jogador.setdefault('pronto', False)
+    return dados
+
+
+def _migrar_v2_para_v3(dados):
+    """v2 -> v3 (Fase 11): jogadores IA e configs de substituição/nível dos bots."""
+    for jogador in dados.get('jogadores', []) or []:
+        jogador.setdefault('is_ia', False)
+        jogador.setdefault('ia_nivel', None)
+    config = dados.setdefault('config', {})
+    config.setdefault('substituir_desconectado_por_ia', False)
+    config.setdefault('ia_nivel_padrao', 2)
+    return dados
+
+
+MIGRACOES = {
+    1: _migrar_v1_para_v2,
+    2: _migrar_v2_para_v3,
+}
+
+
 class Jogador:
     def __init__(self, client_id, master=False, lobby=None, partida_atual=None, rodada_atual=None, turno_atual=None):
         self.client_id = client_id
@@ -45,11 +84,6 @@ class Jogador:
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
                 f"master={self.master}, pontos={self.pontos}, entrou={self.entrou})")
-
-    @classmethod
-    def criar_jogador(cls, client_id, master=False):
-        """Cria e retorna uma nova instância de Jogador."""
-        return cls(client_id=client_id, master=master)
 
     @classmethod
     def criar_ia(cls, nivel, username):
@@ -155,7 +189,7 @@ class Lobby:
         """
         Nome da room no Socket.IO correspondente a esta sala.
         """
-        return f"sala_{self.sala_id}"
+        return sala_room(self.sala_id)
 
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
@@ -167,7 +201,6 @@ class Lobby:
         for rodada in partida.rodadas:
             rodadas.append({
                 'rodada_num': rodada.rodada_num,
-                'jogaram_dados': rodada.jogaram_dados,
                 'todos_os_dados': rodada.todos_os_dados,
                 'dados_por_jogador': rodada.dados_por_jogador,
                 'com_coringa': rodada.com_coringa,
@@ -204,7 +237,7 @@ class Lobby:
     def para_dict(self):
         """Serializa toda a árvore do Lobby (jogadores + partidas) para o store distribuído."""
         return {
-            'versao': 3,
+            'versao': VERSAO_ATUAL,
             'sala_id': self.sala_id,
             'lobby_num': self.lobby_num,
             'pagina': self.pagina,
@@ -218,12 +251,35 @@ class Lobby:
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
         }
 
+    @staticmethod
+    def _migrar(dados):
+        """
+        Aplica as migrações de formato (Fase 10, S3): lê a versão gravada e sobe
+        passo a passo até VERSAO_ATUAL. Dados sem versão são tratados como v1.
+        Um formato mais novo que o atual é mantido como está (os defaults cobrem
+        campos ausentes), evitando rebaixar uma gravação futura.
+        """
+        if not isinstance(dados, dict):
+            return dados
+        try:
+            versao = int(dados.get('versao') or 1)
+        except (ValueError, TypeError):
+            versao = 1
+        while versao in MIGRACOES:
+            dados = MIGRACOES[versao](dados)
+            versao += 1
+        if versao <= VERSAO_ATUAL:
+            dados['versao'] = VERSAO_ATUAL
+        return dados
+
     @classmethod
     def de_dict(cls, dados):
         """
         Reconstrói a árvore completa do Lobby a partir do dicionário serializado.
         Referências são religadas por client_id / índices (ver Jogador.para_dict).
+        Antes de tudo, migra o formato pela `versao` gravada (Fase 10, S3).
         """
+        dados = cls._migrar(dados)
         sala_id = dados.get('sala_id', 'padrao')
         lobby = cls(sala_id=sala_id, lobby_numero=dados.get('lobby_num', 1))
         lobby.conferiram_vencedor = dados.get('conferiram_vencedor', 0)
@@ -276,7 +332,6 @@ class Lobby:
                 rodada = Rodada(partida=partida, jogadores=partida.jogadores,
                                 rodada_numero=dados_rodada.get('rodada_num', 1),
                                 vez_atual=jogadores.get(dados_rodada.get('vez_atual_id')))
-                rodada.jogaram_dados = bool(dados_rodada.get('jogaram_dados', False))
                 rodada.todos_os_dados = list(dados_rodada.get('todos_os_dados') or [])
                 rodada.dados_por_jogador = dados_rodada.get('dados_por_jogador') or {}
                 rodada.com_coringa = bool(dados_rodada.get('com_coringa', True))
@@ -683,12 +738,6 @@ class Lobby:
         else:
             return len(self.jogadores)
 
-    def listar_jogadores(self):
-        lista = []
-        for jogador in self.jogadores:
-            lista.append(jogador)
-        return lista
-
     def retornar_master(self):
         for jogador in self.jogadores:
             if jogador.master:
@@ -760,7 +809,7 @@ class Partida:
             for jogador in self.jogadores:
                 turnos_lista[jogador.username] = [[0, 0]]
             emit("construtor_html",
-                 {'rodada_n': rodada_numero, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
+                 {'rodada_n': rodada_numero, 'turnos_lista': turnos_lista,
                   'dados_tt': self.dados_qtd}, to=self.sala_room())
             emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, to=self.sala_room())
             emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, to=self.sala_room())
@@ -799,9 +848,6 @@ class Partida:
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
             self.do_lobby.pagina = 1
             return rodada
-
-    def contar_jogadores(self):
-        return len(self.jogadores)
 
     def verificar_partida_anterior(self):
         """
@@ -903,7 +949,6 @@ class Rodada:
                  com_coringa=True):
         self.rodada_num = rodada_numero
         self.da_partida = partida
-        self.jogaram_dados = False
         self.turnos = []
         self.todos_os_dados = []
         self.dados_por_jogador = {}
@@ -989,7 +1034,6 @@ class Rodada:
             self.dados_por_jogador[jogador.client_id] = list(dados)
             for dado in dados:
                 self.todos_os_dados.append(dado)
-        self.jogaram_dados = True
 
     def verificar_se_todos_ja_jogaram_seus_dados(self):
         jogadores_tt = len(self.da_partida.jogadores)

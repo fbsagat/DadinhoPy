@@ -472,6 +472,87 @@ canvas {
     border-top: 1px solid rgba(13, 202, 240, 0.4);
 }
 
+/* Modal de alerta reutilizável (substitui os window.alert do navegador). */
+.alerta-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 8, 20, 0.75);
+    padding: 16px;
+    backdrop-filter: blur(3px);
+}
+
+.alerta-modal {
+    background-color: #001125;
+    border: 2px solid var(--cor-info);
+    border-radius: 16px;
+    box-shadow: 0 0 30px rgba(13, 202, 240, 0.5);
+    width: min(92vw, 420px);
+    padding: 22px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    animation: alerta_aparecer 0.25s ease;
+}
+
+@keyframes alerta_aparecer {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.alerta-icone {
+    font-size: 2.4rem;
+    line-height: 1;
+}
+
+.alerta-titulo {
+    margin: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.15rem;
+    color: var(--cor-info);
+}
+
+.alerta-mensagem {
+    margin: 0;
+    color: #eaf6ff;
+    white-space: pre-line;
+}
+
+.alerta-modal .btn {
+    min-width: 120px;
+    margin-top: 4px;
+}
+
+.alerta-overlay[data-tipo="erro"] .alerta-modal {
+    border-color: #dc3545;
+    box-shadow: 0 0 30px rgba(220, 53, 69, 0.5);
+}
+
+.alerta-overlay[data-tipo="erro"] .alerta-titulo {
+    color: #ff6b7d;
+}
+
+.alerta-overlay[data-tipo="sucesso"] .alerta-modal {
+    border-color: #198754;
+    box-shadow: 0 0 30px rgba(25, 135, 84, 0.5);
+}
+
+.alerta-overlay[data-tipo="sucesso"] .alerta-titulo {
+    color: #4ade80;
+}
+
 /* ============================================================
    Fase 11: melhorias visuais + responsividade mobile-first.
    Layout padrão para desktop: full HD (1920x1080).
