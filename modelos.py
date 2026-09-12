@@ -22,6 +22,9 @@ class Jogador:
         self.rodada_atual = rodada_atual
         self.turno_atual = turno_atual
         self.entrou = datetime.now()
+        # Dedup de confirmação (evita clique duplo/refresh contar 2x e travar o jogo).
+        self.confirmou_rodada = False
+        self.confirmou_vencedor = False
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -56,6 +59,8 @@ class Jogador:
             'dados_qtd': self.dados_qtd,
             'joguei_dados': self.joguei_dados,
             'entrou': self.entrou.isoformat() if self.entrou else None,
+            'confirmou_rodada': self.confirmou_rodada,
+            'confirmou_vencedor': self.confirmou_vencedor,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -82,6 +87,9 @@ class Lobby:
         self.jogadores = []
         self.partidas = []
         self.conferiram_vencedor = 0
+        # Página atual da sala (0=lobby, 1=rolar dados, 2=turnos, 3=conferência, 4=vitória).
+        # Persistida para permitir o snapshot no reconnect/novo tab (Fase 4).
+        self.pagina = 0
 
     def sala_room(self):
         """
@@ -106,6 +114,7 @@ class Lobby:
                 'coringa_atual_jogador_id': rodada.coringa_atual_jogador.client_id
                 if rodada.coringa_atual_jogador else None,
                 'conferiram': rodada.conferiram,
+                'conferencia': rodada.conferencia,
                 'vez_atual_id': rodada.vez_atual.client_id if rodada.vez_atual else None,
                 'perdedor_id': rodada.perdedor.client_id if rodada.perdedor else None,
                 'vencedor_id': rodada.vencedor.client_id if rodada.vencedor else None,
@@ -124,6 +133,7 @@ class Lobby:
             'dados_qtd': partida.dados_qtd,
             'jogadores_ids': [jogador.client_id for jogador in partida.jogadores],
             'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
+            'vencedor_final_id': partida.vencedor_final.client_id if partida.vencedor_final else None,
             'rodadas': rodadas,
         }
 
@@ -133,6 +143,7 @@ class Lobby:
             'versao': 1,
             'sala_id': self.sala_id,
             'lobby_num': self.lobby_num,
+            'pagina': self.pagina,
             'conferiram_vencedor': self.conferiram_vencedor,
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
@@ -147,6 +158,7 @@ class Lobby:
         sala_id = dados.get('sala_id', 'padrao')
         lobby = cls(sala_id=sala_id, lobby_numero=dados.get('lobby_num', 1))
         lobby.conferiram_vencedor = dados.get('conferiram_vencedor', 0)
+        lobby.pagina = dados.get('pagina', 0)
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):
@@ -160,6 +172,8 @@ class Lobby:
             jogador.joguei_dados = bool(dados_jogador.get('joguei_dados', False))
             entrou = dados_jogador.get('entrou')
             jogador.entrou = datetime.fromisoformat(entrou) if entrou else datetime.now()
+            jogador.confirmou_rodada = bool(dados_jogador.get('confirmou_rodada', False))
+            jogador.confirmou_vencedor = bool(dados_jogador.get('confirmou_vencedor', False))
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
@@ -171,6 +185,7 @@ class Lobby:
                               partida_numero=dados_partida.get('partida_num', 1),
                               dados_qtd=dados_partida.get('dados_qtd', 1))
             partida.jogador_sorteado = jogadores.get(dados_partida.get('jogador_sorteado_id'))
+            partida.vencedor_final = jogadores.get(dados_partida.get('vencedor_final_id'))
             for dados_rodada in dados_partida.get('rodadas', []):
                 rodada = Rodada(partida=partida, jogadores=partida.jogadores,
                                 rodada_numero=dados_rodada.get('rodada_num', 1),
@@ -181,6 +196,7 @@ class Lobby:
                 rodada.coringa_atual_qtd = dados_rodada.get('coringa_atual_qtd', 0)
                 rodada.coringa_atual_jogador = jogadores.get(dados_rodada.get('coringa_atual_jogador_id'))
                 rodada.conferiram = dados_rodada.get('conferiram', 0)
+                rodada.conferencia = dados_rodada.get('conferencia')
                 rodada.perdedor = jogadores.get(dados_rodada.get('perdedor_id'))
                 rodada.vencedor = jogadores.get(dados_rodada.get('vencedor_id'))
                 for dados_turno in dados_rodada.get('turnos', []):
@@ -240,6 +256,7 @@ class Lobby:
         Mantém apelido, pontos e status de master; zera somente o estado da partida.
         """
         self.conferiram_vencedor = 0
+        self.pagina = 0
         for jogador in self.jogadores:
             jogador.partida_atual = None
             jogador.rodada_atual = None
@@ -247,6 +264,8 @@ class Lobby:
             jogador.dados = []
             jogador.dados_qtd = 0
             jogador.joguei_dados = False
+            jogador.confirmou_rodada = False
+            jogador.confirmou_vencedor = False
             jogador.partidas = []
             jogador.rodadas = []
             jogador.turnos = []
@@ -313,6 +332,19 @@ class Lobby:
                 return jogador
         return None
 
+    def buscar_jogador_pela_chave(self, chave_secreta):
+        """
+        Procura um jogador pela chave secreta de sessão (usado para retomar
+        identidade em um refresh/reconexão sem depender do sid antigo).
+        :param chave_secreta: A chave do jogador (vinda de sessionStorage).
+        """
+        if not chave_secreta:
+            return None
+        for jogador in self.jogadores:
+            if jogador.chave_secreta == chave_secreta:
+                return jogador
+        return None
+
     def contar_jogadores(self, nome=False):
         if nome:
             quantidade = sum(1 for jogador in self.jogadores if jogador.username is not None)
@@ -346,6 +378,7 @@ class Partida:
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
         self.rodadas = []
+        self.vencedor_final = None
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.jogadores]
@@ -403,6 +436,7 @@ class Partida:
             for jogador in self.jogadores:
                 jogador.rodada_atual = rodada
                 jogador.joguei_dados = False
+                jogador.confirmou_rodada = False
                 jogador.turnos = []
                 jogador.rodadas.append(rodada)
                 jogador.dados_qtd = self.dados_qtd if rodada_numero == 1 else jogador.dados_qtd
@@ -422,6 +456,7 @@ class Partida:
                 emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
                 emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
+            self.do_lobby.pagina = 1
             return rodada
 
     def contar_jogadores(self):
@@ -475,6 +510,8 @@ class Partida:
         Dar um ponto pro vencedor.
         """
         jogador.pontos += 1
+        self.vencedor_final = jogador
+        self.do_lobby.pagina = 4
         emit('vencedor_da_partida', {'nome': jogador.username}, to=self.sala_room())
         emit('botao_vencedor_ativ', to=jogador.client_id)
         emit("mudar_pagina", {'pag_numero': 4}, to=self.sala_room())
@@ -503,6 +540,7 @@ class Rodada:
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
         self.conferiram = 0
+        self.conferencia = None  # Payload da tela de conferência, persistido p/ snapshot (Fase 4).
         self.vez_atual = vez_atual
         self.perdedor = perdedor
         self.vencedor = vencedor
@@ -622,10 +660,13 @@ class Rodada:
         # Mudar para a tela de conferência destacando o vencedor e o perdedor e descrevendo o acontecimento:
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         dados = [jogador.dados for jogador in self.da_partida.jogadores]
-        emit('cards_conferencia',
-             {'nomes': nomes, 'ganhador': vencedor, 'perdedor': perdedor, 'saiu_da_partida': saiu, 'dados': dados,
-              'dado_apostado_face': ultimo_turno.dado_face,
-              'com_coringa': self.com_coringa, 'texto': txt}, to=self.sala_room())
+        self.conferencia = {
+            'nomes': nomes, 'ganhador': vencedor, 'perdedor': perdedor, 'saiu_da_partida': saiu, 'dados': dados,
+            'dado_apostado_face': ultimo_turno.dado_face,
+            'com_coringa': self.com_coringa, 'texto': txt,
+        }
+        self.da_partida.do_lobby.pagina = 3
+        emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
 
     def atualizar_front_pro_da_vez(self, jogador_atual):

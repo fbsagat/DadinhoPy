@@ -69,6 +69,98 @@ def mudar_pagina(num, sala):
     emit("mudar_pagina", {'pag_numero': num}, to=sala_room(sala))
 
 
+def enviar_snapshot_sala(lobby, jogador):
+    """
+    Reconstrói o front-end de um jogador que acabou de conectar (tab novo, refresh
+    ou reconexão), refletindo o estado persistido da sala (Fase 4).
+
+    O estado autoritativo já é emitido por eventos; aqui apenas os repetimos para
+    este cliente, na ordem certa, baseado em `lobby.pagina`.
+    """
+    pagina = lobby.pagina
+    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id)
+    if pagina == 0:
+        return
+
+    # Um tab novo que chega no meio da partida não tem partida_atual: usa a última.
+    partida = jogador.partida_atual
+    if partida is None and lobby.partidas:
+        partida = lobby.partidas[-1]
+    if partida is None:
+        return
+
+    rodada = partida.rodadas[-1] if partida.rodadas else None
+    espectador = jogador not in partida.jogadores
+
+    if pagina == 1:
+        if rodada is not None:
+            emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador},
+                 to=jogador.client_id)
+            if not espectador and jogador.joguei_dados and jogador.dados:
+                # Já rolou: repete o resultado pra reapresentar os dados na tela.
+                emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados},
+                     to=jogador.client_id)
+        return
+
+    if pagina == 2:
+        if rodada is None:
+            return
+        turnos_lista = {
+            j.username: [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]]
+            for j in partida.jogadores
+        }
+        emit('construtor_html',
+             {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista, 'coringa_atual': rodada.coringa_atual_qtd,
+              'dados_tt': partida.dados_qtd}, to=jogador.client_id)
+        emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id)
+        if rodada.com_coringa is False:
+            emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id)
+        else:
+            emit('atualizar_coringa', {
+                'coringa_atual': rodada.coringa_atual_qtd,
+                'ultimo_coringa': rodada.coringa_atual_jogador.username if rodada.coringa_atual_jogador else '',
+            }, to=jogador.client_id)
+        if not espectador:
+            emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id)
+        nomes = [j.username for j in partida.jogadores]
+        vez_atual = rodada.vez_atual
+        emit('formatador_coletivo', {'jogadores_nomes': nomes,
+                                     'jogador_inicial_nome': vez_atual.username if vez_atual else ''},
+             to=jogador.client_id)
+        for j in partida.jogadores:
+            if j.turnos:
+                emit('atualizar_turno',
+                     {'jogador': j.username, 'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]]},
+                     to=jogador.client_id)
+        if vez_atual is not None:
+            if not espectador and vez_atual == jogador:
+                emit('meu_turno', {'username': jogador.username, 'turno_num': len(rodada.turnos)},
+                     to=jogador.client_id)
+            else:
+                emit('espera_turno', {'username': vez_atual.username}, to=jogador.client_id)
+        return
+
+    if pagina == 3:
+        if rodada is not None and rodada.conferencia:
+            emit('cards_conferencia', rodada.conferencia, to=jogador.client_id)
+        return
+
+    if pagina == 4:
+        if partida.vencedor_final is not None:
+            emit('vencedor_da_partida', {'nome': partida.vencedor_final.username}, to=jogador.client_id)
+            nomes = [j.username for j in lobby.jogadores if j.username is not None]
+            pontos = [j.pontos for j in lobby.jogadores if j.username is not None]
+            emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id)
+            if not espectador and partida.vencedor_final == jogador:
+                emit('botao_vencedor_ativ', to=jogador.client_id)
+        return
+
+    # Jogadores que não estão mais na partida (perderam os dados) entram como espectador:
+    # esconde os painéis e mostra o selo ESPECTADOR por último, para não ser sobrescrito.
+    if espectador:
+        emit('espectador', {'nome': jogador.username}, to=jogador.client_id)
+
+
 def atualizar_lista_usuarios(lobby):
     """
     Atualiza a lista de usuários na tela de entrada de jogadores da sala.
