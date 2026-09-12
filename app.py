@@ -8,10 +8,12 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
 from modelos import Jogador
 from store import trancar_sala, esquecer_sala
 from datetime import datetime
+from socketio.manager import Manager as GerenciadorSocketIOBase
 import functools
 import os
 import store
 import ia
+import threading
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("DADINHO_SECRET_KEY", "supersecretkey")
@@ -19,6 +21,45 @@ app.secret_key = os.environ.get("DADINHO_SECRET_KEY", "supersecretkey")
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
 COOLDOWN_ESCRITA = 0.5
 COOLDOWN_BUSCA = 2.0
+
+
+class GerenciadorThreadSeguro(GerenciadorSocketIOBase):
+    """
+    Corrige uma corrida do python-socketio em async_mode 'threading' (a instância
+    quente da Vercel atende requests concorrentes): basic_leave_room apaga o
+    namespace quando a última sala sai, enquanto outro thread acabou de registrar
+    o sid em manager.connect. O join_room seguinte então estoura
+    "sid is not connected to requested namespace" (ou KeyError), o handler de
+    connect falha e o cliente entra em loop de reconexão.
+
+    Serializa as mutações do registro de rooms com um RLock reentrante; connect,
+    join_room e leave_room passam a ser atômicos entre si.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._trava_registro = threading.RLock()
+
+    def connect(self, eio_sid, namespace):
+        with self._trava_registro:
+            return super().connect(eio_sid, namespace)
+
+    def basic_enter_room(self, sid, namespace, room, eio_sid=None):
+        with self._trava_registro:
+            return super().basic_enter_room(sid, namespace, room, eio_sid=eio_sid)
+
+    def basic_leave_room(self, sid, namespace, room):
+        with self._trava_registro:
+            return super().basic_leave_room(sid, namespace, room)
+
+    def basic_disconnect(self, sid, namespace, **kwargs):
+        with self._trava_registro:
+            return super().basic_disconnect(sid, namespace, **kwargs)
+
+    def basic_close_room(self, room, namespace):
+        with self._trava_registro:
+            return super().basic_close_room(room, namespace)
+
 
 # Transporte e armazenamento ajustáveis por ambiente (ver Fase 2 do todo.md).
 async_mode = os.environ.get("DADINHO_ASYNC_MODE", "threading").strip() or "threading"
@@ -28,6 +69,7 @@ permitir_websocket = os.environ.get("DADINHO_PERMITIR_WEBSOCKET", padrao_permiti
 socketio = SocketIO(
     app,
     async_mode=async_mode,
+    client_manager=GerenciadorThreadSeguro(),
     allow_upgrades=permitir_websocket,
     ping_interval=15,
     ping_timeout=20,
