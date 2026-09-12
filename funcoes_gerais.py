@@ -1,26 +1,87 @@
 from flask_socketio import emit
 from modelos import Lobby
 import re
+import store
 
-lobby_unico = Lobby(lobby_numero=1)
-
-
-def mudar_pagina(num, broadcast=False):
-    emit("mudar_pagina", {'pag_numero': num}, broadcast=broadcast)
+SALA_PADRAO = "padrao"
 
 
-def atualizar_lista_usuarios():
+def sala_room(sala_id):
     """
-    Atualiza a lista de usuários na tela de entrada de jogadores.
+    Retorna o nome da room no Socket.IO para um id de sala.
     """
-    lista = lobby_unico.listar_jogadores()
+    return f"sala_{sala_id}"
+
+
+def normalizar_sala(sala_id):
+    """
+    Normaliza e valida o id de sala vindo da URL/front-end. Inválidos caem na sala padrão.
+    """
+    if not isinstance(sala_id, str):
+        return SALA_PADRAO
+    sala = sala_id.strip().lower()
+    if re.fullmatch(r"[a-z0-9\-_]{1,24}", sala):
+        return sala
+    return SALA_PADRAO
+
+
+def obter_sala(sala_id):
+    """
+    Retorna o Lobby da sala, carregando-o do store distribuído ou criando caso ainda não exista.
+    """
+    sala_id = normalizar_sala(sala_id)
+    lobby = store.carregar_sala(sala_id)
+    if lobby is None:
+        lobby = Lobby(sala_id=sala_id, lobby_numero=store.contar_salas() + 1)
+        store.salvar_sala(lobby)
+    return lobby
+
+
+def salvar_sala(lobby):
+    """
+    Persiste o estado atual da sala no store distribuído.
+    """
+    if lobby is not None:
+        store.salvar_sala(lobby)
+
+
+def buscar_lobby_pelo_client_id(client_id):
+    """
+    Procura em todas as salas o Lobby que contém o jogador com o client_id informado.
+    """
+    for lobby in store.listar_lobbys():
+        if lobby.buscar_jogador_pelo_client_id(client_id) is not None:
+            return lobby
+    return None
+
+
+def remover_sala(sala_id):
+    """
+    Remove uma sala vazia do store (GC de salas sem ninguém).
+    """
+    store.remover_sala(sala_id)
+
+
+def mudar_pagina(num, sala):
+    """
+    Envia a mudança de página escopada à room da sala.
+    """
+    emit("mudar_pagina", {'pag_numero': num}, to=sala_room(sala))
+
+
+def atualizar_lista_usuarios(lobby):
+    """
+    Atualiza a lista de usuários na tela de entrada de jogadores da sala.
+    """
+    lista = lobby.listar_jogadores()
     usernames = [jogador.username for jogador in lista if jogador.username is not None]
     pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
     masters = [jogador.master for jogador in lista if jogador.username is not None]
-    o_master = lobby_unico.retornar_master()
+    o_master = lobby.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
-    emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, broadcast=True)
+    emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, to=lobby.sala_room())
+    salvar_sala(lobby)
 
 
 def validar_input(texto, tamanho_minimo=1, tamanho_maximo=12, permitir_espacos=True,

@@ -26,9 +26,22 @@
         <!-- TELA JOGADORES INICIO (0) -->
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
+            <div class="mb-4">
+                <small class="text-light d-block mb-2">Sala atual: <span id="sala_atual"
+                        class="badge text-bg-info">#padrao</span>
+                </small>
+                <div class="d-flex justify-content-center gap-2 flex-wrap">
+                    <input type="text" id="input_sala" class="form-control text-center" style="width: 160px;"
+                        maxlength="24" placeholder="Código da sala" onkeydown="verificar_enter(event, 'sala')">
+                    <button id="bot_sala_entrar" class="btn btn-outline-info" onclick="entrar_sala()">Entrar</button>
+                    <button id="bot_sala_criar" class="btn btn-info" onclick="criar_sala()">Criar sala</button>
+                    <button class="btn btn-outline-light" onclick="copiar_link_sala()">Copiar link</button>
+                </div>
+            </div>
+
             <div>
                 <input type="text" id="apelido" class="container form-control text-center mx-auto" style="width: 200px;"
-                    onkeydown="verificr_enter(event, 'button')" placeholder="Escreva seu nome..." maxlength="10">
+                    onkeydown="verificar_enter(event, 'button')" placeholder="Escreva seu nome..." maxlength="10">
                 <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
             </div>
 
@@ -79,58 +92,9 @@
         <!-- TELA JOGADORES FIM -->
         <!-- TELA JOGAR DADOS INICIO (1) -->
         <div id="tela_jogar_dados" class="tela_jogar_dados container-fluid text-center" style="display: none;">
-
-            <!-- Tela dados -->
-            <!-- <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded"
-                style="--bs-bg-opacity: .3;">
-                <button id="dadobotao" class="btn btn-primary mt-2" onclick="jogar_dados()">Jogar dados</button>
-                <div class="container mt-5">
-                    <div class="row d-flex justify-content-evenly">
-                        <div class="col-4 text-center">
-                            <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem 1"
-                                width="100" height="100">
-                        </div>
-                        <div class="col-4 text-center">
-                            <img id="dado2" src="../static/imagens/dado/6.png" class="img-fluid" alt="Imagem 2"
-                                width="100" height="100">
-                        </div>
-                        <div class="col-4 text-center">
-                            <img id="dado3" src="../static/imagens/dado/3.png" class="img-fluid" alt="Imagem 3"
-                                width="100" height="100">
-                        </div>
-                        <div class="col-4 text-center">
-                            <img id="dado3" src="../static/imagens/dado/2.png" class="img-fluid" alt="Imagem 3"
-                                width="100" height="100">
-                        </div>
-                        <div class="col-4 text-center">
-                            <img id="dado3" src="../static/imagens/dado/2.png" class="img-fluid" alt="Imagem 3"
-                                width="100" height="100">
-                        </div>
-                        <div class="col-4 text-center">
-                            <img id="dado3" src="../static/imagens/dado/2.png" class="img-fluid" alt="Imagem 3"
-                                width="100" height="100">
-                        </div>
-                    </div>
-                </div>
-                <audio id="rollSound" src="../static/sounds/dice-roll.mp3"></audio>
-            </div> -->
-            <!-- Fim da Tela dados -->
-            <!-- Tela espectador -->
-            <!-- <div class="container my-4 p-3 mb-2 bg-black text-white border border-light rounded"
-                style="--bs-bg-opacity: .3;">
-                <div class="container mt-5 d-flex justify-content-center align-items-center">
-                    <span class="fs-3 badge text-bg-primary text-wrap mb-2" style="width: 36rem;">Aguarde, os dados
-                        estão rolando</span>
-                </div>
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div> -->
-            <!-- Fim da Tela espectador -->
         </div>
-    </div>
-    <!-- TELA JOGAR DADOS FIM -->
-    <!-- TELA PARTIDA INICIO (2) -->
+        <!-- TELA JOGAR DADOS FIM -->
+        <!-- TELA PARTIDA INICIO (2) -->
     <div id="tela_partida" class="tela_partida container-fluid text-center" style="display: none;">
 
         <div
@@ -139,89 +103,22 @@
             <div id="meus_dados"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
                 style="width: 375px;">
-
-                <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
-                <div class="col-auto">
-                    <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
-                </div>
-                <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
-                <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
-
             </div>
 
             <div id="dados_mesa"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
                 style="width: 375px;">
-
-                <!-- <span class="fs-5 text-white me-2">Seus dados: </span>
-                <div class="col-auto">
-                    <img id="dado1" src="../static/imagens/dado/1.png" class="img-fluid me-2" alt="Imagem 1" width="30" height="30">
-                </div>
-                <div class="col-auto"><img id="dado2" src="../static/imagens/dado/3.png" class="img-fluid me-2" alt="Imagem 2" width="30" height="30"></div>
-                <div class="col-auto"><img id="dado3" src="../static/imagens/dado/5.png" class="img-fluid me-2" alt="Imagem 3" width="30" height="30"></div> -->
-
             </div>
 
             <div id="corin_atual"
                 class="col-5 d-flex justify-content-around align-items-center text-primary-emphasis bg-dark border border-primary-subtle rounded-3 px-1 py-1"
                 style="width: 375px;">
-
-                <!-- <span class="fs-5 text-white me-2">Coringa atual: </span>
-                <img src="../static/imagens/dado/1.png" class="img-fluid" alt="Imagem atual" width="30" height="30">
-                <span class="fs-5 text-white me-2">Não foi jogado</span> -->
-
             </div>
 
         </div>
         <div class="row justify-content-around mt-2">
             <div class="container-fluid">
                 <div id="cards" class="row d-flex justify-content-evenly row no-gutters">
-
-                    <!-- CARD DE EXEMPLO NUM 1 -->
-                    <!-- <div class="col-md-2 col-sm-4 col-6 mb-1">
-                        <div class="card border-primary border-4 text-bg-dark">
-                            <div class="card-header">Fábio</div>
-                            <div class="card-body">
-                                <div class="row d-flex justify-content-center align-items-center text-center">
-
-                                    <div class="col-md-12 mb-1">
-                                        <div
-                                            class="d-flex align-items-center justify-content-evenly border border-2 border-primary rounded">
-                                            <div>
-                                                <img src="../static/imagens/dado/6.png" class="diceImage img-fluid ms-4"
-                                                    alt="Imagem 1" width="40" height="40">
-                                            </div>
-                                            <div class="mt-2">
-                                                <h1 class="fs-3">X4</h1>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-12 mb-1 opacity-50">
-                                        <div class="d-flex align-items-center justify-content-evenly border rounded">
-                                            <div>
-                                                <img src="../static/imagens/dado/4.png" class="diceImage img-fluid ms-4"
-                                                    alt="Imagem 1" width="40" height="40">
-                                            </div>
-                                            <div class="mt-2">
-                                                <h1 class="fs-3">X6</h1>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-12 mb-1 opacity-25">
-                                        <div class="d-flex align-items-center justify-content-evenly border rounded">
-                                            <div>
-                                                <img src="../static/imagens/dado/1.png" class="diceImage img-fluid ms-4"
-                                                    alt="Imagem 1" width="40" height="40">
-                                            </div>
-                                            <div class="mt-2">
-                                                <h1 class="fs-3">X1</h1>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div> -->
                 </div>
             </div>
 
@@ -305,7 +202,6 @@
             </div>
 
         </div>
-        <!-- ESSA MERDA NÃO QUER SUMIR -->
         <div class="d-flex justify-content-center align-items-center">
             <span id="painel_aguarde" class="fs-4 badge text-bg-warning text-wrap mb-1 me-1"
                 style="width: 16rem; display: none;">Aguarde a sua vez</span>
@@ -327,44 +223,6 @@
             <h1 class="fw-bold text-primary hero">Conferência</h1>
 
             <div class="row d-flex justify-content-around" id="cards_conferencia">
-
-                <!-- <div class="col-sm-3 mb-3">
-                    <div class="card text-bg-secondary">
-                        <div class="card-body">
-                            <h5 class="card-title">Fábio</h5>
-                            <hr>
-                            <div class="row d-flex justify-content-evenly">
-                                <div class="row container text-center">
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                    <div class="col g-1">
-                                        <img src="../static/imagens/dado/1.png" class="img-fluid px-1" alt="Imagem 1"
-                                            width="40" height="40">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div> -->
-
             </div>
         </div>
         <div class="d-flex justify-content-center align-items-center">
@@ -385,7 +243,6 @@
 
     </div>
     <!-- TELA VITORIA FIM -->
-    </div>
 
     <script src="/static/script.js"></script>
 

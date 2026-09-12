@@ -1,54 +1,55 @@
 let indiceAtual = 0;
-
-// // Função para capturar a tecla "K"
-// // Definindo uma constante para a tecla "K"
-// const TECLA_K = 'k';
-// document.addEventListener('keydown', function (event) {
-//     // Verifica se a tecla pressionada é "K" (minúscula ou maiúscula)
-//     if (event.key === TECLA_K || event.key === TECLA_K.toUpperCase()) {
-//         const logo = document.getElementById('titulo_img');
-//         const logodiv = document.getElementById('div_titulo_img');
-//         const paginas = [
-//             document.getElementById('tela_jogadores'),
-//             document.getElementById('tela_jogar_dados'),
-//             document.getElementById('tela_partida'),
-//             document.getElementById('tela_conferencia'),
-//             document.getElementById('tela_vitoria')
-//         ]
-//         let indicie_atual = 0;
-//         paginas[indiceAtual].style.display = "none";
-//         // Atualiza o índice para a próxima página
-//         indiceAtual = (indiceAtual + 1) % paginas.length; // Ciclo entre 0 e o número de páginas
-//         // Mostra a próxima página
-//         paginas[indiceAtual].style.display = "block";
-
-//         if (indiceAtual === 2) {
-//             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-//             logodiv.style.height = '10vh';
-//             logo.src = "../static/imagens/titulo_p.png";
-//             logo.style.width = '25%';
-//         } else if (indiceAtual === 3) {
-//             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-//             logodiv.style.height = '45vh';
-//             logo.src = "../static/imagens/titulo.png";
-//             logo.style.width = '40%';
-//         } else {
-//             // logo.style.display = "block"; // Exibe o logotipo
-//             logodiv.style.height = '45vh';
-//             logo.src = "../static/imagens/titulo.png";
-//             logo.style.width = '40%';
-//         }
-//     }
-// });
-
-// Embaralhar os dados ao iniciar
-window.onload = escolherImagemAleatoria;
 let chave_secreta = '';
 let nome_jogador = '';
+let sala_atual = getParamSala();
 
 
-const socket = io({ autoConnect: true });
+const socket = io({ autoConnect: true, query: { sala: sala_atual } });
 socket.connect();
+
+function getParamSala() {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('sala') || 'padrao').trim() || 'padrao';
+}
+
+function ir_para_sala(codigo) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('sala', codigo);
+    window.location.href = url.toString();
+}
+
+function criar_sala() {
+    const caracteres = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let codigo = '';
+    for (let i = 0; i < 5; i++) {
+        codigo += caracteres[Math.floor(Math.random() * caracteres.length)];
+    }
+    ir_para_sala(codigo);
+}
+
+function entrar_sala() {
+    const input = document.getElementById('input_sala');
+    const codigo = input.value.trim();
+    if (!codigo) {
+        alert('Digite o código da sala!');
+        return;
+    }
+    ir_para_sala(codigo);
+}
+
+function copiar_link_sala() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('sala', sala_atual);
+    navigator.clipboard.writeText(url.toString());
+}
+
+const apelidoSalvo = sessionStorage.getItem('dadinho_apelido');
+if (apelidoSalvo) {
+    const apelidoInput = document.getElementById('apelido');
+    if (apelidoInput) {
+        apelidoInput.value = apelidoSalvo;
+    }
+}
 
 // Atualiza a lista de jogadores
 socket.on("update_user_list", (data) => {
@@ -95,18 +96,18 @@ socket.on("update_user_list", (data) => {
             headerRow.appendChild(pontuacaoDiv); // Adiciona cada pontuação à lista
         });
 
+        const iniciar_jogo = document.getElementById('iniciar_jogo');
         if (data.users.length >= 2) {
-            const iniciar_jogo = document.getElementById('iniciar_jogo');
             iniciar_jogo.disabled = false; // Ativa o botão de iniciar partida
         } else {
-            iniciar_jogo.disabled = true; // Ativa o botão de iniciar partida
+            iniciar_jogo.disabled = true; // Desativa o botão de iniciar partida
         }
     }
 });
 
 socket.on('atualizar_pontos', function (data) {
     data.nomes.forEach((nome, index) => {
-        pontos = document.getElementById(`pontos_${nome}`);
+        const pontos = document.getElementById(`pontos_${nome}`);
         pontos.textContent = data.pontos[index];
     })
 })
@@ -159,7 +160,7 @@ socket.on("mudar_pagina", function (data) {
 });
 
 // Função para preencher os dados do jogador na página de partida
-socket.on('meus_dados', function (data, index) {
+socket.on('meus_dados', function (data) {
     const meus_dados = document.getElementById('meus_dados');
     meus_dados.innerHTML = "";
     const span = document.createElement('span');
@@ -167,7 +168,7 @@ socket.on('meus_dados', function (data, index) {
     span.innerText = "Seus dados: ";
     meus_dados.appendChild(span);
 
-    data.dados.forEach(dados => {
+    data.dados.forEach((dado, index) => {
         const col_dado = document.createElement('div');
         col_dado.className = "col-auto";
 
@@ -176,7 +177,7 @@ socket.on('meus_dados', function (data, index) {
         img_dado.alt = `imagem ${index}`;
         img_dado.width = 30;
         img_dado.height = 30;
-        img_dado.src = `../static/imagens/dado/${dados}.png`;
+        img_dado.src = `../static/imagens/dado/${dado}.png`;
 
         meus_dados.appendChild(col_dado);
         col_dado.appendChild(img_dado);
@@ -186,12 +187,12 @@ socket.on('meus_dados', function (data, index) {
 
 // Função para preencher a info sobre os dados na mesa
 socket.on('dados_mesa', function (data) {
-    dados_mesa = document.getElementById('dados_mesa')
-    data = data.total
+    const dados_mesa = document.getElementById('dados_mesa')
+    const total = data.total
     dados_mesa.innerHTML = ""
-    span = document.createElement('span')
+    const span = document.createElement('span')
     span.className = 'fs-5 text-white me-2'
-    span.innerHTML = `Temos <b>${data}</b> dados na mesa`
+    span.innerHTML = `Temos <b>${total}</b> dados na mesa`
     dados_mesa.appendChild(span)
 });
 
@@ -319,17 +320,7 @@ socket.on('construtor_dados', function (data) {
         // Adicionando o container interno ao container principal
         container.appendChild(containerInterno);
 
-        // Criação do elemento de áudio
-        const audio = document.createElement('audio');
-        audio.id = 'rollSound';
-        audio.src = '../static/sounds/dice-roll.mp3';
-
-        // Adicionando o elemento de áudio ao container principal
-        container.appendChild(audio);
-
-        // Adicionando o container principal ao corpo do documento
-        document.body.appendChild(container);
-
+        // Adicionando o container principal à tela
         tela_jogar_dados.appendChild(container)
     } else {
         // Cria a div principal
@@ -409,21 +400,6 @@ socket.on('construtor_html', function (data) {
         row.className = 'row d-flex justify-content-center align-items-center text-center';
         row.id = `card_row_${jogador}`;
 
-        if (data.rodada_n != 0) {
-
-            let opacidade;
-            // Definindo a opacidade com base no índice
-            if (i === 0) {
-                opacidade = 'opacity-25'; // Para o índice 0, opacidade 25%
-            } else if (i === 1) {
-                opacidade = 'opacity-50'; // Para o índice 1, opacidade 50%
-            } else if (i === 2) {
-                opacidade = 'opacity-100'; // Para o índice 2, opacidade 100%
-            }
-            for (let i = 0; i < turnos.length; i++) {
-                row.appendChild(createDiceSection(`X${turnos[i][0]}`, opacidade, turnos[i][1]));
-            }
-        }
         // Montando a estrutura do card
         cardBody.appendChild(row);
         card.appendChild(cardHeader);
@@ -438,7 +414,7 @@ socket.on('construtor_html', function (data) {
 socket.on('atualizar_turno', function (dados) {
     const jogador = dados.jogador
     const lista_turnos = dados.lista_turnos
-    card_row = document.getElementById(`card_row_${jogador}`)
+    const card_row = document.getElementById(`card_row_${jogador}`)
     card_row.innerHTML = ""
     lista_turnos.forEach((sublista, index) => {
         const dado = sublista[0];
@@ -488,11 +464,14 @@ socket.on('espera_turno', function (data) {
 socket.on('reset_rodada', function (data) {
     const jogadores = data.jogadores_nomes;
     const jogadores_dados = data.jogadores_dados_qtd;
+    const botao = document.getElementById('bot_confe_fim');
+    const botao_desc = document.getElementById('desconfiar');
+    botao.disabled = false; // Reativa o input
+    botao_desc.disabled = true; // Desativa o input
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_hea_${jogador}`);
         const c_row = document.getElementById(`card_row_${jogador}`);
-        const botao = document.getElementById('bot_confe_fim');
 
         if (card) {  // Verifica se o elemento existe
             card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
@@ -500,9 +479,6 @@ socket.on('reset_rodada', function (data) {
         if (c_row) {  // Verifica se o elemento existe
             c_row.innerHTML = '';
         }
-        botao.disabled = false; // Reativa o input
-        const botao_desc = document.getElementById('desconfiar');
-        botao_desc.disabled = true; // Desativa o input
     });
 });
 
@@ -526,6 +502,10 @@ socket.on('formatador_coletivo', function (data) {
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_${jogador}`);
+
+        if (!card) {
+            return;
+        }
 
         if (jogador === eu) {
             if (jogador === jog_da_vez) {
@@ -661,19 +641,6 @@ socket.on('espectador', function (data) {
 
 })
 
-document.querySelectorAll('.image-button').forEach(button => {
-    button.addEventListener('click', () => {
-        // Remove a classe 'selected' de todos os botões
-        document.querySelectorAll('.image-button').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-
-        // Adiciona a classe 'selected' ao botão clicado
-        button.classList.add('selected');
-    });
-});
-
-
 // Lógica para enviar a aposta
 document.getElementById('apostar').addEventListener('click', () => {
     const quantidade = document.getElementById('quantidade').value;
@@ -705,15 +672,17 @@ document.getElementById('desconfiar').addEventListener('click', () => {
 // Funções após conectar
 socket.on("connect_start", function (data) {
     chave_secreta = data.chave_secreta;
+    if (data.sala) {
+        sala_atual = data.sala;
+        const badge = document.getElementById('sala_atual');
+        if (badge) {
+            badge.textContent = '#' + data.sala;
+        }
+    }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
-    textInput.disabled = false; // Desativa o input
-    botaapelido.disabled = false; // Desativa o input
-    if (data.is_master) {
-        startGameButton.style.display = "inline-block"; // Exibe o botão "Iniciar Jogo" para o mestre
-        textInput.disabled = true; // Desativa o input
-        botaapelido.disabled = true; // Desativa o input
-    }
+    textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
+    botaapelido.disabled = false;
 });
 
 socket.on("update_username", function (data) {
@@ -743,14 +712,11 @@ socket.on("jogar_dados_resultado", function (data) {
         }
     }
 
-    const rollSound = document.getElementById('rollSound');
-
     const rollInterval = 100; // Intervalo de troca de imagens em milissegundos
     const rollTime = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000; // Tempo total da rolagem
 
     // Inicia o som de rolagem
-    rollSound.currentTime = 0;
-    rollSound.play();
+    tocar_som_dados();
 
     // Inicia a animação de rolagem para todos os dados
     const animation = setInterval(() => {
@@ -773,10 +739,6 @@ socket.on("jogar_dados_resultado", function (data) {
             dado.src = finalResults[index];
         });
 
-        // Para o som
-        rollSound.pause();
-        rollSound.currentTime = 0;
-
         // Envia confirmação para o servidor
         socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
     }, rollTime);
@@ -784,7 +746,7 @@ socket.on("jogar_dados_resultado", function (data) {
 
 // Alerta de jogada inválida
 socket.on('jogada_invalida', function (data) {
-    txt = data.txtadd
+    const txt = data.txtadd
     window.alert(`Esta jogada é inválida, ${txt}`);
 })
 
@@ -794,6 +756,7 @@ function enviar_apelido() {
     const botaapelido = document.getElementById('botapel');
     let apelido = textInput.value.trim();
     if (apelido) {
+        sessionStorage.setItem('dadinho_apelido', apelido); // Mantém o apelido entre trocas de sala (recarregar página)
         socket.emit('apelido', { apelido_msg: textInput.value });
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
@@ -808,10 +771,49 @@ function iniciar_partida() {
     socket.emit('iniciar_partida', { dados_qtd: diceCount });
 }
 
+let contexto_audio = null;
+
+function garantir_contexto_audio() {
+    if (typeof (window.AudioContext) === 'undefined' && typeof (window.webkitAudioContext) === 'undefined') {
+        return false;
+    }
+    if (!contexto_audio) {
+        contexto_audio = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (contexto_audio.state === 'suspended') {
+        contexto_audio.resume();
+    }
+    return true;
+}
+
+// Simula o som de dados rolando, sem depender de arquivo de áudio externo.
+function tocar_som_dados() {
+    if (!contexto_audio || contexto_audio.state !== 'running') {
+        return;
+    }
+    const duracao = 0.8;
+    const taxa = contexto_audio.sampleRate;
+    const buffer = contexto_audio.createBuffer(1, Math.floor(taxa * duracao), taxa);
+    const canal = buffer.getChannelData(0);
+    // Rajadas curtas de ruído decaindo, simulando dados quicando na mesa.
+    for (let i = 0; i < canal.length; i++) {
+        const rajada = (i % 24) / 24;
+        const caida = 1 - (i / canal.length);
+        canal[i] = (Math.random() * 2 - 1) * (rajada < 0.5 ? 1 : 0.3) * caida;
+    }
+    const fonte = contexto_audio.createBufferSource();
+    fonte.buffer = buffer;
+    const ganho = contexto_audio.createGain();
+    ganho.gain.setValueAtTime(0.15, contexto_audio.currentTime);
+    fonte.connect(ganho);
+    ganho.connect(contexto_audio.destination);
+    fonte.start();
+}
+
 function jogar_dados() {
     socket.emit('jogar_dados');
-    const bot_iniciar = document.getElementById('jogar_dados');
-    constant = dadobt = document.getElementById('dadobotao');
+    garantir_contexto_audio();
+    const dadobt = document.getElementById('dadobotao');
     dadobt.disabled = true; // Desativa o input
 }
 
@@ -831,28 +833,14 @@ document.getElementById('comemorar').addEventListener('click', () => {
     socket.emit('foguetear_click');
 });
 
-function verificr_enter(event, button) {
-    if (event.key === 'Enter' && button === 'button') {
-        enviar_apelido();
+function verificar_enter(event, button) {
+    if (event.key !== 'Enter') {
+        return;
     }
-}
-
-function escolherImagemAleatoria() {
-    let diceImages = [
-        "../static/imagens/dado/1.png",
-        "../static/imagens/dado/2.png",
-        "../static/imagens/dado/3.png",
-        "../static/imagens/dado/4.png",
-        "../static/imagens/dado/5.png",
-        "../static/imagens/dado/6.png"
-    ];
-
-    // Loop para atualizar as imagens de dado no inicio da partida
-    for (let i = 1; i <= 3; i++) {
-        const randomIndex = Math.floor(Math.random() * diceImages.length); // Escolhe um índice aleatório
-        const randomImage = diceImages[randomIndex]; // Seleciona a imagem correspondente
-
-        document.getElementById(`dado${i}`).src = randomImage; // Atualiza o src da tag <img>
+    if (button === 'button') {
+        enviar_apelido();
+    } else if (button === 'sala') {
+        entrar_sala();
     }
 }
 
@@ -881,7 +869,7 @@ let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
 document.querySelectorAll('.image-button').forEach(button => {
     button.addEventListener('click', () => {
         // Desmarca todos os botões
-        document.querySelectorAll('.img-button').forEach(btn => {
+        document.querySelectorAll('.image-button').forEach(btn => {
             btn.classList.remove('selected');
         });
         // Marca o botão clicado

@@ -1,7 +1,7 @@
 body {
     background-color: #001125;
     /* Fundo escuro */
-    color: rgba(255, 0, 0, 0.212);
+    color: #ffffff;
     /* Texto branco */
     height: 100vh;
     /* Altura total da viewport */
@@ -11,6 +11,8 @@ body {
     /* Direção da coluna */
     align-items: center;
     /* Centraliza horizontalmente */
+    margin: 0;
+    overflow: hidden;
 }
 
 .custom-list {
@@ -167,10 +169,6 @@ input[type="number"] {
     /* Sombra azul suave ao focar */
 }
 
-body {
-    margin: 0;
-    overflow: hidden;
-}
 canvas {
     position: fixed; /* Fixa o canvas no fundo da página */
     top: 0;

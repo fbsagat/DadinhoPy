@@ -1,0 +1,53 @@
+# AGENTS.md
+
+"Dadinho" — a real-time multiplayer dice-bluffing game in the browser. Flask-SocketIO backend in Python, one HTML page + one JS file frontend. Design/spec doc: `Dadinho idéia.txt` (screens, rules, flow) — read it before changing game behavior.
+
+## Roadmap (constraints for new code)
+- **Target deployment: Vercel** (serverless/edge). Assume stateless infra; no single-server assumptions, no persistent in-memory state across requests. Game state lives in a distributed store (`store.py`) — see Architecture.
+- **Múltiplas salas já existem** (single instance): sala = `?sala=<id>` na URL; cada sala é uma room Socket.IO (`sala_<id>`) com seu próprio `Lobby`. Não hard-code um lobby único.
+- **Casual only.** No accounts, no long-term ranking, no leaderboards. Player state resets per partida; identity = Socket.IO `request.sid` only.
+
+## Commands
+- Run the server: `python app.py` (use the `.venv`; run from repo root). Opens on http://localhost:5000 by default. Local dev only — deployment targets Vercel, not a LAN reachable host.
+- No tests, no linter, no formatter, no CI. There is nothing to run for verification; manually test via two browser tabs.
+
+## Conventions
+- Code comments, docstrings, variable/socket-event names, and commit messages are in **Brazilian Portuguese (pt-BR)**. Follow this in new code. `app.py:20-23` is the style to match.
+- No `.gitignore` exists at repo level? Actually it does now (`.venv/`, `__pycache__/`, `.idea/`). `.venv/` is also ignored via global git config; don't rely on repo-level ignores alone.
+- `requirements.txt` is fully pinned. Add deps pinned the same way.
+
+## Architecture
+- **Socket.IO only, no REST routes** beyond `/` (serves `templates/jogo.html`). All game flow is event-driven through `flask_socketio.emit`.
+- **State lives in `store.py`** (distributed), not em processo: interface `carregar_sala`/`salvar_sala`/`remover_sala`/`listar_lobbys`, com `ArmazenamentoMemoria` (dev, `DADINHO_STORE=memoria`) e `ArmazenamentoUpstash` (Redis REST, via `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`). Cada sala é uma room `sala_<id>` e tem seu próprio `Lobby`, `master`, estado de partida, etc. Isolamento por sala via `join_room`/`leave_room` no connect/disconnect e `emit(..., to=<sala_room>)` em toda a cadeia (nada de `broadcast=True` global).
+- Model hierarchy: `Lobby` → `Partida` → `Rodada` → `Turno` (all in `modelos.py`). Models **emit Socket.IO events directly** (`from flask_socketio import emit`) — the "view layer" is the browser; `app.py` only registers event handlers and does lightweight auth checks. A árvore inteira é serializável (`Lobby.para_dict`/`Lobby.de_dict`, refs religadas por `client_id`/índices) para persistir no store.
+- Player identity = `request.sid` (Socket.IO session id); it is the key into a sala's `Lobby` (single source of truth). A player's live state (`partida_atual`, `rodada_atual`, `turno_atual`, `dados_qtd`, `joguei_dados`) lives as attributes on the `Jogador` object.
+- Each player gets a `chave_secreta` (`secrets.token_hex(16)`) on connect; the client echoes it back in `joguei_dados`, `aposta` (`dados['chave']`), and `desconfiar` to authenticate handlers. Any new client-mutable event needs this check.
+- First connection of cada sala becomes `master`; master re-choice on disconnect is in `handle_disconnect` → `achar_jogador` → `Lobby.definir_master()`. Todo handler que **muta** estado de sala deve terminar com `salvar_sala(lobby)` (se não, o turno/rodada pode se perder entre instâncias).
+- **Deploy/entrypoint:** `api/index.py` exporta `application = app.wsgi_app` (middleware Socket.IO) e `vercel.json` usa builder `@vercel/python` com rota catch-all. `app.secret_key` vem de `DADINHO_SECRET_KEY`. Transporte ajustável: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `false` com `VERCEL=1`; Vercel roda só long-polling).
+
+## Game flow (page numbers via `mudar_pagina`)
+0 = lobby, 1 = roll dice, 2 = turns/bets, 3 = round confirmation, 4 = victory screen. Events are emitted escopados à room da sala (`to=sala_<id>`) no namespace global.
+
+## Frontend
+- Everything lives in `templates/jogo.html` + `static/script.js` (~950 lines, all inline socket handling) + `static/custom_styles.css`. Server pushes state via events; JS builds the DOM. Images in `static/imagens/`. When touching a server `emit`, find the matching `socket.on` in `script.js` first.
+- `app.secret_key` vem de `DADINHO_SECRET_KEY` (fallback de dev `supersecretkey` em `app.py`); token Upstash via env vars — não comitar segredos.
+
+## Deploy e operação (Vercel)
+
+Fluxo real de publicação (Fase 3 do `todo.md`):
+
+0. **Produção atual:** https://dadinho-hazel.vercel.app (projeto `dadinho` da Vercel, scope `fbsagats-projects`, GitHub `fbsagat/DadinhoPy` conectado).
+
+1. **Pré-requisitos:** conta Vercel + CLI logado (`vercel whoami`), e um banco Redis REST da Upstash (node → panel → create database; copiar URL REST e token REST). Sem Upstash o código cai silenciosamente em `ArmazenamentoMemoria` (`store.py:108-115`), que quebra o estado entre instâncias serverless — só serve para validar na hora.
+2. **Env vars na Vercel** (dashboard do projeto → Settings → Environment Variables, ou `vercel env add <NOME> production`):
+   - `DADINHO_SECRET_KEY` — qualquer string longa aleatória (`secrets.token_hex(32)`).
+   - `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` — o par REST do banco Upstash.
+   - `VERCEL=1` é setado automaticamente pela plataforma (muda transportes/`socketio.run`); `DADINHO_PERMITIR_WEBSOCKET` e `DADINHO_ASYNC_MODE` não precisam de valor (padrão já é o correto em produção).
+3. **Publicar:** `vercel --prod` (submete o diretório local; `.vercelignore` já exclui `.venv`/`.idea`/`__pycache__`). Alternativa: conectar o repositório GitHub e dar push (git integration), que builda a cada `git push`.
+4. **Validar:** abrir a URL de produção em 2+ abas/navegadores/dispositivos, criar sala, rodar partida completa até vitória. Único meio de verificação do projeto (sem testes automatizados).
+
+Notas operacionais (validadas na Fase 3):
+- **Hobby (free):** função serverless até 300s (5 min) — suficiente para o long-polling (cada long-poll espera ~25s); memória 2 GB; concorrência escala até ~30k; uma região só (`iad1`, Virgínia); ~100 deploys/dia. WebSocket **não** existe na Vercel: transporte é só long-polling.
+- **Upstash free:** 256 MB, 500 mil comandos/mês, 10 GB banda. A sala inteira (árvore `Lobby`) é um campo de um hash (`dadinho:salas`), sobrescrita a cada mutação (`salvar_sala`).
+- **Limitação conhecida:** rooms/emits do Socket.IO vivem em memória **por instância**; com poucos jogadores a Vercel costuma servir a mesma instância quente, mas não é garantido. Se partidas quebram entre jogadores de verdade, a saída é um message queue (`socketio.RedisManager` via Upstash) — iteração futura.
+- **Sem leaderboard/estado de longo prazo:** casual only; o store guarda só o lobby atual de cada sala.

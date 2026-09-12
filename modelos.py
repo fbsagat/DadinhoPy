@@ -32,6 +32,35 @@ class Jogador:
         """Cria e retorna uma nova instância de Jogador."""
         return cls(client_id=client_id, master=master)
 
+    def para_dict(self, lobby):
+        """
+        Serializa o jogador para ser persistido no store distribuído.
+        Referências vivas (partida/rodada/turno atuais) viram índices dentro da árvore do Lobby.
+        """
+        partida_atual_idx = None
+        rodada_atual_idx = None
+        turno_atual_idx = None
+        if self.partida_atual in lobby.partidas:
+            partida_atual_idx = lobby.partidas.index(self.partida_atual)
+            if self.rodada_atual in self.partida_atual.rodadas:
+                rodada_atual_idx = self.partida_atual.rodadas.index(self.rodada_atual)
+                if self.turno_atual in self.rodada_atual.turnos:
+                    turno_atual_idx = self.rodada_atual.turnos.index(self.turno_atual)
+        return {
+            'client_id': self.client_id,
+            'username': self.username,
+            'master': self.master,
+            'chave_secreta': self.chave_secreta,
+            'pontos': self.pontos,
+            'dados': self.dados,
+            'dados_qtd': self.dados_qtd,
+            'joguei_dados': self.joguei_dados,
+            'entrou': self.entrou.isoformat() if self.entrou else None,
+            'partida_atual_idx': partida_atual_idx,
+            'rodada_atual_idx': rodada_atual_idx,
+            'turno_atual_idx': turno_atual_idx,
+        }
+
     def jogar_dados(self):
         """Rola os seus dados e retorna o resultado como uma lista de valores."""
         dados = []
@@ -47,21 +76,154 @@ class Lobby:
     Representa o momento onde os jogadores se juntam para jogar dadinho, até o fim deste momento.
     """
 
-    def __init__(self, lobby_numero):
+    def __init__(self, sala_id, lobby_numero):
+        self.sala_id = sala_id
         self.lobby_num = lobby_numero
         self.jogadores = []
         self.partidas = []
         self.conferiram_vencedor = 0
 
+    def sala_room(self):
+        """
+        Nome da room no Socket.IO correspondente a esta sala.
+        """
+        return f"sala_{self.sala_id}"
+
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
+
+    @staticmethod
+    def _partida_para_dict(partida):
+        """Serializa uma partida (com rodadas e turnos) para ser persistida no store."""
+        rodadas = []
+        for rodada in partida.rodadas:
+            rodadas.append({
+                'rodada_num': rodada.rodada_num,
+                'jogaram_dados': rodada.jogaram_dados,
+                'todos_os_dados': rodada.todos_os_dados,
+                'com_coringa': rodada.com_coringa,
+                'coringa_atual_qtd': rodada.coringa_atual_qtd,
+                'coringa_atual_jogador_id': rodada.coringa_atual_jogador.client_id
+                if rodada.coringa_atual_jogador else None,
+                'conferiram': rodada.conferiram,
+                'vez_atual_id': rodada.vez_atual.client_id if rodada.vez_atual else None,
+                'perdedor_id': rodada.perdedor.client_id if rodada.perdedor else None,
+                'vencedor_id': rodada.vencedor.client_id if rodada.vencedor else None,
+                'turnos': [
+                    {
+                        'turno_num': turno.turno_num,
+                        'do_jogador_id': turno.do_jogador.client_id if turno.do_jogador else None,
+                        'dado_face': turno.dado_face,
+                        'dado_qtd': turno.dado_qtd,
+                    }
+                    for turno in rodada.turnos
+                ],
+            })
+        return {
+            'partida_num': partida.partida_num,
+            'dados_qtd': partida.dados_qtd,
+            'jogadores_ids': [jogador.client_id for jogador in partida.jogadores],
+            'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
+            'rodadas': rodadas,
+        }
+
+    def para_dict(self):
+        """Serializa toda a árvore do Lobby (jogadores + partidas) para o store distribuído."""
+        return {
+            'versao': 1,
+            'sala_id': self.sala_id,
+            'lobby_num': self.lobby_num,
+            'conferiram_vencedor': self.conferiram_vencedor,
+            'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
+            'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
+        }
+
+    @classmethod
+    def de_dict(cls, dados):
+        """
+        Reconstrói a árvore completa do Lobby a partir do dicionário serializado.
+        Referências são religadas por client_id / índices (ver Jogador.para_dict).
+        """
+        sala_id = dados.get('sala_id', 'padrao')
+        lobby = cls(sala_id=sala_id, lobby_numero=dados.get('lobby_num', 1))
+        lobby.conferiram_vencedor = dados.get('conferiram_vencedor', 0)
+
+        jogadores = {}
+        for dados_jogador in dados.get('jogadores', []):
+            jogador = Jogador(client_id=dados_jogador['client_id'],
+                              master=dados_jogador.get('master', False))
+            jogador.username = dados_jogador.get('username')
+            jogador.chave_secreta = dados_jogador.get('chave_secreta', '')
+            jogador.pontos = dados_jogador.get('pontos', 0)
+            jogador.dados = list(dados_jogador.get('dados') or [])
+            jogador.dados_qtd = dados_jogador.get('dados_qtd', 0)
+            jogador.joguei_dados = bool(dados_jogador.get('joguei_dados', False))
+            entrou = dados_jogador.get('entrou')
+            jogador.entrou = datetime.fromisoformat(entrou) if entrou else datetime.now()
+            jogador.lobby_atual = lobby
+            jogadores[jogador.client_id] = jogador
+        lobby.jogadores = list(jogadores.values())
+
+        for dados_partida in dados.get('partidas', []):
+            jogadores_partida = [jogadores[cid] for cid in dados_partida.get('jogadores_ids', [])
+                                 if cid in jogadores]
+            partida = Partida(do_lobby=lobby, jogadores=jogadores_partida,
+                              partida_numero=dados_partida.get('partida_num', 1),
+                              dados_qtd=dados_partida.get('dados_qtd', 1))
+            partida.jogador_sorteado = jogadores.get(dados_partida.get('jogador_sorteado_id'))
+            for dados_rodada in dados_partida.get('rodadas', []):
+                rodada = Rodada(partida=partida, jogadores=partida.jogadores,
+                                rodada_numero=dados_rodada.get('rodada_num', 1),
+                                vez_atual=jogadores.get(dados_rodada.get('vez_atual_id')))
+                rodada.jogaram_dados = bool(dados_rodada.get('jogaram_dados', False))
+                rodada.todos_os_dados = list(dados_rodada.get('todos_os_dados') or [])
+                rodada.com_coringa = bool(dados_rodada.get('com_coringa', True))
+                rodada.coringa_atual_qtd = dados_rodada.get('coringa_atual_qtd', 0)
+                rodada.coringa_atual_jogador = jogadores.get(dados_rodada.get('coringa_atual_jogador_id'))
+                rodada.conferiram = dados_rodada.get('conferiram', 0)
+                rodada.perdedor = jogadores.get(dados_rodada.get('perdedor_id'))
+                rodada.vencedor = jogadores.get(dados_rodada.get('vencedor_id'))
+                for dados_turno in dados_rodada.get('turnos', []):
+                    turno = Turno(da_rodada=rodada, dado=dados_turno.get('dado_face', 1),
+                                  jogador=jogadores.get(dados_turno.get('do_jogador_id')),
+                                  dado_qtd=dados_turno.get('dado_qtd', 1),
+                                  turno_numero=dados_turno.get('turno_num', 1))
+                    rodada.turnos.append(turno)
+                partida.rodadas.append(rodada)
+            # Histórico de turnos por jogador: a rodada atual (última) é a que está em jogo.
+            for jogador in partida.jogadores:
+                jogador.turnos = []
+            if partida.rodadas:
+                for turno in partida.rodadas[-1].turnos:
+                    if turno.do_jogador is not None:
+                        turno.do_jogador.turnos.append(turno)
+            lobby.partidas.append(partida)
+
+        for dados_jogador, jogador in zip(dados.get('jogadores', []), lobby.jogadores):
+            partida_idx = dados_jogador.get('partida_atual_idx')
+            if partida_idx is not None and 0 <= partida_idx < len(lobby.partidas):
+                partida = lobby.partidas[partida_idx]
+                jogador.partida_atual = partida
+                rodada_idx = dados_jogador.get('rodada_atual_idx')
+                if rodada_idx is not None and 0 <= rodada_idx < len(partida.rodadas):
+                    rodada = partida.rodadas[rodada_idx]
+                    jogador.rodada_atual = rodada
+                    turno_idx = dados_jogador.get('turno_atual_idx')
+                    if turno_idx is not None and 0 <= turno_idx < len(rodada.turnos):
+                        jogador.turno_atual = rodada.turnos[turno_idx]
+            jogador.partidas = [p for p in lobby.partidas if jogador in p.jogadores]
+            jogador.rodadas = []
+            for partida in jogador.partidas:
+                jogador.rodadas.extend(r for r in partida.rodadas if jogador in r.jogadores)
+
+        return lobby
 
     def construir_partida(self, dados_qtd):
         """
         Constrói uma partida em um lobby.
         :param dados_qtd: A quantidade de dados para cada jogador nesta partida.
         """
-        emit('reset_partida', broadcast=True)  # Arruma algumas coisas da partida anterior no front-end
+        emit('reset_partida', to=self.sala_room())  # Arruma algumas coisas da partida anterior no front-end
         partida_numero = len(self.partidas) + 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
                           dados_qtd=dados_qtd)
@@ -71,6 +233,23 @@ class Lobby:
             jogador.partidas.append(partida)
             emit('desativar_username_edit', to=jogador.client_id)
         return partida
+
+    def resetar_para_lobby(self):
+        """
+        Volta todos os jogadores ao estado inicial do lobby, após o fim de uma partida.
+        Mantém apelido, pontos e status de master; zera somente o estado da partida.
+        """
+        self.conferiram_vencedor = 0
+        for jogador in self.jogadores:
+            jogador.partida_atual = None
+            jogador.rodada_atual = None
+            jogador.turno_atual = None
+            jogador.dados = []
+            jogador.dados_qtd = 0
+            jogador.joguei_dados = False
+            jogador.partidas = []
+            jogador.rodadas = []
+            jogador.turnos = []
 
     def verificar_apelido(self, nome):
         """
@@ -173,6 +352,12 @@ class Partida:
         txt = f"(PARTIDA do lobby {self.do_lobby} com jogadores: {jogadores_nomes})"
         return txt
 
+    def sala_room(self):
+        """
+        Nome da room no Socket.IO da sala onde a partida acontece.
+        """
+        return self.do_lobby.sala_room()
+
     def construir_rodada(self):
         """
         Constrói uma nova rodada numa partida.
@@ -203,9 +388,9 @@ class Partida:
                 turnos_lista[jogador.username] = [[0, 0]]
             emit("construtor_html",
                  {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
-                  'dados_tt': self.dados_qtd}, broadcast=True)
-            emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, broadcast=True)
-            emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, broadcast=True)
+                  'dados_tt': self.dados_qtd}, to=self.sala_room())
+            emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, to=self.sala_room())
+            emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, to=self.sala_room())
 
             # cria a rodada.
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
@@ -217,6 +402,7 @@ class Partida:
             jogadores_dados_qtd = []
             for jogador in self.jogadores:
                 jogador.rodada_atual = rodada
+                jogador.joguei_dados = False
                 jogador.turnos = []
                 jogador.rodadas.append(rodada)
                 jogador.dados_qtd = self.dados_qtd if rodada_numero == 1 else jogador.dados_qtd
@@ -232,10 +418,10 @@ class Partida:
                 dados_mesa += jogador.dados_qtd
             if rodada_numero > 1:
                 emit('reset_rodada', {'jogadores_nomes': nomes, 'jogadores_dados_qtd': jogadores_dados_qtd},
-                     broadcast=True)
-                emit('atualizar_coringa', {'coringa_atual': 0}, broadcast=True)
-                emit('dados_mesa', {'total': dados_mesa}, broadcast=True)
-            emit("mudar_pagina", {'pag_numero': 1}, broadcast=True)
+                     to=self.sala_room())
+                emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
+                emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
+            emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
             return rodada
 
     def contar_jogadores(self):
@@ -249,25 +435,30 @@ class Partida:
         rodada_numero = len(self.rodadas) + 1
         # Se não for a primeira rodada, escolher alguém para iniciar.
         if rodada_numero > 1:
-            perdedor = self.rodadas[-1].perdedor if hasattr(self.rodadas[-1], 'perdedor') else None
-            vencedor = self.rodadas[-1].vencedor if hasattr(self.rodadas[-1], 'vencedor') else None
-            # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado para ele
-            perdedor.dados_qtd -= 1
-            if perdedor.dados_qtd == 0:
-                # Fazer tudo isso com o perdedor da partida, ou seja, com nenhum dado.
-                perdedor.joguei_dados = False
-                perdedor.rodadas = []
-                perdedor.turnos = []
-                perdedor.rodada_atual = None
-                perdedor.turno_atual = None
-                self.jogadores.remove(perdedor)
-            if len(self.jogadores) < 2:
-                return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
-            else:
+            ultima_rodada = self.rodadas[-1]
+            perdedor = getattr(ultima_rodada, 'perdedor', None)
+            vencedor = getattr(ultima_rodada, 'vencedor', None)
+            if perdedor is not None:
+                # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado para ele
+                perdedor.dados_qtd -= 1
+                if perdedor.dados_qtd == 0:
+                    # Fazer tudo isso com o perdedor da partida, ou seja, com nenhum dado.
+                    perdedor.joguei_dados = False
+                    perdedor.rodadas = []
+                    perdedor.turnos = []
+                    perdedor.rodada_atual = None
+                    perdedor.turno_atual = None
+                    self.jogadores.remove(perdedor)
+                if len(self.jogadores) < 2:
+                    return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
                 if perdedor in self.jogadores:
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
-                else:
-                    return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
+                return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
+            # Sem registro de perdedor na rodada anterior: segue com o vencedor ou com um sorteado.
+            proximo = vencedor or self.jogador_sorteado
+            if len(self.jogadores) < 2:
+                return {'vez_atual': proximo, 'rodada_numero': rodada_numero, 'final': True}
+            return {'vez_atual': proximo, 'rodada_numero': rodada_numero}
         # Se for a primeira rodada, sortear.
         else:
             return {'vez_atual': self.jogador_sorteado, 'rodada_numero': rodada_numero}
@@ -284,14 +475,14 @@ class Partida:
         Dar um ponto pro vencedor.
         """
         jogador.pontos += 1
-        emit('vencedor_da_partida', {'nome': jogador.username}, broadcast=True)
+        emit('vencedor_da_partida', {'nome': jogador.username}, to=self.sala_room())
         emit('botao_vencedor_ativ', to=jogador.client_id)
-        emit("mudar_pagina", {'pag_numero': 4}, broadcast=True)
+        emit("mudar_pagina", {'pag_numero': 4}, to=self.sala_room())
         nomes = [jogador.username for jogador in self.do_lobby.jogadores if jogador.username is not None]
         pontos = [jogador.pontos for jogador in self.do_lobby.jogadores if jogador.username is not None]
 
         # Atualizar pontos na tela inicial.
-        emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, broadcast=True)
+        emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=self.sala_room())
 
 
 class Rodada:
@@ -321,6 +512,12 @@ class Rodada:
         txt = (f"(RODADA {self.rodada_num} da partida {self.da_partida} com os jogadores: {jogadores_nomes}, "
                f"perdedor: {self.perdedor}, vencedor: {self.vencedor})")
         return txt
+
+    def sala_room(self):
+        """
+        Nome da room no Socket.IO da sala onde a rodada acontece.
+        """
+        return self.da_partida.sala_room()
 
     def construir_turno(self, jogador, dados):
         """
@@ -428,8 +625,8 @@ class Rodada:
         emit('cards_conferencia',
              {'nomes': nomes, 'ganhador': vencedor, 'perdedor': perdedor, 'saiu_da_partida': saiu, 'dados': dados,
               'dado_apostado_face': ultimo_turno.dado_face,
-              'com_coringa': self.com_coringa, 'texto': txt}, broadcast=True)
-        emit("mudar_pagina", {'pag_numero': 3}, broadcast=True)
+              'com_coringa': self.com_coringa, 'texto': txt}, to=self.sala_room())
+        emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
 
     def atualizar_front_pro_da_vez(self, jogador_atual):
         """
@@ -438,7 +635,7 @@ class Rodada:
         """
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
-             broadcast=True)
+             to=self.sala_room())
         emit('meu_turno', {'username': jogador_atual.username, 'turno_num': len(self.turnos)},
              to=jogador_atual.client_id)
         for jogador in self.da_partida.jogadores:
@@ -469,22 +666,28 @@ class Turno:
         txt = f"(TURNO {self.turno_num} de {self.do_jogador.username}, (Face: {self.dado_face}, Qtd: {self.dado_qtd}))"
         return txt
 
+    def sala_room(self):
+        """
+        Nome da room no Socket.IO da sala onde o turno acontece.
+        """
+        return self.da_rodada.sala_room()
+
     def executar_turno(self):
         """Executa o turno no front end"""
         # Mostrar sempre os 3 últimos.
         turnos = self.do_jogador.turnos[-3:][::-1]
         lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
         emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos},
-             broadcast=True)
+             to=self.sala_room())
 
         if self.da_rodada.com_coringa is True:
             if lista_turnos[0][0] == 1:
                 emit('atualizar_coringa', {
                     'coringa_atual': self.da_rodada.coringa_atual_qtd,
                     'ultimo_coringa': self.da_rodada.coringa_atual_jogador.username,
-                    'coringa_cancelado': False}, broadcast=True)
+                    'coringa_cancelado': False}, to=self.sala_room())
         else:
-            emit('atualizar_coringa', {'coringa_cancelado': True}, broadcast=True)
+            emit('atualizar_coringa', {'coringa_cancelado': True}, to=self.sala_room())
 
     def obter_turno_anterior_na_partida(self):
         if self.turno_num > 1:
