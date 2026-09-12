@@ -325,9 +325,10 @@ canvas {
     background-color: rgba(13, 110, 253, 0.15) !important;
 }
 
-/* O tema do Bootstrap é claro, então `.text-muted` fica cinza-escuro sobre o
-   painel escuro da busca (ilegível). Força um tom claro legível no contexto. */
-.tela_busca .text-muted {
+/* O tema do Bootstrap é claro, então `.text-muted` fica cinza-escuro sobre os
+   painéis escuros do jogo (ilegível). Como o app inteiro usa fundo escuro,
+   força um tom claro legível em todos os textos secundários. */
+.text-muted {
     color: #bfe3ff !important;
 }
 
