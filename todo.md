@@ -1,6 +1,6 @@
 # TODO — Dadinho
 
-<!-- Fases 0 a 9 concluídas. Fase 10 aberta: limpeza/organização e tooling. -->
+<!-- Fases 0 a 9 e 11 concluídas. Fase 10 aberta: limpeza/organização e tooling. -->
 
 Plano em fases para o objetivo atual: **subir o jogo na Vercel, com múltiplas salas, casual only** (sem contas, sem ranking, sem VPS).
 
@@ -13,6 +13,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 8** — Performance e escala do store (Upstash). ✅ concluída
 - **Fase 9** — UX e melhorias de negócio. ✅ concluída
 - **Fase 10** — Limpeza, organização e tooling.
+- **Fase 11** — Jogadores IA (4 níveis). ✅ concluída
 
 ---
 
@@ -194,6 +195,24 @@ Objetivo: pagar dívida técnica e dar verificação automatizada ao projeto (ho
 - [ ] **S2 — Remover código morto:** `validar_numero` (usar na Fase 6 ou remover), `Partida.contar_jogadores`, `Rodada.jogaram_dados` (só serializado), `Lobby.listar_jogadores`, `Jogador.criar_jogador` (wrapper trivial), `sala_room()` duplicado (`funcoes_gerais.py:9` vs `Lobby.sala_room`), chaves `rodada_n`/`coringa_atual` não usadas de `construtor_html`.
 - [ ] **S4 — `emit` explícito com `to=`** em toda a cadeia (`jogar_dados_resultado` `app.py:238` e `meus_dados` `app.py:254` hoje dependem do default "somente ao originador" — deixar explícito).
 - [ ] **S5 — Decorator/helper** para o boilerplate `achar_jogador` + guard de chave repetido em ~10 handlers.
-- [ ] **S3 — Mecanismo de migração** por `versao` em `Lobby.para_dict`/`de_dict` (hoje `versao: 2` é gravado e nunca validado).
+- [ ] **S3 — Mecanismo de migração** por `versao` em `Lobby.para_dict`/`de_dict` (hoje `versao: 3` é gravado e nunca validado).
 - [ ] **S7 — Limpezas JS:** variável morta `indicie_atual` (`script.js:341`), bloco `{}` solto no `mudar_pagina`, `diceImages` como constante global, typos `conringa_cancelado`/`corin_atual` (`script.js:408-409`).
 - [ ] **Script único de verificação** no repo (`py_compile` + `node --check` + boot `VERCEL=1` respondendo 200 + integração `flask_socketio.test_client` cobrindo Fase 6/7) — consolidar os scripts heap de `Temp` no projeto.
+
+## Fase 11 — Jogadores IA (4 níveis) ✅ concluída
+
+Objetivo: bots server-side para preencher partidas reais e permitir testes sem vários navegadores.
+
+- [x] **Modelo (`modelos.py`)** — `Jogador.is_ia`/`ia_nivel` serializados (`versao` 3); `Jogador.criar_ia(nivel, username)`; `Lobby.definir_master` ignora bots; `Lobby.tem_humano()` (GC de sala só com bots); `resetar_para_lobby` mantém bots prontos; configs `substituir_desconectado_por_ia` e `ia_nivel_padrao` em `config_padrao`/`definir_config`.
+- [x] **Validação pura** — `Rodada.jogada_valida` extraída de `Turno.verificar_validade_da_jogada` (que passa a delegar, mantendo o efeito do 1º turno); a IA usa a versão pura para gerar apostas legais.
+- [x] **Motor (`ia.py`)** — `decidir` com 4 níveis: 1 Novato (aleatório), 2 Regular (aposta mínima + heurística binomial imperfeita), 3 Perito (binomial, limiar 0,40, aposta mais defensável), 4 Mestre (limiar 0,30 subindo em disputas longas + aposta de pressão com P≥0,60). Só usa os próprios dados + informação pública (nunca `rodada.todos_os_dados`).
+- [x] **Orquestrador** — `ia.processar(lobby)` roda dentro do request (sem threads/timers) e avança rolagem/apostas/conferência/vitória até precisar de humano; chamado em `iniciar_partida`, `joguei_dados`, `aposta`, `desconfiar`, `conferencia_final`, `vencedor_final`, `handle_connect` e no expurgo da graça. `handle_disconnect` remove sala sem humano; bots confirmam nas páginas 3/4.
+- [x] **Eventos/UI** — `adicionar_ia`/`completar_com_ias`/`remover_ia` (master + `chave_secreta`, só na espera); painel 🤖 no lobby (nível, quantidade, adicionar/completar/remover) e switch "Trocar desconectado por IA".
+- [x] **Substituição na graça** — `_substituir_por_ia`: com a opção ligada e havendo outro humano ativo, o desconectado vira bot (preserva dados/turno) em vez de sair.
+
+Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py ia.py simular_ia.py api/index.py`; `node --check static/script.js`; boot respondendo 200; simulador headless `python simular_ia.py` (milhares de partidas — hierarquia 4>3>2>1 consistente em 1-4 dados e com/sem coringa, sem travamentos); integração `flask_socketio.test_client` com 1 humano + 2 bots até o fim (humano virou espectador, bots fecharam e voltaram ao lobby); testes de serialização v3, `definir_master`, prontidão dos bots após reset e substituição por IA. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\` (`teste_integracao_ia.py`, `teste_modelo_ia.py`, `teste_substituicao_ia.py`, `sweep_ia.py`).
+
+Notas/limitações registradas (aceitos para o casual):
+- As ações dos bots são instantâneas (serverless-safe): a cadeia inteira de lances aparece de uma vez ao fim do request, sem animação espaçada no cliente.
+- `simular_ia.py` neutraliza `emit` e monta o `Lobby` direto no modelo — é ferramenta de verificação/balanceamento, não roda dentro do app.
+- Sala só com bots é removida no disconnect do último humano; a substituição por IA exige outro humano ativo (senão não faria sentido continuar).

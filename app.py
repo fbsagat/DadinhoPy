@@ -11,6 +11,7 @@ from datetime import datetime
 import functools
 import os
 import store
+import ia
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("DADINHO_SECRET_KEY", "supersecretkey")
@@ -101,22 +102,52 @@ def _remover_jogador_da_sala(lobby, jogador):
                 mudar_pagina(2, sala=lobby.sala_id)
 
 
+def _substituir_por_ia(lobby, jogador):
+    """
+    Converte um desconectado em bot (Fase 11), quando o master ativou a opção:
+    preserva dados/turno e deixa a partida seguir. Só vale se ainda houver outro
+    humano ativo — senão a sala seguiria só com bots.
+    """
+    if not lobby.config.get('substituir_desconectado_por_ia'):
+        return False
+    if jogador.partida_atual is None:
+        return False
+    tem_humano_ativo = any(not j.is_ia and j is not jogador and j.desconectado_em is None
+                           for j in lobby.jogadores)
+    if not tem_humano_ativo:
+        return False
+    jogador.is_ia = True
+    jogador.ia_nivel = int(lobby.config.get('ia_nivel_padrao', 2) or 2)
+    jogador.desconectado_em = None
+    jogador.pronto = True
+    emit('jogador_substituido_por_ia', {'nome': jogador.username or ''}, to=lobby.sala_room())
+    return True
+
+
 def _purgar_desconectados(lobby):
     """
     Remove da sala os jogadores cuja janela de reconexão (grace) já expirou
-    (Fase 9). Devolve True se algum jogador foi removido.
+    (Fase 9). Com a opção do master ligada, em vez de remover, o desconectado
+    vira bot (Fase 11) e a partida continua. Devolve True se algo mudou.
     """
     agora = datetime.now()
+    mudou = False
     removidos = False
     for jogador in list(lobby.jogadores):
         if jogador.desconectado_em is None:
             continue
         if (agora - jogador.desconectado_em).total_seconds() >= GRACE_RECONEXAO_SEGUNDOS:
+            if _substituir_por_ia(lobby, jogador):
+                mudou = True
+                continue
             _remover_jogador_da_sala(lobby, jogador)
             removidos = True
+            mudou = True
     if removidos:
         lobby.definir_master()
-    return removidos
+    if mudou:
+        ia.processar(lobby)
+    return mudou
 
 
 def evento_mutavel(func):
@@ -202,6 +233,10 @@ def handle_connect():
               'username': jogador.username})
         atualizar_lista_usuarios(lobby)
         enviar_snapshot_sala(lobby, jogador)
+        # Fase 11: se a partida parou na vez de uma IA (ex.: troca de instância),
+        # o connect destrava o fluxo.
+        if ia.processar(lobby):
+            salvar_sala(lobby)
 
 
 @socketio.on('disconnect')
@@ -250,8 +285,8 @@ def handle_disconnect():
 
         if lobby.contar_jogadores() > 0:
             lobby.definir_master()
-        todos_desconectados = all(j.desconectado_em is not None for j in lobby.jogadores)
-        if lobby.contar_jogadores() == 0 or todos_desconectados:
+        # Fase 11: sala só com bots (nenhum humano, nem na janela de graça) é removida.
+        if lobby.contar_jogadores() == 0 or not lobby.tem_humano():
             remover_sala(lobby.sala_id)
             sala_esvaziou = True
         else:
@@ -307,6 +342,7 @@ def iniciar_partida(dados):
         return
     partida = lobby.construir_partida(dados_qtd=int(lobby.config.get('dados_qtd', 1)))
     partida.construir_rodada()
+    ia.processar(lobby)
     salvar_sala(lobby)
     # Fase 8: status virou 'jogando' — atualiza o resumo da busca de partidas.
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
@@ -350,6 +386,57 @@ def ficar_pronto(dados):
         return
     jogador.pronto = not jogador.pronto
     atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('adicionar_ia')
+@evento_mutavel
+def adicionar_ia(dados):
+    """O master adiciona bots à sala de espera (níveis 1-4, Fase 11)."""
+    dados = dados or {}
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None or not jogador.master:
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.status != 'espera':
+        return
+    if ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1)):
+        atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('completar_com_ias')
+@evento_mutavel
+def completar_com_ias(dados):
+    """O master preenche as vagas restantes da sala com bots (Fase 11)."""
+    dados = dados or {}
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None or not jogador.master:
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.status != 'espera':
+        return
+    if ia.completar_bots(lobby, dados.get('nivel', 2)):
+        atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('remover_ia')
+@evento_mutavel
+def remover_ia(dados):
+    """O master remove bots da sala de espera, por nível ou todos (Fase 11)."""
+    dados = dados or {}
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None or not jogador.master:
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.status != 'espera':
+        return
+    if ia.remover_bots(lobby, dados.get('nivel')) > 0:
+        atualizar_lista_usuarios(lobby)
 
 
 @socketio.on('listar_partidas')
@@ -435,11 +522,13 @@ def joguei_dados(dados):
     if jogador is not None and jogador.rodada_atual is not None and jogador.chave_secreta == chave:
         emit('meus_dados', {'dados': jogador.dados})
         rodada = jogador.rodada_atual
+        lobby = jogador.lobby_atual
         # Executar isso \/ quando o último jogar os dados
         if rodada.verificar_se_todos_ja_jogaram_seus_dados():
-            jogador.lobby_atual.pagina = 2
-            salvar_sala(jogador.lobby_atual)
-            mudar_pagina(2, sala=jogador.lobby_atual.sala_id)
+            lobby.pagina = 2
+            mudar_pagina(2, sala=lobby.sala_id)
+        ia.processar(lobby)
+        salvar_sala(lobby)
 
 
 @socketio.on('apostar')
@@ -462,6 +551,7 @@ def aposta(dados):
     rodada = jogador.rodada_atual
     if rodada and jogador.chave_secreta == chave and rodada.vez_atual == jogador:
         jogador.rodada_atual.construir_turno(jogador=jogador, dados=dados_aposta)
+        ia.processar(lobby)
         salvar_sala(lobby)
 
 
@@ -481,6 +571,7 @@ def desconfiar(dados):
     if jogador.rodada_atual and jogador.rodada_atual.vez_atual == jogador and jogador.chave_secreta == chave and len(
             jogador.rodada_atual.turnos) > 0:
         jogador.rodada_atual.desconfiar(jogador=jogador)
+        ia.processar(lobby)
         salvar_sala(lobby)
 
 
@@ -506,6 +597,7 @@ def conferencia_final(dados):
     rodada.conferiram += 1
     if rodada.conferiram == len(rodada.jogadores):
         jogador.partida_atual.construir_rodada()
+    ia.processar(lobby)
     salvar_sala(lobby)
 
 
@@ -533,6 +625,8 @@ def vencedor_final(dados):
         lobby.resetar_para_lobby()
         atualizar_lista_usuarios(lobby)
         mudar_pagina(0, sala=lobby.sala_id)
+    ia.processar(lobby)
+    salvar_sala(lobby)
 
 
 @socketio.on('foguetear_click')

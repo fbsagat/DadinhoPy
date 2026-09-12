@@ -267,7 +267,7 @@ function aplicar_master() {
     if (iniciar_jogo) {
         iniciar_jogo.style.display = sou_master ? 'block' : 'none';
     }
-    document.querySelectorAll('#painel_config input, #painel_config select').forEach(el => {
+    document.querySelectorAll('#painel_config input, #painel_config select, #painel_ia input, #painel_ia select, #painel_ia button').forEach(el => {
         el.disabled = !sou_master;
     });
 }
@@ -296,6 +296,14 @@ function aplicar_config(config) {
     if (config_publica) {
         config_publica.checked = config.publica === true;
     }
+    const config_substituir_ia = document.getElementById('config_substituir_ia');
+    if (config_substituir_ia) {
+        config_substituir_ia.checked = config.substituir_desconectado_por_ia === true;
+    }
+    const ia_nivel = document.getElementById('ia_nivel');
+    if (ia_nivel && config.ia_nivel_padrao) {
+        ia_nivel.value = String(config.ia_nivel_padrao);
+    }
 }
 
 // Envia as configurações definidas pelo master (sala de espera).
@@ -309,9 +317,34 @@ function enviar_config() {
         max_jogadores: document.getElementById('config_max').value,
         com_coringa: document.getElementById('config_coringa').checked,
         publica: document.getElementById('config_publica').checked,
+        substituir_desconectado_por_ia: document.getElementById('config_substituir_ia').checked,
+        ia_nivel_padrao: document.getElementById('ia_nivel').value,
     };
     socket.emit('configurar_partida', { chave: chave_secreta, config: config });
 }
+
+// --- Jogadores IA (Fase 11) ---
+function adicionar_ia() {
+    const nivel = document.getElementById('ia_nivel').value;
+    const quantidade = document.getElementById('ia_quantidade').value;
+    socket.emit('adicionar_ia', { chave: chave_secreta, nivel: nivel, quantidade: quantidade });
+}
+
+function completar_com_ias() {
+    const nivel = document.getElementById('ia_nivel').value;
+    socket.emit('completar_com_ias', { chave: chave_secreta, nivel: nivel });
+}
+
+function remover_ias() {
+    socket.emit('remover_ia', { chave: chave_secreta });
+}
+
+socket.on('jogador_substituido_por_ia', function (data) {
+    const painel = document.getElementById('motivo_iniciar');
+    if (painel && data && data.nome) {
+        painel.textContent = `${data.nome} caiu e foi substituído por uma IA.`;
+    }
+});
 
 // Alterna a prontidão do jogador na sala de espera.
 function alternar_pronto() {
@@ -319,7 +352,7 @@ function alternar_pronto() {
 }
 
 // O master aplica as configurações ao alterar qualquer campo da sala de espera.
-['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica'].forEach((id) => {
+['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'ia_nivel'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
         el.addEventListener('change', enviar_config);

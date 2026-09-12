@@ -29,6 +29,10 @@ class Jogador:
         # Janela de reconexão (Fase 9): marca o momento da desconexão durante uma
         # partida; enquanto não expira, o jogador pode voltar via chave_secreta.
         self.desconectado_em = None
+        # Jogador controlado por IA (Fase 11): is_ia + nível de inteligência (1-4).
+        # Bots não têm socket e nunca viram master.
+        self.is_ia = False
+        self.ia_nivel = None
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -38,6 +42,19 @@ class Jogador:
     def criar_jogador(cls, client_id, master=False):
         """Cria e retorna uma nova instância de Jogador."""
         return cls(client_id=client_id, master=master)
+
+    @classmethod
+    def criar_ia(cls, nivel, username):
+        """
+        Cria um jogador controlado por IA (Fase 11). Ganha um client_id próprio
+        (não é um sid do Socket.IO), já entra pronto e nunca é master.
+        """
+        jogador = cls(client_id=f"ia:{secrets.token_hex(8)}")
+        jogador.username = username
+        jogador.is_ia = True
+        jogador.ia_nivel = int(nivel)
+        jogador.pronto = True
+        return jogador
 
     def para_dict(self, lobby):
         """
@@ -67,6 +84,8 @@ class Jogador:
             'confirmou_vencedor': self.confirmou_vencedor,
             'pronto': self.pronto,
             'desconectado_em': self.desconectado_em.isoformat() if self.desconectado_em else None,
+            'is_ia': self.is_ia,
+            'ia_nivel': self.ia_nivel,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -110,6 +129,8 @@ class Lobby:
             'max_jogadores': 6,
             'com_coringa': True,
             'publica': True,
+            'substituir_desconectado_por_ia': False,
+            'ia_nivel_padrao': 2,
         }
 
     def sala_room(self):
@@ -162,7 +183,7 @@ class Lobby:
     def para_dict(self):
         """Serializa toda a árvore do Lobby (jogadores + partidas) para o store distribuído."""
         return {
-            'versao': 2,
+            'versao': 3,
             'sala_id': self.sala_id,
             'lobby_num': self.lobby_num,
             'pagina': self.pagina,
@@ -209,6 +230,8 @@ class Lobby:
             jogador.pronto = bool(dados_jogador.get('pronto', False))
             desconectado_em = dados_jogador.get('desconectado_em')
             jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
+            jogador.is_ia = bool(dados_jogador.get('is_ia', False))
+            jogador.ia_nivel = dados_jogador.get('ia_nivel')
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
@@ -327,6 +350,17 @@ class Lobby:
         if 'publica' in dados and isinstance(dados['publica'], bool):
             config['publica'] = dados['publica']
             aplicado = True
+        if 'substituir_desconectado_por_ia' in dados and isinstance(dados['substituir_desconectado_por_ia'], bool):
+            config['substituir_desconectado_por_ia'] = dados['substituir_desconectado_por_ia']
+            aplicado = True
+        try:
+            if 'ia_nivel_padrao' in dados:
+                valor = int(dados['ia_nivel_padrao'])
+                if 1 <= valor <= 4:
+                    config['ia_nivel_padrao'] = valor
+                    aplicado = True
+        except (ValueError, TypeError):
+            pass
         self.config = config
         return aplicado
 
@@ -394,7 +428,8 @@ class Lobby:
             jogador.joguei_dados = False
             jogador.confirmou_rodada = False
             jogador.confirmou_vencedor = False
-            jogador.pronto = False
+            # Bots continuam prontos para a próxima partida; humanos recomeçam.
+            jogador.pronto = jogador.is_ia
             jogador.partidas = []
             jogador.rodadas = []
             jogador.turnos = []
@@ -426,14 +461,19 @@ class Lobby:
 
     def definir_master(self):
         """
-        Define um novo master caso precise.
+        Define um novo master caso precise. Bots nunca assumem o master.
         """
         if self.verificar_jogador_master():
             return
         else:
-            self.jogadores.sort(key=lambda jogador: jogador.entrou)
-            if self.jogadores:
-                self.jogadores[0].master = True
+            humanos = [jogador for jogador in self.jogadores if not jogador.is_ia]
+            humanos.sort(key=lambda jogador: jogador.entrou)
+            if humanos:
+                humanos[0].master = True
+
+    def tem_humano(self):
+        """True se ainda há ao menos um jogador humano na sala (ativo ou na janela de graça)."""
+        return any(not j.is_ia for j in self.jogadores)
 
     def adicionar_jogador(self, jogador):
         """
@@ -745,6 +785,41 @@ class Rodada:
                 count += 1
         return True if jogadores_tt == count else False
 
+    def jogada_valida(self, face, qtd, turno_ant=None, turno_num=None):
+        """
+        Validação pura de uma jogada, sem efeitos colaterais (Fase 11) — usada pela
+        IA para gerar apenas apostas legais. Espelha a regra de
+        Turno.verificar_validade_da_jogada, que delega para cá.
+        """
+        if turno_num is None:
+            turno_num = len(self.turnos) + 1
+        if turno_num == 1:
+            return True
+        face_ant = turno_ant.dado_face if turno_ant else 0
+        qtd_ant = turno_ant.dado_qtd if turno_ant else 0
+        if self.com_coringa:
+            if face_ant > 1 and face > 1:
+                if qtd > qtd_ant:
+                    return True
+                if face_ant < face and qtd_ant == qtd:
+                    return True
+            if face_ant > 1 and face == 1:
+                if qtd > self.coringa_atual_qtd:
+                    return True
+            if face_ant == 1 and face > 1:
+                if qtd >= (self.coringa_atual_qtd * 2):
+                    return True
+            if face_ant == face:
+                if qtd > qtd_ant:
+                    return True
+            return False
+        if face_ant > 0 and face > 0:
+            if qtd > qtd_ant:
+                return True
+            if face_ant < face and qtd_ant == qtd:
+                return True
+        return False
+
     def desconfiar(self, jogador):
         """
         Pegar todos os dados
@@ -884,86 +959,12 @@ class Turno:
             return turno
 
     def verificar_validade_da_jogada(self):
-        """ Validar jogada aqui, retorna True se válida ou False de inválida:
-        1. Se for o primeiro turno(self.turno_num == 1): self.da_partida.sem_coringa = False caso o
-        turno_atual_dado_face == 1, depois disso feito retorna false prontamente.
-
-        A partir do segundo turno:
-        Se coringa True (coringa_true_false): Usar variáveis 'coringa_atual_qtd', 'turno_ant_coringa' e
-        'turno_atual_coringa' aqui:
-            1. Se atual jogar coringa, pode ser a qualquer momento, desde que qtd seja maior que qtd do coringa
-            anterior.
-            2. Se jogar num, qtd deve ser maior que qtd do número anterior ou a mesma qtd se a face do dado for maior,
-            se anterior for um coringa, dobrar a quantidade.
-            ...
-        Se coringa False (coringa_true_false), não usar variáveis 'turno_ant_coringa' e 'turno_atual_coringa' e
-        'coringa_atual_qtd' aqui:
-            1. Se jogar 1, pode ser a qualquer momento, desde que qtd seja maior que qtd do número anterior.
-            2. Se jogar num, qtd deve ser maior que qtd do número anterior ou a mesma qtd se a face do dado for maior.
-
-        UTILIZAR AS VARIÁVEIS ABAIXO NA DESCRIÇÃO E NA CRIAÇÃO DO CÓDIGO
         """
-        turno_ant_dado_qtd = 0
-        turno_ant_dado_face = 0
-
-        # VERIFICANDO VALIDADE DA JOGADA
-        tur_ant = self.obter_turno_anterior_na_partida()  # Recebe o turno anterior
-
-        coringa_true = self.da_rodada.com_coringa
-        coringa_atual_qtd = self.da_rodada.coringa_atual_qtd
-
-        if tur_ant:
-            turno_ant_dado_face = tur_ant.dado_face
-            turno_ant_dado_qtd = tur_ant.dado_qtd
-
-        turno_atual_dado_face = self.dado_face
-        turno_atual_dado_qtd = self.dado_qtd
-
-        # Validações de primeiro turno
-        if self.turno_num == 1 and self.dado_face == 1:
-            # PRIMEIRO TURNO
-            # Se for o primeiro turno e o dado atual for 1, a partida não tem coringa e turno válida.
+        Valida a jogada do turno delegando para Rodada.jogada_valida (lógica pura).
+        Mantém o efeito colateral do 1º turno: apostar face 1 cancela o coringa.
+        """
+        tur_ant = self.obter_turno_anterior_na_partida()
+        valida = self.da_rodada.jogada_valida(self.dado_face, self.dado_qtd, tur_ant, self.turno_num)
+        if valida and self.turno_num == 1 and self.dado_face == 1:
             self.da_rodada.com_coringa = False
-            # Partida sem coringa
-            return True
-        if self.turno_num == 1:
-            # PRIMEIRO TURNO
-            # Partida com coringa
-            # Se for o primeiro turno, turno válido.
-            return True
-
-        # Validações de segundo+ turnos
-        if coringa_true:  # SE CORINGA ATIVADO -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if turno_ant_dado_face > 1 and turno_atual_dado_face > 1:
-                # 1. Ambos números: Aumentar a aposta: A quantidade deve ser maior, mas se o número de face for maior,
-                # a quantidade pode ser igual.
-                if turno_atual_dado_qtd > turno_ant_dado_qtd:
-                    return True
-                if turno_ant_dado_face < turno_atual_dado_face and turno_ant_dado_qtd == turno_atual_dado_qtd:
-                    return True
-            if turno_ant_dado_face > 1 and turno_atual_dado_face == 1:
-                # 2. Se anterior for número, mas atual sendo coringa: Qtd deve ser maior que coringa_atual_qtd.
-                if turno_atual_dado_qtd > coringa_atual_qtd:
-                    return True
-            if turno_ant_dado_face == 1 and turno_atual_dado_face > 1:
-                # 3. Se anterior for coringa com atual sendo número: aumentar a aposta: deve ser o dobro ou mais, mas
-                # sendo qualquer número.
-                if turno_atual_dado_qtd >= (coringa_atual_qtd * 2):
-                    return True
-            if turno_ant_dado_face == turno_atual_dado_face:
-                # 4. Ambos coringas: Qtd deve ser maior que coringa_atual_qtd.
-                if turno_atual_dado_qtd > turno_ant_dado_qtd:
-                    return True
-            return False
-        else:  # SE CORINGA DESATIVADO -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if turno_ant_dado_face > 0 and turno_atual_dado_face > 0:
-                # 1. Ambos números(incluindo 1): Aumentar a aposta: A quantidade deve ser maior, mas se o número de
-                # face for maior, a quantidade pode ser igual.
-                # 2. Se anterior for número, mas atual sendo 1: dentro da regra 1.
-                # 3. Se anterior for 1 com atual sendo número: dentro da regra 1.
-                # 4. Ambos 1: Dentro da regra 1.
-                if turno_atual_dado_qtd > turno_ant_dado_qtd:
-                    return True
-                if turno_ant_dado_face < turno_atual_dado_face and turno_ant_dado_qtd == turno_atual_dado_qtd:
-                    return True
-            return False
+        return valida
