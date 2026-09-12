@@ -1,8 +1,8 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
-                            atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input, validar_numero,
-                            enviar_snapshot_sala)
+                            atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input,
+                            enviar_snapshot_sala, listar_resumos_partidas)
 from modelos import Jogador
 import os
 import random
@@ -66,6 +66,11 @@ def handle_connect():
             # Retomando a mesma identidade: religa o sid novo ao mesmo Jogador.
             jogador.client_id = client_id
         else:
+            # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
+            if lobby.status == 'espera' and len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
+                emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                leave_room(lobby.sala_room(), sid=client_id)
+                return
             master = False if lobby.verificar_jogador_master() else True
             jogador = Jogador.criar_jogador(client_id=client_id, master=master)
             lobby.adicionar_jogador(jogador)
@@ -149,20 +154,74 @@ def escolher_apelido(data):
 def iniciar_partida(dados):
     """
     Esta função inicia uma nova partida, é executada pelo master do lobby da sala.
+    Só libera quando todos os jogadores (não-master) estiverem prontos e houver ao menos 2.
     :param dados: Vem do front, é o número de dados que cada jogador recebe para jogar.
     """
     client_id = request.sid
     lobby, jogador = achar_jogador(client_id)
-    if jogador is None or lobby is None or jogador.master is not True or lobby.contar_jogadores() < 2:
+    if jogador is None or lobby is None or jogador.master is not True:
         return
-    try:
-        dados_qtd = int(dados.get('dados_qtd', 1))
-    except (ValueError, TypeError):
-        dados_qtd = 1
-    valido = validar_numero(dados_qtd)
-    partida = lobby.construir_partida(dados_qtd=dados_qtd if valido else 1)
+    if dados is not None and 'dados_qtd' in dados:
+        try:
+            lobby.definir_config({'dados_qtd': int(dados.get('dados_qtd', 1))})
+        except (ValueError, TypeError):
+            pass
+    pode, motivo = lobby.pode_iniciar()
+    if not pode:
+        emit('iniciar_negado', {'motivo': motivo}, to=client_id)
+        return
+    partida = lobby.construir_partida(dados_qtd=int(lobby.config.get('dados_qtd', 1)))
     partida.construir_rodada()
     salvar_sala(lobby)
+
+
+@socketio.on('configurar_partida')
+def configurar_partida(dados):
+    """
+    Aplica as configurações da partida definidas pelo master na sala de espera
+    (nome, quantidade de dados, máximo de jogadores, coringa, pública).
+    """
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None or not jogador.master:
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.status != 'espera':
+        return
+    if lobby.definir_config(dados.get('config', {})):
+        atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('ficar_pronto')
+def ficar_pronto(dados):
+    """
+    Alterna a prontidão do jogador na sala de espera. O jogo só inicia quando
+    todos os jogadores (não-master) estiverem prontos.
+    """
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None:
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.status != 'espera':
+        return
+    jogador.pronto = not jogador.pronto
+    atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('listar_partidas')
+def listar_partidas(dados):
+    """
+    Retorna a listagem de partidas públicas (com filtros) para a tela de busca.
+    Responde apenas ao cliente que pediu (to=client_id).
+    """
+    client_id = request.sid
+    filtros = (dados or {}).get('filtros', {})
+    sala_atual = (dados or {}).get('sala_atual')
+    resumos = listar_resumos_partidas(filtros, sala_atual=sala_atual)
+    emit('partidas_listadas', {'partidas': resumos}, to=client_id)
 
 
 @socketio.on('jogar_dados')
@@ -277,6 +336,7 @@ def vencedor_final():
     lobby.conferiram_vencedor += 1
     if lobby.conferiram_vencedor == len(lobby.jogadores):
         lobby.resetar_para_lobby()
+        atualizar_lista_usuarios(lobby)
         mudar_pagina(0, sala=lobby.sala_id)
     salvar_sala(lobby)
 

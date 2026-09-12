@@ -164,16 +164,69 @@ def enviar_snapshot_sala(lobby, jogador):
 def atualizar_lista_usuarios(lobby):
     """
     Atualiza a lista de usuários na tela de entrada de jogadores da sala.
+    Também envia o estado da sala de espera: nome, status, configurações e prontidão.
     """
     lista = lobby.listar_jogadores()
     usernames = [jogador.username for jogador in lista if jogador.username is not None]
     pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
     masters = [jogador.master for jogador in lista if jogador.username is not None]
+    prontos = [jogador.pronto for jogador in lista if jogador.username is not None]
     o_master = lobby.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
-    emit("update_user_list", {"users": usernames, "pontos": pontos, "masters": masters}, to=lobby.sala_room())
+    pode_iniciar, motivo = lobby.pode_iniciar()
+    emit("update_user_list", {
+        "users": usernames,
+        "pontos": pontos,
+        "masters": masters,
+        "prontos": prontos,
+        "nome": lobby.nome,
+        "status": lobby.status,
+        "config": lobby.config,
+        "pode_iniciar": pode_iniciar,
+        "motivo": motivo,
+    }, to=lobby.sala_room())
     salvar_sala(lobby)
+
+
+def listar_resumos_partidas(filtros, sala_atual=None):
+    """
+    Monta a listagem de partidas públicas para a busca, aplicando os filtros enviados
+    pelo front-end. Nada do estado é modificado aqui — apenas leitura do store.
+    """
+    filtros = filtros if isinstance(filtros, dict) else {}
+    busca = str(filtros.get('busca', '') or '').strip().lower()
+    status = filtros.get('status', 'todas')
+    com_vaga = bool(filtros.get('com_vaga', False))
+    coringa = filtros.get('com_coringa', 'todas')
+    ordenar = filtros.get('ordenar', 'recentes')
+
+    resumos = []
+    for lobby in store.listar_lobbys():
+        if lobby.sala_id == sala_atual:
+            continue
+        resumo = lobby.resumo_partida()
+        if not resumo['publica']:
+            continue
+        if busca and busca not in (resumo['nome'] or '').lower() and busca not in lobby.sala_id.lower():
+            continue
+        if status in ('espera', 'jogando') and resumo['status'] != status:
+            continue
+        if com_vaga and not resumo['pode_entrar']:
+            continue
+        if coringa == 'sim' and not resumo['com_coringa']:
+            continue
+        if coringa == 'nao' and resumo['com_coringa']:
+            continue
+        resumos.append(resumo)
+
+    if ordenar == 'jogadores':
+        resumos.sort(key=lambda r: (-r['jogadores'], (r['nome'] or '').lower()))
+    elif ordenar == 'nome':
+        resumos.sort(key=lambda r: (r['nome'] or '').lower())
+    else:
+        resumos.sort(key=lambda r: r['criada_em'] or '', reverse=True)
+    return resumos
 
 
 def validar_input(texto, tamanho_minimo=1, tamanho_maximo=12, permitir_espacos=True,

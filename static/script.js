@@ -2,6 +2,7 @@ let indiceAtual = 0;
 let chave_secreta = '';
 let nome_jogador = '';
 let sala_atual = getParamSala();
+let sou_master = false;
 
 // Envia a chave guardada anteriormente (via sessionStorage) para o servidor
 // reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
@@ -45,6 +46,101 @@ function copiar_link_sala() {
     navigator.clipboard.writeText(url.toString());
 }
 
+// --- Busca de partidas (tela client-side) ---
+function abrir_busca() {
+    document.getElementById('tela_jogadores').style.display = 'none';
+    document.getElementById('tela_busca').style.display = 'block';
+    buscar_partidas();
+}
+
+function fechar_busca() {
+    document.getElementById('tela_busca').style.display = 'none';
+    document.getElementById('tela_jogadores').style.display = 'block';
+}
+
+function buscar_partidas() {
+    const filtros = {
+        busca: document.getElementById('filtro_busca').value.trim(),
+        status: document.getElementById('filtro_status').value,
+        com_coringa: document.getElementById('filtro_coringa').value,
+        ordenar: document.getElementById('filtro_ordenar').value,
+        com_vaga: document.getElementById('filtro_vaga').checked,
+    };
+    socket.emit('listar_partidas', { filtros: filtros, sala_atual: sala_atual });
+}
+
+function entrar_partida(codigo) {
+    tocar_som_variante('pegar_dados', [1, 2]);
+    ir_para_sala(codigo);
+}
+
+socket.on('partidas_listadas', function (data) {
+    const lista = document.getElementById('lista_partidas');
+    lista.innerHTML = '';
+    const partidas = data.partidas || [];
+
+    if (partidas.length === 0) {
+        lista.innerHTML = '<small class="text-muted">Nenhuma partida encontrada com esses filtros.</small>';
+        return;
+    }
+
+    partidas.forEach((partida) => {
+        const div = document.createElement('div');
+        div.className = 'border rounded p-2 mb-2 bg-black bg-opacity-50 d-flex flex-wrap align-items-center justify-content-between gap-2';
+        div.style.setProperty('--bs-bg-opacity', '.3');
+
+        const info = document.createElement('div');
+        info.className = 'text-start';
+
+        const nome = document.createElement('div');
+        nome.className = 'fw-bold';
+        const jogando = partida.status === 'jogando';
+        nome.textContent = `${partida.nome} (${partida.jogadores}/${partida.max_jogadores})`;
+
+        const detalhes = document.createElement('small');
+        detalhes.className = 'text-muted d-block';
+        const detalhes_parts = [
+            `🎲 ${partida.dados_qtd} dado(s)`,
+            partida.com_coringa ? 'coringa ativo' : 'sem coringa',
+            `master: ${partida.master || '?'}`,
+            jogando ? '🕹 em andamento' : `${partida.prontos}/${partida.jogadores} prontos`,
+        ];
+        detalhes.textContent = detalhes_parts.join(' · ');
+
+        info.appendChild(nome);
+        info.appendChild(detalhes);
+
+        const botao = document.createElement('button');
+        if (jogando) {
+            botao.className = 'btn btn-sm btn-outline-secondary';
+            botao.textContent = 'Assistir';
+            botao.disabled = true; // Entrar no meio de uma partida só pelo link direto
+            botao.title = 'Partidas em andamento só aceitam espectadores pelo link direto';
+        } else if (partida.pode_entrar) {
+            botao.className = 'btn btn-sm btn-success';
+            botao.textContent = 'Entrar';
+            botao.onclick = () => entrar_partida(partida.sala);
+        } else {
+            botao.className = 'btn btn-sm btn-outline-secondary';
+            botao.textContent = 'Lotada';
+            botao.disabled = true;
+        }
+
+        div.appendChild(info);
+        div.appendChild(botao);
+        lista.appendChild(div);
+    });
+});
+
+socket.on('sala_cheia', function () {
+    alert('Esta sala está cheia (limite de jogadores atingido).');
+    ir_para_sala('padrao');
+});
+
+socket.on('iniciar_negado', function (data) {
+    alert(`Não é possível iniciar: ${data.motivo}`);
+});
+
 const apelidoSalvo = sessionStorage.getItem('dadinho_apelido');
 if (apelidoSalvo) {
     const apelidoInput = document.getElementById('apelido');
@@ -53,10 +149,39 @@ if (apelidoSalvo) {
     }
 }
 
-// Atualiza a lista de jogadores
+// Atualiza a lista de jogadores e o estado da sala de espera
 socket.on("update_user_list", (data) => {
     const userListItems = document.getElementById("lista_de_jogadores");
     userListItems.innerHTML = ""; // Limpa a lista existente
+
+    // Nome, status e prontidão da partida.
+    const nome_partida = document.getElementById('nome_partida');
+    if (nome_partida) {
+        nome_partida.textContent = data.nome || 'Partida';
+    }
+    const status_partida = document.getElementById('status_partida');
+    if (status_partida) {
+        const jogando = data.status === 'jogando';
+        status_partida.textContent = jogando ? '🕹 Em andamento' : '⏳ Aguardando jogadores';
+        status_partida.className = 'badge ' + (jogando ? 'text-bg-success' : 'text-bg-secondary');
+    }
+    const prontidao_partida = document.getElementById('prontidao_partida');
+    if (prontidao_partida) {
+        const prontos = data.prontos.filter(Boolean).length;
+        prontidao_partida.textContent = `${prontos}/${data.users.length} prontos`;
+    }
+    const motivo_iniciar = document.getElementById('motivo_iniciar');
+    if (motivo_iniciar) {
+        if (data.users.length >= 2 && data.status === 'espera') {
+            motivo_iniciar.textContent = data.pode_iniciar ? 'Tudo pronto! Pode iniciar.' : data.motivo || '';
+        } else {
+            motivo_iniciar.textContent = '';
+        }
+    }
+
+    // Aplica a configuração da partida (read-only para não-master).
+    aplicar_config(data.config);
+
     if (data.users.length === 0) {
         userListItems.innerHTML = "<small>Aguardando jogadores...</small>";
     } else {
@@ -86,7 +211,8 @@ socket.on("update_user_list", (data) => {
             if (data.masters[index] === true) {
                 master = '🏁'
             }
-            userItem.textContent = `${user} ${master}`;
+            const pronto = data.prontos[index] === true ? '✅' : '⏳';
+            userItem.textContent = `${user} ${master} ${pronto}`;
 
             const pontuacaoDiv = document.createElement("div");
             pontuacaoDiv.className = "col-md-6";
@@ -98,11 +224,19 @@ socket.on("update_user_list", (data) => {
             headerRow.appendChild(pontuacaoDiv); // Adiciona cada pontuação à lista
         });
 
+        // Botão "Ficar pronto" reflete o estado atual do próprio jogador.
+        const bot_pronto = document.getElementById('bot_pronto');
+        if (bot_pronto) {
+            const meu_indice = data.users.indexOf(nome_jogador);
+            const eu_pronto = meu_indice !== -1 && data.prontos[meu_indice] === true;
+            bot_pronto.textContent = eu_pronto ? '✅ Pronto (clique para desfazer)' : 'Ficar pronto';
+            bot_pronto.disabled = data.status === 'jogando';
+        }
+
         const iniciar_jogo = document.getElementById('iniciar_jogo');
-        if (data.users.length >= 2) {
-            iniciar_jogo.disabled = false; // Ativa o botão de iniciar partida
-        } else {
-            iniciar_jogo.disabled = true; // Desativa o botão de iniciar partida
+        if (iniciar_jogo) {
+            iniciar_jogo.disabled = !data.pode_iniciar; // Ativa o botão de iniciar partida
+            iniciar_jogo.style.display = sou_master ? 'block' : 'none';
         }
     }
 });
@@ -117,16 +251,83 @@ socket.on('atualizar_pontos', function (data) {
 // Funções para o "master" do servidor
 socket.on("master_def", function (data) {
     if (data.is_master) {
-        const diceForm_fieldset = document.getElementById('diceForm_fieldset');
-        const startGameButton = document.getElementById("iniciar_jogo");
-        startGameButton.style.display = "block"; // Exibe o botão "Iniciar Jogo" para o mestre
-        diceForm_fieldset.style.display = 'block';
+        sou_master = true;
+        aplicar_master();
+    }
+});
+
+function aplicar_master() {
+    // Só o master vê o botão de iniciar e pode editar as configurações.
+    const iniciar_jogo = document.getElementById('iniciar_jogo');
+    if (iniciar_jogo) {
+        iniciar_jogo.style.display = sou_master ? 'block' : 'none';
+    }
+    document.querySelectorAll('#painel_config input, #painel_config select').forEach(el => {
+        el.disabled = !sou_master;
+    });
+}
+
+function aplicar_config(config) {
+    if (!config) {
+        return;
+    }
+    const config_nome = document.getElementById('config_nome');
+    const config_dados = document.getElementById('config_dados');
+    const config_max = document.getElementById('config_max');
+    const config_coringa = document.getElementById('config_coringa');
+    const config_publica = document.getElementById('config_publica');
+    if (config_nome && document.activeElement !== config_nome) {
+        config_nome.value = config.nome || '';
+    }
+    if (config_dados) {
+        config_dados.value = String(config.dados_qtd);
+    }
+    if (config_max) {
+        config_max.value = String(config.max_jogadores);
+    }
+    if (config_coringa) {
+        config_coringa.checked = config.com_coringa === true;
+    }
+    if (config_publica) {
+        config_publica.checked = config.publica === true;
+    }
+}
+
+// Envia as configurações definidas pelo master (sala de espera).
+function enviar_config() {
+    if (!sou_master) {
+        return;
+    }
+    const config = {
+        nome: document.getElementById('config_nome').value.trim(),
+        dados_qtd: document.getElementById('config_dados').value,
+        max_jogadores: document.getElementById('config_max').value,
+        com_coringa: document.getElementById('config_coringa').checked,
+        publica: document.getElementById('config_publica').checked,
+    };
+    socket.emit('configurar_partida', { chave: chave_secreta, config: config });
+}
+
+// Alterna a prontidão do jogador na sala de espera.
+function alternar_pronto() {
+    socket.emit('ficar_pronto', { chave: chave_secreta });
+}
+
+// O master aplica as configurações ao alterar qualquer campo da sala de espera.
+['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('change', enviar_config);
     }
 });
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
     tocar_som('virar_papel');
+    const tela_busca = document.getElementById('tela_busca');
+    if (tela_busca) {
+        tela_busca.style.display = 'none'; // Fecha a busca caso esteja aberta (navegação do servidor)
+    }
     const logo = document.getElementById('titulo_img');
     const logodiv = document.getElementById('div_titulo_img');
     {
@@ -693,6 +894,7 @@ document.getElementById('desconfiar').addEventListener('click', () => {
 socket.on("connect_start", function (data) {
     chave_secreta = data.chave_secreta;
     sessionStorage.setItem('dadinho_chave', chave_secreta);
+    sou_master = data.is_master === true;
     if (data.sala) {
         sala_atual = data.sala;
         const badge = document.getElementById('sala_atual');
@@ -712,6 +914,7 @@ socket.on("connect_start", function (data) {
     const botaapelido = document.getElementById('botapel');
     textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
     botaapelido.disabled = false;
+    aplicar_master();
 });
 
 // Indicadores de conexão/reconexão (heartbeat visual).
@@ -815,9 +1018,8 @@ function enviar_apelido() {
 
 function iniciar_partida() {
     tocar_som_variante('embaralhar', [1, 2]);
-    const bot_iniciar = document.getElementById('iniciar_partida');
-    const diceCount = document.querySelector('input[name="diceCount"]:checked').value;
-    socket.emit('iniciar_partida', { dados_qtd: diceCount });
+    const dados_qtd = document.getElementById('config_dados').value;
+    socket.emit('iniciar_partida', { dados_qtd: dados_qtd });
 }
 
 let contexto_audio = null;

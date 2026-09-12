@@ -26,7 +26,7 @@
 
     <div class="mt-4 container-fluid align-items-center">
 
-        <!-- TELA JOGADORES INICIO (0) -->
+        <!-- TELA JOGADORES INICIO (0) / Sala de Espera -->
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
             <div class="mb-4">
@@ -39,61 +39,156 @@
                         maxlength="24" placeholder="Código da sala" onkeydown="verificar_enter(event, 'sala')">
                     <button id="bot_sala_entrar" class="btn btn-outline-info" onclick="entrar_sala()">Entrar</button>
                     <button id="bot_sala_criar" class="btn btn-info" onclick="criar_sala()">Criar sala</button>
+                    <button id="bot_buscar_partidas" class="btn btn-outline-light" onclick="abrir_busca()">🔍 Buscar
+                        partidas</button>
                     <button class="btn btn-outline-light" onclick="copiar_link_sala()">Copiar link</button>
                 </div>
             </div>
 
-            <div>
-                <input type="text" id="apelido" class="container form-control text-center mx-auto" style="width: 200px;"
-                    onkeydown="verificar_enter(event, 'button')" placeholder="Escreva seu nome..." maxlength="10">
-                <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
+            <div class="mb-3">
+                <h3 id="nome_partida" class="text-info mb-1">Partida</h3>
+                <div class="d-flex justify-content-center gap-2 flex-wrap">
+                    <span id="status_partida" class="badge text-bg-secondary">Aguardando jogadores</span>
+                    <span id="prontidao_partida" class="badge text-bg-dark">0/0 prontos</span>
+                    <small id="motivo_iniciar" class="text-muted d-block w-100"></small>
+                </div>
             </div>
 
-            <div class="container my-4 p-3 bg-dark text-light border border-info rounded gamer-container"
-                id="lista_de_jogadores"
-                style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
-                <small>Aguardando jogadores...</small>
-            </div>
+            <div class="container">
+                <div class="row justify-content-center g-3">
 
-            <div id="diceForm_fieldset" class="container" style="display: none;">
-                <fieldset>
-                    <small class="form-label text-light">Número de dados:</small>
-                    <div class="d-flex justify-content-center gap-3">
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice1" value="1" checked>
-                            <label class="form-check-label text-light" for="dice1">1</label>
+                    <div class="col-md-5">
+                        <div>
+                            <input type="text" id="apelido" class="container form-control text-center mx-auto"
+                                style="width: 200px;" onkeydown="verificar_enter(event, 'button')"
+                                placeholder="Escreva seu nome..." maxlength="10">
+                            <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
                         </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice2" value="2">
-                            <label class="form-check-label text-light" for="dice2">2</label>
+
+                        <div class="container my-3 p-3 bg-dark text-light border border-info rounded gamer-container"
+                            id="lista_de_jogadores"
+                            style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
+                            <small>Aguardando jogadores...</small>
                         </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice3" value="3">
-                            <label class="form-check-label text-light" for="dice3">3</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice4" value="4">
-                            <label class="form-check-label text-light" for="dice4">4</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice5" value="5">
-                            <label class="form-check-label text-light" for="dice5">5</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="diceCount" id="dice6" value="6">
-                            <label class="form-check-label text-light" for="dice6">6</label>
+
+                        <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
+                            <button id="bot_pronto" class="btn btn-warning" onclick="alternar_pronto()">Ficar
+                                pronto</button>
+                            <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()"
+                                style="display: none;" disabled>Iniciar partida</button>
                         </div>
                     </div>
-                </fieldset>
-            </div>
 
-            <div class="d-flex justify-content-center mt-1">
-                <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()" style="display: none;"
-                    disabled>Iniciar partida</button>
+                    <div class="col-md-5">
+                        <div id="painel_config"
+                            class="container my-3 p-3 bg-dark text-light border border-secondary rounded text-center"
+                            style="--bs-bg-opacity: .8; max-width: 420px;">
+                            <h5 class="text-info mb-3">Configurações da partida</h5>
+                            <div class="mb-2">
+                                <label class="form-label small d-block" for="config_nome">Nome da partida</label>
+                                <input type="text" id="config_nome" class="form-control form-control-sm text-center mx-auto"
+                                    maxlength="30" placeholder="Nome da partida">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small d-block" for="config_dados">Dados por jogador</label>
+                                    <select id="config_dados" class="form-select form-select-sm text-center mx-auto">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small d-block" for="config_max">Máximo de jogadores</label>
+                                    <select id="config_max" class="form-select form-select-sm text-center mx-auto">
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                        <option value="7">7</option>
+                                        <option value="8">8</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-check form-switch d-flex justify-content-center gap-2 mb-1">
+                                <input class="form-check-input" type="checkbox" id="config_coringa">
+                                <label class="form-check-label" for="config_coringa">Coringa (1 conta como qualquer)</label>
+                            </div>
+                            <div class="form-check form-switch d-flex justify-content-center gap-2">
+                                <input class="form-check-input" type="checkbox" id="config_publica">
+                                <label class="form-check-label" for="config_publica">Pública (aparece na busca)</label>
+                            </div>
+                            <small class="text-muted d-block mt-2">Somente o master edita as configurações.</small>
+                        </div>
+                    </div>
+
+                </div>
             </div>
 
         </div>
         <!-- TELA JOGADORES FIM -->
+
+        <!-- TELA BUSCA DE PARTIDAS INICIO (client-side, fora do ciclo de páginas) -->
+        <div id="tela_busca" class="tela_busca container-fluid text-center" style="display: none;">
+            <div class="container my-4 p-3 bg-dark text-light border border-info rounded"
+                style="--bs-bg-opacity: .85; max-width: 820px;">
+                <h3 class="text-info mb-1">Buscar partidas</h3>
+                <small class="text-muted d-block mb-3">Entre em uma sala de espera para jogar com outros jogadores.</small>
+
+                <div class="row g-2 align-items-end justify-content-center mb-3">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small d-block" for="filtro_busca">Nome ou código</label>
+                        <input type="text" id="filtro_busca" class="form-control form-control-sm" placeholder="Ex.: amigos"
+                            maxlength="30">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small d-block" for="filtro_status">Status</label>
+                        <select id="filtro_status" class="form-select form-select-sm">
+                            <option value="todas">Todas</option>
+                            <option value="espera">Em espera</option>
+                            <option value="jogando">Jogando</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small d-block" for="filtro_coringa">Coringa</label>
+                        <select id="filtro_coringa" class="form-select form-select-sm">
+                            <option value="todas">Tanto faz</option>
+                            <option value="sim">Com coringa</option>
+                            <option value="nao">Sem coringa</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small d-block" for="filtro_ordenar">Ordenar</label>
+                        <select id="filtro_ordenar" class="form-select form-select-sm">
+                            <option value="recentes">Recentes</option>
+                            <option value="jogadores">Nº jogadores</option>
+                            <option value="nome">Nome</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-2 text-center">
+                        <div class="form-check mt-4">
+                            <input class="form-check-input" type="checkbox" id="filtro_vaga" checked>
+                            <label class="form-check-label small" for="filtro_vaga">Com vaga</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-center gap-2 mb-3 flex-wrap">
+                    <button class="btn btn-info" onclick="buscar_partidas()">Buscar</button>
+                    <button class="btn btn-outline-light" onclick="buscar_partidas()">Atualizar</button>
+                    <button class="btn btn-outline-secondary" onclick="fechar_busca()">Voltar</button>
+                </div>
+
+                <div id="lista_partidas" class="text-start">
+                    <small class="text-muted">Clique em "Buscar" para ver as partidas disponíveis.</small>
+                </div>
+            </div>
+        </div>
+        <!-- TELA BUSCA DE PARTIDAS FIM -->
         <!-- TELA JOGAR DADOS INICIO (1) -->
         <div id="tela_jogar_dados" class="tela_jogar_dados container-fluid text-center" style="display: none;">
         </div>

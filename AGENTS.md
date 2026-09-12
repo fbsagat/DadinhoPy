@@ -26,7 +26,10 @@
 - **Deploy/entrypoint:** `api/index.py` exporta `application = app.wsgi_app` (middleware Socket.IO) e `vercel.json` usa builder `@vercel/python` com rota catch-all. `app.secret_key` vem de `DADINHO_SECRET_KEY`. Transporte ajustável: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `false` com `VERCEL=1`; Vercel roda só long-polling).
 
 ## Game flow (page numbers via `mudar_pagina`)
-0 = lobby, 1 = roll dice, 2 = turns/bets, 3 = round confirmation, 4 = victory screen. Events are emitted escopados à room da sala (`to=sala_<id>`) no namespace global.
+0 = lobby (sala de espera), 1 = roll dice, 2 = turns/bets, 3 = round confirmation, 4 = victory screen. Events are emitted escopados à room da sala (`to=sala_<id>`) no namespace global.
+
+- **Sala de espera (página 0)**: o master edita `Lobby.config` via evento `configurar_partida` (nome, `dados_qtd`, `max_jogadores`, `com_coringa`, `publica`); jogadores alternam prontidão em `ficar_pronto`; `iniciar_partida` só libera quando `Lobby.pode_iniciar()` (>=2, todos com apelido, todos os não-master prontos). Sala cheia recusa connect com `sala_cheia`. `status` vira `"jogando"` ao iniciar e volta a `"espera"` no `resetar_para_lobby`.
+- **Busca de partidas**: tela client-side (fora do ciclo de páginas), evento `listar_partidas` → `partidas_listadas` (somente leitura, `to=client_id`). Filtros: busca por nome/código, status, coringa, vaga e ordenação (`funcoes_gerais.listar_resumos_partidas`). Salas privadas não aparecem na busca.
 
 ## Frontend
 - Everything lives in `templates/jogo.html` + `static/script.js` (~950 lines, all inline socket handling) + `static/custom_styles.css`. Server pushes state via events; JS builds the DOM. Images in `static/imagens/`. When touching a server `emit`, find the matching `socket.on` in `script.js` first.

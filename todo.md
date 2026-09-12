@@ -84,3 +84,20 @@ Notas/limitações registradas (aceitos para o público casual):
 - Snapshot reinvoca apenas os handlers clientes já existentes (nenhum evento novo no `script.js`), e o branch da página 4 retorna antes do `emit('espectador')` final — espectador na tela de vitória mantém o "Ok".
 
 Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; round-trip de serialização da árvore `Lobby`; `node --check static\script.js`; boot `VERCEL=1` respondendo 200; e teste de integração via `flask_socketio.test_client` cobrindo lobby→página 2→aposta→conferência→resume por chave→dedup e desconexões no meio do jogo (da vez cai → vez avança; quem não rolou cai → rolagem destrava). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase4.py`.
+
+## Fase 5 — Sala de espera, configurações e busca de partidas ✅ concluída
+
+Objetivo: transformar a tela 0 numa sala de espera de verdade (nome da partida, configurações pelo master, botão "ficar pronto" com trava de início) e adicionar a busca/listagem de partidas públicas com filtros.
+
+- [x] **Modelo (`modelos.py`)** — `Lobby` ganha `nome`, `status` ("espera"/"jogando"), `criado_em` e `config` (dados_qtd, max_jogadores, com_coringa, publica); `Jogador` ganha `pronto`. `Lobby.definir_config` valida os valores; `Lobby.pode_iniciar()` devolve `(bool, motivo)` com as regras (>=2 jogadores, todos com apelido, todos os não-master prontos, dentro do limite); `Lobby.resumo_partida()` monta o resumo público da listagem. `Partida`/`Rodada` agora respeitam `config.com_coringa` (persistido na serialização, `versao` do Lobby bumpada p/ 2).
+- [x] **Listagem/filtros (`funcoes_gerais.py`)** — `listar_resumos_partidas(filtros, sala_atual)` lê `store.listar_lobbys()` e filtra por busca (nome/código), status, vaga, coringa e ordenação (recentes/jogadores/nome); privadas não aparecem. `atualizar_lista_usuarios` agora também envia `nome`, `status`, `config`, `prontos`, `pode_iniciar` e `motivo`.
+- [x] **Eventos (`app.py`)** — `configurar_partida` (master + `chave_secreta`), `ficar_pronto` (toggle com `chave_secreta`) e `listar_partidas` (somente leitura). `iniciar_partida` passou a exigir `pode_iniciar()` (senão emite `iniciar_negado`) e a usar `config.dados_qtd`. Connect recusa sala de espera cheia (`max_jogadores`) com `sala_cheia`; `construir_partida` marca `status='jogando'` e `resetar_para_lobby` volta para `espera` + zera prontidão (com `atualizar_lista_usuarios` no `vencedor_final`).
+- [x] **Frontend** — Tela 0 virou sala de espera: título da partida, badges de status/prontidão, painel de configurações (somente master edita; auto-save via `change`), botão "Ficar pronto" e trava do "Iniciar partida". Nova tela **Buscar partidas** (client-side, fora do ciclo de páginas do servidor): filtros (nome/código, status, coringa, ordenar, com vaga) e lista com botão Entrar/Lotada/Assistir; `mudar_pagina` fecha a busca ao receber navegação do servidor.
+- [x] **CSS** — painel de config e listagem (`#lista_partidas` com scroll + hover), selects/inputs da busca no tema escuro.
+
+Notas/limitações registradas (aceitos para o público casual):
+- `listar_partidas` reidrata todos os lobbies do store para montar os resumos — ok para escala casual, mas se a Upstash crescer muito, um índice leve (só resumo) seria a evolução natural.
+- Salas privadas não aparecem na busca; quem tem o link (`?sala=`) entra direto.
+- Sala cheia bloqueia novo connect na sala de espera; entrar no meio de partida em andamento só pelo link direto (vira espectador).
+
+Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (versão 2, config + prontos + status + com_coringa); regras de `pode_iniciar`; filtros de listagem (busca/privada/status/coringa/vaga); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` (master configura, não-master não, pronto libera início, partida inicia, busca lista a sala). Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase5.py` e `teste_integracao_fase5.py`.

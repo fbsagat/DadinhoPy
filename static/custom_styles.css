@@ -242,3 +242,33 @@ canvas {
         width: 90% !important;
     }
 }
+
+/* Fase 5: sala de espera e busca de partidas. */
+#painel_config {
+    font-family: 'Orbitron', sans-serif;
+}
+
+#lista_partidas {
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+#lista_partidas > div {
+    transition: background-color 0.2s ease;
+}
+
+#lista_partidas > div:hover {
+    background-color: rgba(13, 110, 253, 0.15) !important;
+}
+
+.tela_busca select,
+.tela_busca input[type="text"] {
+    background-color: #002952;
+    color: #ffffff;
+    border-color: #0dcaf0;
+}
+
+.tela_busca select option {
+    background-color: #001125;
+    color: #ffffff;
+}

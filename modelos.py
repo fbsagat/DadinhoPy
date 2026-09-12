@@ -25,6 +25,8 @@ class Jogador:
         # Dedup de confirmação (evita clique duplo/refresh contar 2x e travar o jogo).
         self.confirmou_rodada = False
         self.confirmou_vencedor = False
+        # Sala de espera: só inicia quando todos os não-master estiverem prontos.
+        self.pronto = False
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -61,6 +63,7 @@ class Jogador:
             'entrou': self.entrou.isoformat() if self.entrou else None,
             'confirmou_rodada': self.confirmou_rodada,
             'confirmou_vencedor': self.confirmou_vencedor,
+            'pronto': self.pronto,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -90,6 +93,21 @@ class Lobby:
         # Página atual da sala (0=lobby, 1=rolar dados, 2=turnos, 3=conferência, 4=vitória).
         # Persistida para permitir o snapshot no reconnect/novo tab (Fase 4).
         self.pagina = 0
+        # Sala de espera / matchmaking (Fase 5).
+        self.nome = f"Partida #{lobby_numero}"
+        self.status = "espera"  # "espera" | "jogando"
+        self.criado_em = datetime.now()
+        self.config = Lobby.config_padrao()
+
+    @staticmethod
+    def config_padrao():
+        """Configuração padrão de uma partida (editável pelo master na sala de espera)."""
+        return {
+            'dados_qtd': 1,
+            'max_jogadores': 6,
+            'com_coringa': True,
+            'publica': True,
+        }
 
     def sala_room(self):
         """
@@ -131,6 +149,7 @@ class Lobby:
         return {
             'partida_num': partida.partida_num,
             'dados_qtd': partida.dados_qtd,
+            'com_coringa': partida.com_coringa,
             'jogadores_ids': [jogador.client_id for jogador in partida.jogadores],
             'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
             'vencedor_final_id': partida.vencedor_final.client_id if partida.vencedor_final else None,
@@ -140,11 +159,15 @@ class Lobby:
     def para_dict(self):
         """Serializa toda a árvore do Lobby (jogadores + partidas) para o store distribuído."""
         return {
-            'versao': 1,
+            'versao': 2,
             'sala_id': self.sala_id,
             'lobby_num': self.lobby_num,
             'pagina': self.pagina,
             'conferiram_vencedor': self.conferiram_vencedor,
+            'nome': self.nome,
+            'status': self.status,
+            'criado_em': self.criado_em.isoformat() if self.criado_em else None,
+            'config': self.config,
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
         }
@@ -159,6 +182,12 @@ class Lobby:
         lobby = cls(sala_id=sala_id, lobby_numero=dados.get('lobby_num', 1))
         lobby.conferiram_vencedor = dados.get('conferiram_vencedor', 0)
         lobby.pagina = dados.get('pagina', 0)
+        lobby.nome = dados.get('nome') or f"Partida #{lobby.lobby_num}"
+        lobby.status = dados.get('status', 'espera')
+        criado_em = dados.get('criado_em')
+        lobby.criado_em = datetime.fromisoformat(criado_em) if criado_em else datetime.now()
+        lobby.config = dict(cls.config_padrao())
+        lobby.config.update(dados.get('config') or {})
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):
@@ -174,6 +203,7 @@ class Lobby:
             jogador.entrou = datetime.fromisoformat(entrou) if entrou else datetime.now()
             jogador.confirmou_rodada = bool(dados_jogador.get('confirmou_rodada', False))
             jogador.confirmou_vencedor = bool(dados_jogador.get('confirmou_vencedor', False))
+            jogador.pronto = bool(dados_jogador.get('pronto', False))
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
@@ -183,7 +213,8 @@ class Lobby:
                                  if cid in jogadores]
             partida = Partida(do_lobby=lobby, jogadores=jogadores_partida,
                               partida_numero=dados_partida.get('partida_num', 1),
-                              dados_qtd=dados_partida.get('dados_qtd', 1))
+                              dados_qtd=dados_partida.get('dados_qtd', 1),
+                              com_coringa=dados_partida.get('com_coringa', True))
             partida.jogador_sorteado = jogadores.get(dados_partida.get('jogador_sorteado_id'))
             partida.vencedor_final = jogadores.get(dados_partida.get('vencedor_final_id'))
             for dados_rodada in dados_partida.get('rodadas', []):
@@ -242,21 +273,112 @@ class Lobby:
         emit('reset_partida', to=self.sala_room())  # Arruma algumas coisas da partida anterior no front-end
         partida_numero = len(self.partidas) + 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
-                          dados_qtd=dados_qtd)
+                          dados_qtd=dados_qtd, com_coringa=bool(self.config.get('com_coringa', True)))
         self.partidas.append(partida)
+        self.status = 'jogando'
         for jogador in self.jogadores:
             jogador.partida_atual = partida
             jogador.partidas.append(partida)
+            jogador.pronto = False
             emit('desativar_username_edit', to=jogador.client_id)
         return partida
+
+    def definir_config(self, dados):
+        """
+        Atualiza a configuração da partida (sala de espera), com validações.
+        Aceita um subconjunto das chaves; o restante permanece como estava.
+        :param dados: Dicionário com as configurações a aplicar.
+        :return: True se algo foi aplicado.
+        """
+        if not isinstance(dados, dict):
+            return False
+        config = dict(self.config)
+        aplicado = False
+        if 'nome' in dados and isinstance(dados['nome'], str):
+            nome = dados['nome'].strip()[:30]
+            if nome:
+                self.nome = nome
+                aplicado = True
+        try:
+            if 'dados_qtd' in dados:
+                valor = int(dados['dados_qtd'])
+                if 1 <= valor <= 6:
+                    config['dados_qtd'] = valor
+                    aplicado = True
+        except (ValueError, TypeError):
+            pass
+        try:
+            if 'max_jogadores' in dados:
+                valor = int(dados['max_jogadores'])
+                if 2 <= valor <= 8:
+                    config['max_jogadores'] = valor
+                    aplicado = True
+        except (ValueError, TypeError):
+            pass
+        if 'com_coringa' in dados:
+            config['com_coringa'] = bool(dados['com_coringa'])
+            aplicado = True
+        if 'publica' in dados:
+            config['publica'] = bool(dados['publica'])
+            aplicado = True
+        self.config = config
+        return aplicado
+
+    def contar_prontos(self):
+        """Quantidade de jogadores prontos (o master conta como pronto por padrão)."""
+        return sum(1 for jogador in self.jogadores if jogador.master or jogador.pronto)
+
+    def pode_iniciar(self):
+        """
+        Verifica as regras da sala de espera para liberar o início da partida.
+        Retorna (bool, motivo_em_português).
+        """
+        if self.status != 'espera':
+            return False, 'Esta partida já está em andamento.'
+        if len(self.jogadores) < 2:
+            return False, 'São necessários ao menos 2 jogadores.'
+        if self.contar_jogadores(nome=True) != len(self.jogadores):
+            return False, 'Todos os jogadores precisam escolher um apelido.'
+        if len(self.jogadores) > int(self.config.get('max_jogadores', 6)):
+            return False, 'A partida está acima do limite de jogadores.'
+        for jogador in self.jogadores:
+            if not jogador.master and not jogador.pronto:
+                nome = jogador.username or 'Um jogador'
+                return False, f'{nome} ainda não está pronto.'
+        return True, 'Tudo pronto para começar!'
+
+    def resumo_partida(self):
+        """
+        Resumo público da partida para a listagem/busca de partidas.
+        """
+        master = self.retornar_master()
+        pode_iniciar, motivo = self.pode_iniciar()
+        return {
+            'sala': self.sala_id,
+            'nome': self.nome,
+            'status': self.status,
+            'jogadores': len(self.jogadores),
+            'prontos': self.contar_prontos(),
+            'max_jogadores': int(self.config.get('max_jogadores', 6)),
+            'dados_qtd': int(self.config.get('dados_qtd', 1)),
+            'com_coringa': bool(self.config.get('com_coringa', True)),
+            'publica': bool(self.config.get('publica', True)),
+            'master': master.username if master else None,
+            'criada_em': self.criado_em.isoformat() if self.criado_em else None,
+            'pode_entrar': self.status == 'espera'
+                           and len(self.jogadores) < int(self.config.get('max_jogadores', 6)),
+            'pode_iniciar': pode_iniciar,
+            'motivo': motivo,
+        }
 
     def resetar_para_lobby(self):
         """
         Volta todos os jogadores ao estado inicial do lobby, após o fim de uma partida.
-        Mantém apelido, pontos e status de master; zera somente o estado da partida.
+        Mantém apelido, pontos, status de master e configurações; zera somente o estado da partida.
         """
         self.conferiram_vencedor = 0
         self.pagina = 0
+        self.status = 'espera'
         for jogador in self.jogadores:
             jogador.partida_atual = None
             jogador.rodada_atual = None
@@ -266,6 +388,7 @@ class Lobby:
             jogador.joguei_dados = False
             jogador.confirmou_rodada = False
             jogador.confirmou_vencedor = False
+            jogador.pronto = False
             jogador.partidas = []
             jogador.rodadas = []
             jogador.turnos = []
@@ -371,9 +494,10 @@ class Partida:
     Representa o momento em que todos os jogadores estão no jogo, até o momento em que sobra um ganhador.
     """
 
-    def __init__(self, do_lobby, jogadores, partida_numero, dados_qtd):
+    def __init__(self, do_lobby, jogadores, partida_numero, dados_qtd, com_coringa=True):
         self.partida_num = partida_numero
         self.dados_qtd = dados_qtd
+        self.com_coringa = com_coringa
         self.jogadores = jogadores
         self.jogador_sorteado = random.choice(self.jogadores)
         self.do_lobby = do_lobby
@@ -427,7 +551,7 @@ class Partida:
 
             # cria a rodada.
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
-                            vez_atual=vez_atual)
+                            vez_atual=vez_atual, com_coringa=self.com_coringa)
             self.rodadas.append(rodada)
             # Arruma o front pro jogador da vez na rodada.
             rodada.atualizar_front_pro_da_vez(jogador_atual=vez_atual)
@@ -529,14 +653,15 @@ class Rodada:
     ele mesmo ou outro jogador perde.
     """
 
-    def __init__(self, partida, jogadores, rodada_numero, vez_atual, perdedor=None, vencedor=None):
+    def __init__(self, partida, jogadores, rodada_numero, vez_atual, perdedor=None, vencedor=None,
+                 com_coringa=True):
         self.rodada_num = rodada_numero
         self.da_partida = partida
         self.jogaram_dados = False
         self.turnos = []
         self.todos_os_dados = []
         self.jogadores = jogadores
-        self.com_coringa = True
+        self.com_coringa = com_coringa
         self.coringa_atual_qtd = 0
         self.coringa_atual_jogador = None
         self.conferiram = 0
