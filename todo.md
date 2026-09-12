@@ -1,6 +1,6 @@
 # TODO — Dadinho
 
-<!-- Fase 2 concluída; Fase 3 em andamento. -->
+<!-- Fase 3 e Fase 4 concluídas. -->
 
 Plano em fases para o objetivo atual: **subir o jogo na Vercel, com múltiplas salas, casual only** (sem contas, sem ranking, sem VPS).
 
@@ -67,8 +67,20 @@ Extras no caminho (não listados originalmente):
 - [x] Validar limites free: duração máxima de função (300s/Hobby), conexões WebSocket simultâneas (sem WebSocket na Vercel — long-polling; sem leaderboard persistente).
 - [x] Registrar no `AGENTS.md`/`README` o fluxo de deploy real (comandos, env vars).
 
-## Fase 4 — Experiência pós-deploy (opcional)
+## Fase 4 — Experiência pós-deploy (opcional) ✅ concluída
 
-- [ ] Heartbeat/reconexão: hoje um tab novo nunca sincroniza o estado de uma partida em andamento; enviar snapshot da sala no connect.
-- [ ] Polir espectador/`reset_partida`/limpeza de sala vazia (GC de salas sem ninguém).
-- [ ] UI: remover hardcodes de layout (alturas de card 240px etc.), revisar tipografia/exibição em mobile.
+- [x] Heartbeat/reconexão: snapshot da sala no connect — `funcoes_gerais.enviar_snapshot_sala(lobby, jogador)` reemite `mudar_pagina` (0/1/2/3/4) + os eventos de reconstrução do estado (`construtor_dados`, `construtor_html`, `dados_mesa`, `atualizar_coringa`, `meus_dados`, `formatador_coletivo`, `atualizar_turno`/`meu_turno`/`espera_turno`, `cards_conferencia`, `vencedor_da_partida`, `atualizar_pontos`, `botao_vencedor_ativ`, `espectador`).
+- [x] Retomada de identidade por `chave_secreta`: cada jogador guarda a chave no `sessionStorage` (`dadinho_chave`) e reencanta no connect (`Lobby.buscar_jogador_pela_chave`), reaproveitando o mesmo `Jogador` (pontos, partida/rodada/turno atuais) — refresh/tab novo volta ao mesmo lugar; sid antigo fica órfão e é limpo no disconnect.
+- [x] Estado extra persistido no store para o snapshot: `Lobby.pagina`, `Rodada.conferencia`, `Partida.vencedor_final`, e flags `Jogador.confirmou_rodada`/`confirmou_vencedor` (dedup de clique duplo em conferência/vitória).
+- [x] `handle_disconnect` resiliente a partida em andamento: remove o jogador de `partida.jogadores`, avança `vez_atual` (e reemite `atualizar_front_pro_da_vez`) quando o da vez cai, destrava a rolagem quando o que faltava rolar cai, e declara vencedor quando só sobra 1 (sem travamento).
+- [x] Polir `reset_partida`/GC: `resetar_para_lobby` define `pagina=0` e zera `confirmou_*`; cliente limpa DOM de vitória (h1 e texto) ao rejogar; sala sem ninguém continua sendo removida do store no disconnect do último jogador.
+- [x] UI sem hardcodes de layout: cards com `min-height` fluido (200px no lugar de 240px fixo), painéis flex com wrap (`flex: 1 1 200px; min-width: 0`), lista de jogadores `width:100%`/`max-width:400px`, botões de aposta/desconfiar com wrap, `body` com `overflow-y:auto` em vez de `height:100vh` travada, media query `@media (max-width:768px)` para título (22vh/65%), `h1_vencedor` e botões menores, `painel_aguarde` em 90%.
+- [x] Status de conexão visível (elemento `status_conexao` no HTML + handlers `connect`/`disconnect` no JS) e `connect_start` agora devolve `username` (restaura o apelido do `sessionStorage` sem re-tipar).
+
+Notas/limitações registradas (aceitos para o público casual):
+- Duas abas com a mesma chave no `sessionStorage`: a 2ª "rouba" a identidade e a 1ª vira zumbi (desconectada na sequência) — comportamento aceito.
+- Race de refresh: se o disconnect antigo chegar antes do connect novo com a chave, o jogador é recriado como espectador da partida (visível, mas sem identidade) — degradado, não quebrado.
+- Quem entra no meio da partida conta em `len(lobby.jogadores)` para a conferência de vitória (precisa clicar "Ok" mesmo não tendo jogado) — comportamento pré-existente mantido.
+- Snapshot reinvoca apenas os handlers clientes já existentes (nenhum evento novo no `script.js`), e o branch da página 4 retorna antes do `emit('espectador')` final — espectador na tela de vitória mantém o "Ok".
+
+Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; round-trip de serialização da árvore `Lobby`; `node --check static\script.js`; boot `VERCEL=1` respondendo 200; e teste de integração via `flask_socketio.test_client` cobrindo lobby→página 2→aposta→conferência→resume por chave→dedup e desconexões no meio do jogo (da vez cai → vez avança; quem não rolou cai → rolagem destrava). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase4.py`.
