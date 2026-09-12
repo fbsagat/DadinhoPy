@@ -19,7 +19,14 @@ const diceImages = [
 // Envia a chave guardada anteriormente (via sessionStorage) para o servidor
 // reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
 const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
-const socket = io({ autoConnect: true, query: { sala: sala_atual, chave_secreta: chave_resumo } });
+// WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
+// request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
+// entra em loop de reconexão). O polling fica só como fallback de rede.
+const socket = io({
+    autoConnect: true,
+    transports: ['websocket', 'polling'],
+    query: { sala: sala_atual, chave_secreta: chave_resumo },
+});
 socket.connect();
 
 // ---------------------------------------------------------------------------

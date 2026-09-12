@@ -64,7 +64,12 @@ class GerenciadorThreadSeguro(GerenciadorSocketIOBase):
 
 # Transporte e armazenamento ajustáveis por ambiente (ver Fase 2 do todo.md).
 async_mode = os.environ.get("DADINHO_ASYNC_MODE", "threading").strip() or "threading"
-padrao_permitir_websocket = "false" if os.environ.get("VERCEL") == "1" else "true"
+# A Vercel passou a suportar WebSocket nativamente (beta, jun/2026). O WS fixa a
+# conexão numa instância; com long-polling cada request de poll pode cair numa
+# instância sem a sessão Engine.IO (em memória por instância) e voltar
+# "Invalid session", fazendo o cliente reconectar sem parar ("Reconectando...").
+# Por isso o WS é o padrão; DADINHO_PERMITIR_WEBSOCKET=0 desliga o upgrade.
+padrao_permitir_websocket = "true"
 permitir_websocket = os.environ.get("DADINHO_PERMITIR_WEBSOCKET", padrao_permitir_websocket).strip().lower() \
     not in ("0", "false", "nao", "no")
 socketio = SocketIO(
