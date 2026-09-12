@@ -67,7 +67,58 @@ socket.onevent = function (packet) {
     }
 };
 
+// Modo de exibição do narrador, persistido entre sessões:
+//   completo  -> histórico de falas (padrão)
+//   ultima    -> mostra só a última fala
+//   desligado -> painel escondido
+const NARRADOR_MODOS = {
+    completo: { icone: '🎙️', titulo: 'js.narrador.modo.completo', classe: 'btn-outline-info' },
+    ultima: { icone: '💬', titulo: 'js.narrador.modo.ultima', classe: 'btn-outline-warning' },
+    desligado: { icone: '🔕', titulo: 'js.narrador.modo.desligado', classe: 'btn-outline-secondary' },
+};
+const NARRADOR_CICLO = ['completo', 'ultima', 'desligado'];
+let narrador_modo = localStorage.getItem('dadinho_narrador');
+if (!NARRADOR_MODOS[narrador_modo]) {
+    narrador_modo = 'completo';
+}
+
+function aplicar_estado_narrador() {
+    const botao = document.getElementById('botao_narrador');
+    const painel = document.getElementById('narrador');
+    const cfg = NARRADOR_MODOS[narrador_modo];
+    if (botao) {
+        botao.textContent = cfg.icone;
+        botao.title = t(cfg.titulo);
+        Object.keys(NARRADOR_MODOS).forEach(function (chave) {
+            botao.classList.remove(NARRADOR_MODOS[chave].classe);
+        });
+        botao.classList.add(cfg.classe);
+    }
+    if (painel) {
+        painel.style.display = (narrador_modo === 'desligado' || indiceAtual === 0) ? 'none' : 'flex';
+    }
+    if (narrador_modo === 'ultima') {
+        const log = document.getElementById('narrador_log');
+        while (log && log.children.length > 1) {
+            log.removeChild(log.firstChild);
+        }
+    }
+    if (narrador_modo === 'desligado') {
+        esconder_pensando();
+    }
+}
+
+function alternar_narrador() {
+    const pos = NARRADOR_CICLO.indexOf(narrador_modo);
+    narrador_modo = NARRADOR_CICLO[(pos + 1) % NARRADOR_CICLO.length];
+    localStorage.setItem('dadinho_narrador', narrador_modo);
+    aplicar_estado_narrador();
+}
+
 function narrador_linha(texto) {
+    if (narrador_modo === 'desligado') {
+        return;
+    }
     const log = document.getElementById('narrador_log');
     if (!log) {
         return;
@@ -75,14 +126,21 @@ function narrador_linha(texto) {
     const linha = document.createElement('div');
     linha.className = 'narrador-linha';
     linha.textContent = texto;
+    if (narrador_modo === 'ultima') {
+        log.innerHTML = '';
+    }
     log.appendChild(linha);
-    while (log.children.length > 40) {
+    const limite = narrador_modo === 'ultima' ? 1 : 40;
+    while (log.children.length > limite) {
         log.removeChild(log.firstChild);
     }
     log.scrollTop = log.scrollHeight;
 }
 
 function mostrar_pensando(nome, ms) {
+    if (narrador_modo === 'desligado') {
+        return;
+    }
     const el = document.getElementById('narrador_pensando');
     if (!el) {
         return;
@@ -93,7 +151,7 @@ function mostrar_pensando(nome, ms) {
     spinner.className = 'spinner-grow spinner-grow-sm text-info me-1';
     spinner.setAttribute('role', 'status');
     el.appendChild(spinner);
-    el.appendChild(document.createTextNode(`${nome || 'Bot'} está pensando...`));
+    el.appendChild(document.createTextNode(t('js.pensando', { nome: nome || 'Bot' })));
     clearTimeout(el._timer);
     el._timer = setTimeout(function () {
         el.style.display = 'none';
@@ -117,8 +175,9 @@ function limpar_narrador() {
 
 socket.on('narracao', function (data) {
     esconder_pensando();
-    if (data && data.texto) {
-        narrador_linha(data.texto);
+    const texto = traduzirSegmentos(data && data.segmentos, data && data.texto);
+    if (texto) {
+        narrador_linha(texto);
     }
     if (data && data.tipo === 'vitoria') {
         tocar_fanfarra();
@@ -152,7 +211,7 @@ function entrar_sala() {
     const input = document.getElementById('input_sala');
     const codigo = input.value.trim();
     if (!codigo) {
-        mostrar_alerta('Digite o código da sala!', 'aviso');
+        mostrar_alerta(t('msg.codigo_sala_vazio'), 'aviso');
         return;
     }
     ir_para_sala(codigo);
@@ -198,7 +257,10 @@ socket.on('partidas_listadas', function (data) {
     const partidas = data.partidas || [];
 
     if (partidas.length === 0) {
-        lista.innerHTML = '<small class="text-muted">Nenhuma partida encontrada com esses filtros.</small>';
+        const vazio = document.createElement('small');
+        vazio.className = 'text-muted';
+        vazio.textContent = t('js.busca.vazia');
+        lista.appendChild(vazio);
         return;
     }
 
@@ -218,10 +280,10 @@ socket.on('partidas_listadas', function (data) {
         const detalhes = document.createElement('small');
         detalhes.className = 'text-muted d-block';
         const detalhes_parts = [
-            `🎲 ${partida.dados_qtd} dado(s)`,
-            partida.com_coringa ? 'coringa ativo' : 'sem coringa',
-            `master: ${partida.master || '?'}`,
-            jogando ? '🕹 em andamento' : `${partida.prontos}/${partida.jogadores} prontos`,
+            t('js.busca.dados', { n: partida.dados_qtd }),
+            partida.com_coringa ? t('js.busca.coringa_sim') : t('js.busca.coringa_nao'),
+            t('js.busca.master', { nome: partida.master || '?' }),
+            jogando ? t('js.busca.em_andamento') : t('js.prontos', { prontos: partida.prontos, total: partida.jogadores }),
         ];
         detalhes.textContent = detalhes_parts.join(' · ');
 
@@ -233,16 +295,16 @@ socket.on('partidas_listadas', function (data) {
             // Fase 9: assistir partidas em andamento pela busca é liberado; quem
             // entra vira espectador (a sala em jogo não trava mais a entrada).
             botao.className = 'btn btn-sm btn-outline-info';
-            botao.textContent = '👁 Assistir';
-            botao.title = 'Entrar na partida como espectador';
+            botao.textContent = t('js.busca.assistir');
+            botao.title = t('js.busca.assistir_titulo');
             botao.onclick = () => entrar_partida(partida.sala);
         } else if (partida.pode_entrar) {
             botao.className = 'btn btn-sm btn-success';
-            botao.textContent = 'Entrar';
+            botao.textContent = t('js.busca.entrar');
             botao.onclick = () => entrar_partida(partida.sala);
         } else {
             botao.className = 'btn btn-sm btn-outline-secondary';
-            botao.textContent = 'Lotada';
+            botao.textContent = t('js.busca.lotada');
             botao.disabled = true;
         }
 
@@ -253,12 +315,14 @@ socket.on('partidas_listadas', function (data) {
 });
 
 socket.on('sala_cheia', function () {
-    mostrar_alerta('Esta sala está cheia (limite de jogadores atingido).', 'aviso')
+    mostrar_alerta(t('msg.sala_cheia'), 'aviso')
         .then(() => ir_para_sala('padrao'));
 });
 
 socket.on('iniciar_negado', function (data) {
-    mostrar_alerta(`Não é possível iniciar: ${data.motivo}`, 'aviso');
+    const motivo = data && data.motivo;
+    const texto = (motivo && motivo.chave) ? t(motivo.chave, motivo.params) : (motivo || '');
+    mostrar_alerta(t('msg.iniciar_negado', { motivo: texto }), 'aviso');
 });
 
 const apelidoSalvo = sessionStorage.getItem('dadinho_apelido');
@@ -277,23 +341,29 @@ socket.on("update_user_list", (data) => {
     // Nome, status e prontidão da partida.
     const nome_partida = document.getElementById('nome_partida');
     if (nome_partida) {
-        nome_partida.textContent = data.nome || 'Partida';
+        nome_partida.textContent = data.nome || t('ui.partida.titulo');
     }
     const status_partida = document.getElementById('status_partida');
     if (status_partida) {
         const jogando = data.status === 'jogando';
-        status_partida.textContent = jogando ? '🕹 Em andamento' : '⏳ Aguardando jogadores';
+        status_partida.textContent = jogando ? t('js.status.jogando') : t('js.status.espera');
         status_partida.className = 'badge ' + (jogando ? 'text-bg-success' : 'text-bg-secondary');
     }
     const prontidao_partida = document.getElementById('prontidao_partida');
     if (prontidao_partida) {
         const prontos = data.prontos.filter(Boolean).length;
-        prontidao_partida.textContent = `${prontos}/${data.users.length} prontos`;
+        prontidao_partida.textContent = t('js.prontos', { prontos: prontos, total: data.users.length });
     }
     const motivo_iniciar = document.getElementById('motivo_iniciar');
     if (motivo_iniciar) {
         if (data.users.length >= 2 && data.status === 'espera') {
-            motivo_iniciar.textContent = data.pode_iniciar ? 'Tudo pronto! Pode iniciar.' : data.motivo || '';
+            if (data.pode_iniciar) {
+                motivo_iniciar.textContent = t('js.pode_iniciar');
+            } else if (data.motivo && data.motivo.chave) {
+                motivo_iniciar.textContent = t(data.motivo.chave, data.motivo.params);
+            } else {
+                motivo_iniciar.textContent = data.motivo || '';
+            }
         } else {
             motivo_iniciar.textContent = '';
         }
@@ -310,18 +380,20 @@ socket.on("update_user_list", (data) => {
     }
 
     if (data.users.length === 0) {
-        userListItems.innerHTML = "<small>Aguardando jogadores...</small>";
+        const vazio = document.createElement('small');
+        vazio.textContent = t('ui.lista.aguardando');
+        userListItems.appendChild(vazio);
     } else {
         const rowDiv = document.createElement("div");
         rowDiv.className = "row border-bottom";
 
         const jogadoresDiv = document.createElement("div");
         jogadoresDiv.className = "col-md-6 font-weight-bold";
-        jogadoresDiv.textContent = "Jogadores conectados";
+        jogadoresDiv.textContent = t('js.jogadores_conectados');
 
         const pontuacaoDiv = document.createElement("div");
         pontuacaoDiv.className = "col-md-6 font-weight-bold";
-        pontuacaoDiv.textContent = "Pontuação";
+        pontuacaoDiv.textContent = t('js.pontuacao');
 
         userListItems.appendChild(rowDiv);
         rowDiv.appendChild(jogadoresDiv);
@@ -356,7 +428,7 @@ socket.on("update_user_list", (data) => {
         if (bot_pronto) {
             const meu_indice = data.users.indexOf(nome_jogador);
             const eu_pronto = meu_indice !== -1 && data.prontos[meu_indice] === true;
-            bot_pronto.textContent = eu_pronto ? '✅ Pronto (clique para desfazer)' : 'Ficar pronto';
+            bot_pronto.textContent = eu_pronto ? t('js.pronto_desfazer') : t('js.ficar_pronto');
             bot_pronto.disabled = data.status === 'jogando';
         }
 
@@ -469,7 +541,7 @@ function remover_ias() {
 socket.on('jogador_substituido_por_ia', function (data) {
     const painel = document.getElementById('motivo_iniciar');
     if (painel && data && data.nome) {
-        painel.textContent = `${data.nome} caiu e foi substituído por uma IA.`;
+        painel.textContent = t('msg.substituido_ia', { nome: data.nome });
     }
 });
 
@@ -493,10 +565,6 @@ socket.on("mudar_pagina", function (data) {
     if (tela_busca) {
         tela_busca.style.display = 'none'; // Fecha a busca caso esteja aberta (navegação do servidor)
     }
-    const painel_narrador = document.getElementById('narrador');
-    if (painel_narrador) {
-        painel_narrador.style.display = data.pag_numero === 0 ? 'none' : 'flex';
-    }
     const logo = document.getElementById('titulo_img');
     const logodiv = document.getElementById('div_titulo_img');
     if (data.pag_numero === 0) {
@@ -517,6 +585,7 @@ socket.on("mudar_pagina", function (data) {
     paginas[indiceAtual].style.display = "none";
     // Atualiza o índice para a próxima página
     indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
+    aplicar_estado_narrador();
     // Mostra a próxima página
     paginas[indiceAtual].style.display = "block";
     if (data.pag_numero === 2) {
@@ -544,7 +613,7 @@ socket.on('meus_dados', function (data) {
     meus_dados.innerHTML = "";
     const span = document.createElement('span');
     span.className = "fs-5 text-white me-2";
-    span.innerText = "Seus dados: ";
+    span.innerText = t('js.seus_dados');
     meus_dados.appendChild(span);
 
     data.dados.forEach((dado, index) => {
@@ -571,7 +640,7 @@ socket.on('dados_mesa', function (data) {
     dados_mesa.innerHTML = ""
     const span = document.createElement('span')
     span.className = 'fs-5 text-white me-2'
-    span.innerHTML = `Temos <b>${total}</b> dados na mesa`
+    span.innerHTML = t('js.dados_mesa', { total: total });
     dados_mesa.appendChild(span)
 });
 
@@ -586,18 +655,18 @@ socket.on('atualizar_coringa', function (data) {
     if (coringa_cancelado) {
         const span3 = document.createElement('span')
         span3.className = 'fs-5 text-danger me-2'
-        span3.innerText = 'O coringa foi cancelado!'
+        span3.innerText = t('js.coringa_cancelado');
         coringa_atual_el.appendChild(span3)
     } else {
         if (coringa_n === 0) {
             const span3 = document.createElement('span')
             span3.className = 'fs-6 text-white me-2'
-            span3.innerText = 'O coringa ainda não foi jogado'
+            span3.innerText = t('js.coringa_nao_jogado');
             coringa_atual_el.appendChild(span3)
         } else {
             const span1 = document.createElement('span')
             span1.className = 'fs-5 text-white me-2'
-            span1.innerText = `Coringa atual:`
+            span1.innerText = t('js.coringa_atual');
             const img1 = document.createElement('img')
             img1.className = "img-fluid"
             img1.alt = 'imagem coringa';
@@ -606,7 +675,7 @@ socket.on('atualizar_coringa', function (data) {
             img1.src = '../static/imagens/dado/1.png'
             const span2 = document.createElement('span')
             span2.className = 'fs-5 text-white me-2'
-            span2.innerText = `X${coringa_n} (${coringa_j})`
+            span2.innerText = t('js.coringa_x', { n: coringa_n, jogador: coringa_j })
             coringa_atual_el.appendChild(span1)
             coringa_atual_el.appendChild(img1)
             coringa_atual_el.appendChild(span2)
@@ -615,12 +684,15 @@ socket.on('atualizar_coringa', function (data) {
 })
 
 // Função para criar cada seção de dados
-function createDiceSection(text, opacityClass, imageIndex) {
+function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     const col = document.createElement('div');
     col.className = `col-md-12 mb-1 ${opacityClass}`;
 
     const diceDiv = document.createElement('div');
     diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
+    if (destaque) {
+        diceDiv.classList.add('jogada-destaque');
+    }
 
     const imgDiv = document.createElement('div');
     const img = document.createElement('img');
@@ -659,7 +731,7 @@ socket.on('construtor_dados', function (data) {
         const botao = document.createElement('button');
         botao.id = 'dadobotao';
         botao.className = 'btn btn-primary mt-2';
-        botao.textContent = 'Jogar dados';
+        botao.textContent = t('js.jogar_dados');
         botao.onclick = jogar_dados;  // Função que será chamada ao clicar
 
         // Adicionando o botão ao container principal
@@ -716,7 +788,7 @@ socket.on('construtor_dados', function (data) {
         badge.className = 'fs-3 badge text-bg-primary text-wrap mb-2';
         badge.style.width = 'auto';
         badge.style.maxWidth = '90%';
-        badge.textContent = 'Aguarde, os dados estão rolando';
+        badge.textContent = t('js.dados_rolando');
 
         // Adiciona o badge ao sub-container
         subContainer.appendChild(badge);
@@ -729,7 +801,7 @@ socket.on('construtor_dados', function (data) {
         // Adiciona o texto acessível ao spinner
         const visuallyHidden = document.createElement('span');
         visuallyHidden.className = 'visually-hidden';
-        visuallyHidden.textContent = 'Loading...';
+        visuallyHidden.textContent = t('js.carregando');
         spinner.appendChild(visuallyHidden);
 
         // Monta o DOM
@@ -749,11 +821,21 @@ socket.on('construtor_html', function (data) {
     // Fase 9: mostra "Rodada N" na tela de turnos (o payload rodada_n já existia).
     const rodada_txt = document.getElementById('rodada_atual_txt');
     if (rodada_txt && data.rodada_n) {
-        rodada_txt.textContent = `Rodada ${data.rodada_n}`;
+        rodada_txt.textContent = t('js.rodada', { n: data.rodada_n });
         rodada_txt.classList.remove('d-none');
     }
 
-    Object.entries(data.turnos_lista).forEach(([jogador, turnos]) => {
+    // Girar a ordem dos cards para o próprio jogador ficar no centro da sua tela,
+    // mantendo a ordem circular (de turno) entre os demais.
+    let entradas = Object.entries(data.turnos_lista);
+    const meu_indice = entradas.findIndex(([jogador]) => jogador === nome_jogador);
+    if (meu_indice > -1) {
+        const centro = Math.floor(entradas.length / 2);
+        const desloc = meu_indice - centro;
+        entradas = entradas.map((_, i) => entradas[(i + desloc + entradas.length) % entradas.length]);
+    }
+
+    entradas.forEach(([jogador, turnos]) => {
         // Criação do container principal
         const divCol = document.createElement('div');
         divCol.className = 'col-md-2 col-sm-4 col-6 mb-1';
@@ -803,6 +885,13 @@ socket.on('atualizar_turno', function (dados) {
     const jogador = dados.jogador
     const lista_turnos = dados.lista_turnos
     const card_row = document.getElementById(`card_row_${jogador}`)
+    // A última jogada da rodada ganha destaque; antes de marcar, limpa o antigo.
+    const destacar_ultimo = dados.ultimo === true;
+    if (destacar_ultimo) {
+        document.querySelectorAll('#cards .jogada-destaque').forEach(function (el) {
+            el.classList.remove('jogada-destaque');
+        });
+    }
     card_row.innerHTML = ""
     lista_turnos.forEach((sublista, index) => {
         const dado = sublista[0];
@@ -817,7 +906,7 @@ socket.on('atualizar_turno', function (dados) {
         } else if (index === 2) {
             opacidade = 'opacity-25'; // Para o índice 2, opacidade 100%
         }
-        card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado));
+        card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado, destacar_ultimo && index === 0));
     })
 });
 
@@ -943,13 +1032,41 @@ socket.on('vencedor_da_partida', function (data) {
     tocar_som_variante('aposta', [1, 2]);
     tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
-    h1_vencedor.innerHTML = `Vitória de ${data.nome}<br> Nessa bagaça!!!`;
+    h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: data.nome });
     iniciar_celebracao();
 })
 
 socket.on('soltar_fogos', function () {
     soltar_fogos();
 })
+
+// Monta o texto da conferência no idioma do jogador. O servidor manda campos
+// estruturados (quem ganhou/perdeu, quantidade apostada e real); se não vierem,
+// cai para o texto pt-BR legado.
+function texto_conferencia(data) {
+    if (!data) {
+        return '';
+    }
+    if (data.verdadeira === undefined) {
+        return data.texto || '';
+    }
+    const qtd = data.dado_qtd;
+    const face = data.dado_apostado_face;
+    const saiu_txt = data.saiu_da_partida
+        ? t('msg.conf.saiu', { nome: data.perdedor })
+        : '';
+    if (data.verdadeira) {
+        const chave = Number(qtd) > 1 ? 'msg.conf.verdadeira.plural' : 'msg.conf.verdadeira.sing';
+        return t(chave, { vencedor: data.ganhador, perdedor: data.perdedor, qtd: qtd, face: face, saiu: saiu_txt });
+    }
+    const real = Number(data.quantidade_real) || 0;
+    const qchave = real <= 0 ? 'msg.conf.qtd.zero' : (real === 1 ? 'msg.conf.qtd.um' : 'msg.conf.qtd.muitos');
+    const quantidade = t(qchave, { qtd: real });
+    return t('msg.conf.mentirosa', {
+        vencedor: data.ganhador, perdedor: data.perdedor,
+        qtd: qtd, face: face, quantidade: quantidade, saiu: saiu_txt,
+    });
+}
 
 // Função para construir os cards na página conferência
 socket.on('cards_conferencia', function (data) {
@@ -967,7 +1084,7 @@ socket.on('cards_conferencia', function (data) {
     const cardContainer = document.getElementById("cards_conferencia");
     const texto_v_d = document.getElementById("texto_vitoria_derrota")
     cardContainer.innerHTML = ''
-    texto_v_d.innerText = data.texto;
+    texto_v_d.innerText = texto_conferencia(data);
 
     nomes.forEach((nome, index) => {
         // Criação do card
@@ -1042,7 +1159,7 @@ socket.on('espectador', function (data) {
     meus_dados.innerHTML = "";
     const span = document.createElement('span');
     span.className = "fs-5 text-white me-2";
-    span.innerText = "ESPECTADOR";
+    span.innerText = t('js.espectador');
     meus_dados.appendChild(span);
     bot_confe_fim.style.display = 'none';
     painel_aguarde.style.display = 'none';
@@ -1064,7 +1181,7 @@ document.getElementById('apostar').addEventListener('click', () => {
         // Enviar para o backend (exemplo usando fetch)
         socket.emit('apostar', { dados: data });
     } else {
-        mostrar_alerta('Selecione um dado e informe a quantidade!', 'aviso');
+        mostrar_alerta(t('msg.selecione_dado'), 'aviso');
     }
 });
 
@@ -1109,7 +1226,7 @@ socket.on("connect_start", function (data) {
 socket.on('connect', function () {
     const status = document.getElementById('status_conexao');
     if (status) {
-        status.textContent = '● Conectado';
+        status.textContent = t('js.conectado');
         status.className = 'd-block mb-2 text-success';
     }
 });
@@ -1117,7 +1234,7 @@ socket.on('connect', function () {
 socket.on('disconnect', function () {
     const status = document.getElementById('status_conexao');
     if (status) {
-        status.textContent = '⚠ Reconectando...';
+        status.textContent = t('js.reconectando');
         status.className = 'd-block mb-2 text-warning';
     }
 });
@@ -1175,10 +1292,15 @@ socket.on("jogar_dados_resultado", function (data) {
     }, rollTime);
 });
 
-// Alerta de jogada inválida
+// Alerta de jogada inválida: o servidor envia o motivo explicado (Fase 13).
 socket.on('jogada_invalida', function (data) {
-    const txt = data.txtadd
-    mostrar_alerta(`Esta jogada é inválida, ${txt}`, 'erro');
+    let motivo;
+    if (data && data.txtchave) {
+        motivo = t(data.txtchave, data.txtparams || {});
+    } else {
+        motivo = (data && data.txtadd) ? data.txtadd : t('msg.jogada_invalida_padrao');
+    }
+    mostrar_alerta(motivo, 'erro');
 })
 
 // Fase 9: alguém caiu no meio da partida. Agenda um pedido ao servidor para
@@ -1200,7 +1322,7 @@ function enviar_apelido() {
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
     } else {
-        mostrar_alerta('Preencha o seu nome!', 'aviso');
+        mostrar_alerta(t('msg.preencha_nome'), 'aviso');
     }
 }
 
@@ -1264,36 +1386,14 @@ if (botao_som) {
 // Preferência de dicas do jogador, persistida entre sessões. Valor padrão: ligado.
 let dicas_ativadas = localStorage.getItem('dadinho_dicas') !== 'off';
 
-// Dicas contextuais mostradas conforme a página da partida (0 a 4).
+// Dicas contextuais mostradas conforme a página da partida (0 a 4). São chaves
+// de tradução; o texto é resolvido no idioma do jogador em mostrar_dica().
 const dicas_por_pagina = {
-    0: [
-        'Escolha um apelido e clique em "Pronto" para entrar na partida.',
-        'O master define nome, dados por jogador, coringa e se a partida é pública.',
-        'A partida só começa com 2+ jogadores, todos com apelido e prontos.',
-        'Os pontos são acumulados no lobby a cada vitória.',
-    ],
-    1: [
-        'Clique em "Jogar dados" para rolar os seus dados.',
-        'Você só vê os seus dados; os outros jogadores veem apenas os deles.',
-        'Quando todos rolarem, começam os turnos de aposta.',
-    ],
-    2: [
-        'Na sua vez, aposte uma quantidade e um número (face do dado).',
-        'Você também pode desconfiar da aposta anterior em vez de apostar.',
-        'A aposta deve aumentar: quantidade maior, ou mesma quantidade com número maior.',
-        'O 1 é coringa: conta como qualquer número, mas voltar pra número exige o dobro.',
-        'Desconfiou certo? Quem apostou perde um dado. Errou? Você perde um dado.',
-        'Quem perde todos os dados vira espectador da partida.',
-    ],
-    3: [
-        'Veja quem ganhou e quem perdeu um dado na rodada.',
-        'Os dados destacados em vermelho mostram a aposta conferida.',
-        'Clique em Ok para começar a próxima rodada.',
-    ],
-    4: [
-        'Parabéns ao vencedor! Clique em Ok para voltar ao lobby.',
-        'O vencedor ganha 1 ponto na pontuação da sala.',
-    ],
+    0: ['js.dica.0.0', 'js.dica.0.1', 'js.dica.0.2', 'js.dica.0.3'],
+    1: ['js.dica.1.0', 'js.dica.1.1', 'js.dica.1.2'],
+    2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5'],
+    3: ['js.dica.3.0', 'js.dica.3.1', 'js.dica.3.2'],
+    4: ['js.dica.4.0', 'js.dica.4.1'],
 };
 
 const botao_tutorial = document.getElementById('botao_tutorial');
@@ -1312,10 +1412,10 @@ const alerta_mensagem = document.getElementById('alerta_mensagem');
 let _alerta_resolver = null;
 
 const ALERTA_ESTILOS = {
-    aviso: { icone: '⚠️', titulo: 'Atenção' },
-    erro: { icone: '⛔', titulo: 'Ops!' },
-    info: { icone: 'ℹ️', titulo: 'Aviso' },
-    sucesso: { icone: '✅', titulo: 'Tudo certo' },
+    aviso: { icone: '⚠️', titulo: 'alerta.aviso' },
+    erro: { icone: '⛔', titulo: 'alerta.erro' },
+    info: { icone: 'ℹ️', titulo: 'alerta.info' },
+    sucesso: { icone: '✅', titulo: 'alerta.sucesso' },
 };
 
 function mostrar_alerta(mensagem, tipo) {
@@ -1326,7 +1426,7 @@ function mostrar_alerta(mensagem, tipo) {
         return Promise.resolve();
     }
     alerta_icone.textContent = estilo.icone;
-    alerta_titulo.textContent = estilo.titulo;
+    alerta_titulo.textContent = t(estilo.titulo);
     alerta_mensagem.textContent = mensagem;
     alerta_overlay.dataset.tipo = chave;
     alerta_overlay.style.display = 'flex';
@@ -1378,7 +1478,7 @@ function mostrar_dica(pag_numero) {
     if (dicas.length === 0) {
         return;
     }
-    document.getElementById('dicas_texto').textContent = dicas[Math.floor(Math.random() * dicas.length)];
+    document.getElementById('dicas_texto').textContent = t(dicas[Math.floor(Math.random() * dicas.length)]);
     painel_dicas.style.display = 'flex';
 }
 
@@ -1391,7 +1491,8 @@ function fechar_dica() {
 function alternar_dicas() {
     dicas_ativadas = !dicas_ativadas;
     localStorage.setItem('dadinho_dicas', dicas_ativadas ? 'on' : 'off');
-    aplicar_estado_dicas();
+aplicar_estado_dicas();
+aplicar_estado_narrador();
     if (dicas_ativadas) {
         mostrar_dica(indiceAtual);
     } else {
@@ -1416,6 +1517,10 @@ if (botao_tutorial) {
 }
 if (botao_dicas) {
     botao_dicas.addEventListener('click', alternar_dicas);
+}
+const botao_narrador = document.getElementById('botao_narrador');
+if (botao_narrador) {
+    botao_narrador.addEventListener('click', alternar_narrador);
 }
 if (switch_tutorial) {
     switch_tutorial.addEventListener('change', alternar_dicas);
@@ -1508,11 +1613,13 @@ function tocar_estouro() {
 }
 
 // ---------------------------------------------------------------------------
-// Música de fundo oficial: tema chiptune em MIDI (rota /tema.mid, que troca a
-// composição a cada 12h — ver tema.py). O navegador não toca MIDI nativamente,
-// então o arquivo é lido, interpretado e sintetizado via Web Audio
-// (onda quadrada/serra/triângulo e ruído) em loop.
-// A composição é original, inspirada em jogos de tabuleiro de SNES/Mega Drive.
+// Música de fundo oficial: tema orquestral/ambiental em MIDI (rota /tema.mid,
+// que troca a composição a cada 12h — ver tema.py). O navegador não toca MIDI
+// nativamente, então o arquivo é lido, interpretado e sintetizado via Web Audio
+// em loop: cada programa General MIDI vira um timbre aproximado (cordas, coro,
+// flautas, sinos, harpa, baixo acústico), com reverb de sala e largura estéreo.
+// A composição é original, inspirada no clima animado e orquestral de Donkey
+// Kong Country.
 // O som da música é controlado por um botão próprio, independente dos efeitos.
 // ---------------------------------------------------------------------------
 let musica_ativada = localStorage.getItem('dadinho_musica') === 'on';
@@ -1665,31 +1772,86 @@ function parsear_midi(buffer) {
     return { notas: notas, duracao: tick_para_segundos(fim_tick, tempos, ppq) };
 }
 
-// Escolhe a forma de onda do Web Audio a partir do programa General MIDI.
-function onda_do_programa(programa) {
-    if (programa === 81) {
-        return 'sawtooth'; // arpejo estilo Mega Drive
+// Perfil de timbre orquestral (aproximação no Web Audio) a partir do programa
+// General MIDI. Traz as ondas, o envelope, o ganho, o filtro, o vibrato, o
+// envio de reverb e o "coro" de osciladores levemente desafinados.
+function perfil_do_programa(programa) {
+    // Percussão cromática (celesta/vibrafone/marimba/xilofone/campanas).
+    if (programa >= 8 && programa <= 15) {
+        return { ondas: ['sine', 'triangle'], ataque: 0.006, decaimento: 1.1,
+                 sustain: 0.12, liberacao: 0.6, detune: 7, ganho: 0.14,
+                 corte: 6500, vibrato: 0, envio_reverb: 1.1, percussivo: true };
     }
-    if (programa === 38 || programa === 32 || programa === 33) {
-        return 'triangle'; // baixo
+    if (programa === 46) { // harpa
+        return { ondas: ['triangle', 'sine'], ataque: 0.004, decaimento: 1.4,
+                 sustain: 0.08, liberacao: 0.7, detune: 5, ganho: 0.13,
+                 corte: 7000, vibrato: 0, envio_reverb: 1.2, percussivo: true };
     }
-    if (programa >= 88 && programa <= 95) {
-        return 'sine';
+    if (programa <= 7) { // piano e teclas
+        return { ondas: ['triangle', 'sine'], ataque: 0.004, decaimento: 1.0,
+                 sustain: 0.2, liberacao: 0.5, detune: 2, ganho: 0.15,
+                 corte: 5200, vibrato: 0, envio_reverb: 0.9, percussivo: true };
     }
-    return 'square'; // melodia estilo SNES
+    if (programa >= 32 && programa <= 39) { // baixos
+        return { ondas: ['triangle', 'sine'], ataque: 0.02, decaimento: 0.5,
+                 sustain: 0.7, liberacao: 0.35, detune: 0, ganho: 0.3,
+                 corte: 850, vibrato: 0, envio_reverb: 0.4 };
+    }
+    if (programa === 43) { // contrabaixo orquestral
+        return { ondas: ['triangle'], ataque: 0.03, decaimento: 0.6,
+                 sustain: 0.7, liberacao: 0.4, detune: 0, ganho: 0.34,
+                 corte: 650, vibrato: 0, envio_reverb: 0.5 };
+    }
+    // Cordas, ensembles, coro e pads: ataque macio e cauda presente.
+    if ((programa >= 40 && programa <= 55) || (programa >= 88 && programa <= 95)) {
+        return { ondas: ['sawtooth', 'sawtooth'], ataque: 0.35, decaimento: 0.4,
+                 sustain: 0.8, liberacao: 1.1, detune: 11, ganho: 0.09,
+                 corte: 2400, vibrato: 0.12, envio_reverb: 1.3 };
+    }
+    // Metais e trompa.
+    if (programa >= 56 && programa <= 63) {
+        return { ondas: ['sawtooth', 'triangle'], ataque: 0.14, decaimento: 0.3,
+                 sustain: 0.8, liberacao: 0.6, detune: 6, ganho: 0.1,
+                 corte: 1700, vibrato: 0.08, envio_reverb: 1.1 };
+    }
+    // Sopros (madeiras e flautas): vibrato suave, sopro macio.
+    if (programa >= 64 && programa <= 79) {
+        return { ondas: ['sine', 'triangle'], ataque: 0.09, decaimento: 0.25,
+                 sustain: 0.82, liberacao: 0.45, detune: 3, ganho: 0.12,
+                 corte: 3600, vibrato: 0.35, envio_reverb: 1.0 };
+    }
+    // Fallback: synth lead simples.
+    return { ondas: ['square'], ataque: 0.03, decaimento: 0.3, sustain: 0.7,
+             liberacao: 0.4, detune: 0, ganho: 0.07, corte: 3000, vibrato: 0.15,
+             envio_reverb: 1.0 };
 }
 
-function volume_do_programa(programa) {
-    if (programa === 38 || programa === 32 || programa === 33) {
-        return 0.26;
+// Panorâmica fixa por canal dá largura orquestral sem precisar de CC no MIDI.
+// (0 = melodia, 1 = sinos, 2 = colchão, 3 = baixo, 4 = contracanto.)
+function pan_do_canal(canal) {
+    if (canal === 1) {
+        return 0.28;
     }
-    if (programa === 81) {
-        return 0.055;
+    if (canal === 2) {
+        return -0.18;
     }
-    if (programa === 82) {
-        return 0.085;
+    if (canal === 4) {
+        return -0.32;
     }
-    return 0.12;
+    return 0.0;
+}
+
+// Resposta ao impulso sintética para o reverb de sala (sem samples externos).
+function criar_impulso_reverb(ctx, segundos, decaimento) {
+    const tamanho = Math.floor(ctx.sampleRate * segundos);
+    const buffer = ctx.createBuffer(2, tamanho, ctx.sampleRate);
+    for (let canal = 0; canal < 2; canal++) {
+        const dados = buffer.getChannelData(canal);
+        for (let i = 0; i < tamanho; i++) {
+            dados[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / tamanho, decaimento);
+        }
+    }
+    return buffer;
 }
 
 function criar_buffer_ruido(ctx, segundos) {
@@ -1702,19 +1864,43 @@ function criar_buffer_ruido(ctx, segundos) {
     return buffer;
 }
 
-// Percussão sintetizada (bumbo senoidal; caixa/chimbais/pratos com ruído).
-function agendar_percussao(ctx, destino, altura, t0, ruido) {
-    if (altura === 35 || altura === 36) {
+// Percussão animada (tímpano/tom e bongôs/congas senoidais; caixa/chimbais com ruído).
+function agendar_percussao(ctx, seco, reverb, altura, velocidade, t0, ruido) {
+    const vel = Math.max(0.2, velocidade / 127);
+    const envio = ctx.createGain();
+    envio.gain.value = 0.8;
+    envio.connect(reverb);
+    if (altura >= 60 && altura <= 68) { // bongôs, congas, timbales e agogôs
         const osc = ctx.createOscillator();
         const ganho = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(150, t0);
-        osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.12);
-        ganho.gain.setValueAtTime(0.55, t0);
-        ganho.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
-        osc.connect(ganho).connect(destino);
+        const metalico = altura >= 67;
+        const frequencia = 210 + (altura - 60) * 22;
+        osc.type = metalico ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(frequencia, t0);
+        osc.frequency.exponentialRampToValueAtTime(frequencia * 0.62, t0 + 0.14);
+        ganho.gain.setValueAtTime(0.26 * vel, t0);
+        ganho.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
+        osc.connect(ganho);
+        ganho.connect(seco);
+        ganho.connect(envio);
         osc.start(t0);
-        osc.stop(t0 + 0.2);
+        osc.stop(t0 + 0.26);
+        return;
+    }
+    if (altura === 47 || altura === 35 || altura === 36 || altura === 41 || altura === 43) {
+        const osc = ctx.createOscillator();
+        const ganho = ctx.createGain();
+        const grave = altura === 47 || altura === 35 || altura === 36;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(grave ? 150 : 110, t0);
+        osc.frequency.exponentialRampToValueAtTime(grave ? 45 : 58, t0 + (grave ? 0.5 : 0.3));
+        ganho.gain.setValueAtTime((grave ? 0.38 : 0.28) * vel, t0);
+        ganho.gain.exponentialRampToValueAtTime(0.001, t0 + (grave ? 1.1 : 0.6));
+        osc.connect(ganho);
+        ganho.connect(seco);
+        ganho.connect(envio);
+        osc.start(t0);
+        osc.stop(t0 + (grave ? 1.2 : 0.7));
         return;
     }
     const fonte = ctx.createBufferSource();
@@ -1726,50 +1912,112 @@ function agendar_percussao(ctx, destino, altura, t0, ruido) {
         filtro.type = 'bandpass';
         filtro.frequency.value = 1800;
         filtro.Q.value = 0.9;
-        ganho.gain.setValueAtTime(0.32, t0);
+        ganho.gain.setValueAtTime(0.24 * vel, t0);
         duracao = 0.16;
     } else if (altura === 46 || altura === 44) { // chimbal aberto
         filtro.type = 'highpass';
         filtro.frequency.value = 6000;
-        ganho.gain.setValueAtTime(0.16, t0);
+        ganho.gain.setValueAtTime(0.12 * vel, t0);
         duracao = 0.26;
     } else if (altura === 49 || altura === 51 || altura === 57) { // prato
         filtro.type = 'highpass';
         filtro.frequency.value = 4000;
-        ganho.gain.setValueAtTime(0.22, t0);
+        ganho.gain.setValueAtTime(0.16 * vel, t0);
         duracao = 0.9;
     } else { // chimbal fechado
         filtro.type = 'highpass';
         filtro.frequency.value = 7000;
-        ganho.gain.setValueAtTime(0.12, t0);
+        ganho.gain.setValueAtTime(0.1 * vel, t0);
         duracao = 0.06;
     }
     ganho.gain.exponentialRampToValueAtTime(0.001, t0 + duracao);
-    fonte.connect(filtro).connect(ganho).connect(destino);
+    fonte.connect(filtro).connect(ganho);
+    ganho.connect(seco);
+    ganho.connect(envio);
     fonte.start(t0);
     fonte.stop(t0 + duracao + 0.02);
 }
 
-function agendar_nota(ctx, destino, nota_midi, ruido) {
+function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
     const t0 = nota_midi.inicio;
     const t1 = nota_midi.inicio + nota_midi.dur;
     if (nota_midi.canal === 9) {
-        agendar_percussao(ctx, destino, nota_midi.altura, t0, ruido);
+        agendar_percussao(ctx, seco, reverb, nota_midi.altura, nota_midi.velocidade, t0, ruido);
         return;
     }
-    const osc = ctx.createOscillator();
+    const perfil = perfil_do_programa(nota_midi.programa);
+    const ataque = Math.min(perfil.ataque, Math.max(0.01, nota_midi.dur * 0.6));
+    const pico = Math.max(0.0002, perfil.ganho * (nota_midi.velocidade / 127));
+
+    const filtro = ctx.createBiquadFilter();
+    filtro.type = 'lowpass';
+    filtro.frequency.value = perfil.corte;
+    filtro.Q.value = 0.7;
+
     const ganho = ctx.createGain();
-    osc.type = onda_do_programa(nota_midi.programa);
-    osc.frequency.value = 440 * Math.pow(2, (nota_midi.altura - 69) / 12);
-    const volume = volume_do_programa(nota_midi.programa) * (nota_midi.velocidade / 127);
-    const fim_ataque = t0 + 0.012;
-    ganho.gain.setValueAtTime(0.0001, t0);
-    ganho.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), fim_ataque);
-    ganho.gain.setValueAtTime(Math.max(0.0002, volume), Math.max(fim_ataque, t1 - 0.03));
-    ganho.gain.exponentialRampToValueAtTime(0.0001, t1);
-    osc.connect(ganho).connect(destino);
-    osc.start(t0);
-    osc.stop(t1 + 0.02);
+    let parada;
+    if (perfil.percussivo) {
+        const fim = Math.max(t1, t0 + perfil.decaimento);
+        ganho.gain.setValueAtTime(0.0001, t0);
+        ganho.gain.exponentialRampToValueAtTime(pico, t0 + ataque);
+        ganho.gain.exponentialRampToValueAtTime(0.0001, fim);
+        parada = fim + 0.05;
+    } else {
+        const inicio_liberacao = Math.max(t0 + ataque + 0.01, t1 - perfil.liberacao);
+        ganho.gain.setValueAtTime(0.0001, t0);
+        ganho.gain.exponentialRampToValueAtTime(pico, t0 + ataque);
+        ganho.gain.setValueAtTime(pico, inicio_liberacao);
+        ganho.gain.exponentialRampToValueAtTime(0.0001, t1);
+        parada = t1 + 0.05;
+    }
+
+    const mistura = ctx.createGain();
+    mistura.gain.value = 1 / perfil.ondas.length;
+    mistura.connect(filtro);
+    const frequencia = 440 * Math.pow(2, (nota_midi.altura - 69) / 12);
+    let lfo = null;
+    let lfo_ganho = null;
+    if (perfil.vibrato > 0) {
+        lfo = ctx.createOscillator();
+        lfo.frequency.value = 5.2;
+        lfo_ganho = ctx.createGain();
+        lfo_ganho.gain.value = perfil.vibrato * 6;
+        lfo.connect(lfo_ganho);
+    }
+    perfil.ondas.forEach(function (onda, indice) {
+        const osc = ctx.createOscillator();
+        osc.type = onda;
+        osc.frequency.value = frequencia;
+        if (perfil.detune) {
+            osc.detune.value = indice === 0 ? -perfil.detune : perfil.detune;
+        }
+        if (lfo_ganho) {
+            lfo_ganho.connect(osc.detune);
+        }
+        osc.connect(mistura);
+        osc.start(t0);
+        osc.stop(parada);
+    });
+    if (lfo) {
+        lfo.start(t0);
+        lfo.stop(parada);
+    }
+    filtro.connect(ganho);
+
+    let saida = ganho;
+    if (ctx.createStereoPanner) {
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = pan_do_canal(nota_midi.canal);
+        ganho.connect(pan);
+        saida = pan;
+    }
+    saida.connect(seco);
+    if (perfil.envio_reverb > 0) {
+        const envio = ctx.createGain();
+        envio.gain.value = perfil.envio_reverb;
+        saida.connect(envio);
+        envio.connect(reverb);
+    }
 }
 
 // Renderiza o MIDI inteiro para um AudioBuffer (permite loop sem cliques).
@@ -1785,17 +2033,33 @@ async function renderizar_musica(buffer) {
     const taxa = 44100;
     const offline = new OfflineCtx(2, Math.ceil(dados.duracao * taxa), taxa);
     const mestre = offline.createGain();
-    mestre.gain.value = 0.9;
+    mestre.gain.setValueAtTime(0.0001, 0);
+    mestre.gain.exponentialRampToValueAtTime(0.85, 0.06);
+    if (dados.duracao > 0.6) {
+        mestre.gain.setValueAtTime(0.85, dados.duracao - 0.3);
+        mestre.gain.exponentialRampToValueAtTime(0.0001, dados.duracao);
+    }
     const compressor = offline.createDynamicsCompressor();
-    compressor.threshold.value = -16;
-    compressor.knee.value = 24;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.004;
-    compressor.release.value = 0.18;
+    compressor.threshold.value = -18;
+    compressor.knee.value = 30;
+    compressor.ratio.value = 2.5;
+    compressor.attack.value = 0.006;
+    compressor.release.value = 0.25;
     mestre.connect(compressor).connect(offline.destination);
+
+    // Reverb de sala: bus wet alimentado por envio de cada timbre.
+    const reverb = offline.createConvolver();
+    reverb.buffer = criar_impulso_reverb(offline, 2.8, 3.0);
+    const retorno_reverb = offline.createGain();
+    retorno_reverb.gain.value = 0.32;
+    reverb.connect(retorno_reverb).connect(mestre);
+    const seco = offline.createGain();
+    seco.gain.value = 0.85;
+    seco.connect(mestre);
+
     const ruido = criar_buffer_ruido(offline, 1.2);
     dados.notas.forEach(function (n) {
-        agendar_nota(offline, mestre, n, ruido);
+        agendar_nota(offline, seco, reverb, n, ruido);
     });
     return await offline.startRendering();
 }
@@ -1866,8 +2130,8 @@ function aplicar_estado_musica() {
     botao_musica.classList.toggle('btn-outline-light', musica_ativada);
     botao_musica.classList.toggle('btn-outline-secondary', !musica_ativada);
     botao_musica.title = musica_ativada
-        ? 'Música ligada (clique para desligar)'
-        : 'Música desligada (clique para ligar)';
+        ? t('js.musica.on')
+        : t('js.musica.off');
 }
 
 if (botao_musica) {
@@ -2237,16 +2501,16 @@ async function valorDerivado(seedHex, sala, partida, rodada, clientId, indice) {
 async function verificar_auditoria(data) {
     const itens = [];
     if (!crypto.subtle) {
-        return [['Web Crypto indisponível (use HTTPS ou localhost).', false]];
+        return [[t('js.audit.webcrypto'), false]];
     }
     if (data.compromisso_servidor && data.nonce_servidor) {
         const hSrv = await sha256Hex('dadinho:v1:commit|' + data.nonce_servidor);
-        itens.push(['Compromisso do servidor confere', hSrv === data.compromisso_servidor]);
+        itens.push([t('js.audit.servidor_ok'), hSrv === data.compromisso_servidor]);
     }
     for (const p of (data.participantes || [])) {
         if (p.compromisso && p.nonce && !p.sem_reveal) {
             const h = await sha256Hex('dadinho:v1:commit|' + p.nonce);
-            itens.push([`Compromisso de ${p.nome || p.client_id} confere`, h === p.compromisso]);
+            itens.push([t('js.audit.participante', { nome: p.nome || p.client_id }), h === p.compromisso]);
         }
     }
     const nonces = {};
@@ -2258,16 +2522,16 @@ async function verificar_auditoria(data) {
     const ordem = Object.keys(nonces).sort(compararUtf8);
     const partes = [data.fonte, data.entropia_externa, ...ordem.map(c => nonces[c])];
     const seedCalc = await sha256Hex('dadinho:v1:seed|' + partes.join('|'));
-    itens.push(['Seed final bate com a fórmula', seedCalc === data.seed_final]);
+    itens.push([t('js.audit.seed_ok'), seedCalc === data.seed_final]);
 
     if (data.fonte === 'beacon' && data.beacon && data.beacon.round) {
         try {
             const resp = await fetch(`https://api.drand.sh/${data.beacon.chain}/public/${data.beacon.round}`);
             const json = await resp.json();
             const mesmo = String(json.randomness || '').toLowerCase() === String(data.entropia_externa || '').toLowerCase();
-            itens.push(['Beacon drand confere (consulta independente)', mesmo]);
+            itens.push([t('js.audit.beacon_ok'), mesmo]);
         } catch (e) {
-            itens.push(['Beacon drand: não foi possível consultar', false]);
+            itens.push([t('js.audit.beacon_erro'), false]);
         }
     }
 
@@ -2286,11 +2550,11 @@ async function verificar_auditoria(data) {
             }
         }
     }
-    itens.push([`Dados derivados conferem (${iguais}/${total})`, total > 0 && iguais === total]);
+    itens.push([t('js.audit.dados_ok', { iguais: iguais, total: total }), total > 0 && iguais === total]);
 
     if (nonce_local) {
         const meu = (data.participantes || []).find(p => p.nonce === nonce_local);
-        itens.push(['Meu nonce está incluído na seed', !!meu]);
+        itens.push([t('js.audit.nonce_ok'), !!meu]);
     }
     return itens;
 }
@@ -2302,7 +2566,7 @@ async function render_auditoria(data) {
         return;
     }
     painel.style.display = 'block';
-    alvo.innerHTML = '<div class="spinner-border spinner-border-sm text-info" role="status"></div> conferindo...';
+    alvo.innerHTML = '<div class="spinner-border spinner-border-sm text-info" role="status"></div> ' + t('js.conf.conferindo');
     const itens = await verificar_auditoria(data);
     alvo.innerHTML = '';
     const ul = document.createElement('ul');
@@ -2317,7 +2581,7 @@ async function render_auditoria(data) {
 
     const detalhes = document.createElement('details');
     const sumario = document.createElement('summary');
-    sumario.textContent = 'Ver dados técnicos (seed, compromissos, beacon)';
+    sumario.textContent = t('js.conf.detalhes');
     detalhes.appendChild(sumario);
     const pre = document.createElement('pre');
     pre.className = 'small text-start';

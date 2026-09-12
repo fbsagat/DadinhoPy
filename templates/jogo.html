@@ -20,20 +20,26 @@
 <body>
     <canvas id="fireworks"></canvas>
 
-    <div class="position-fixed top-0 end-0 m-2 d-flex flex-column gap-2" style="z-index: 50;">
+    <div class="position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end" style="z-index: 50;">
+        <select id="seletor_idioma" class="form-select form-select-sm bg-dark text-light border-light"
+            style="width: auto;" aria-label="Idioma"></select>
         <button id="botao_som" class="btn btn-sm btn-outline-light"
-            title="Efeitos sonoros ligados/desligados">🔊</button>
+            data-i18n-title="ui.botao_som" title="Efeitos sonoros ligados/desligados">🔊</button>
         <button id="botao_musica" class="btn btn-sm btn-outline-light"
-            title="Música ligada/desligada">🎵</button>
+            data-i18n-title="ui.botao_musica" title="Música ligada/desligada">🎵</button>
     </div>
 
     <div class="position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">
-        <button id="botao_tutorial" class="btn btn-sm btn-outline-light" title="Como jogar (tutorial)">❓</button>
-        <button id="botao_dicas" class="btn btn-sm btn-outline-warning" title="Ligar/desligar dicas">💡</button>
+        <button id="botao_tutorial" class="btn btn-sm btn-outline-light" data-i18n-title="ui.botao_tutorial"
+            title="Como jogar (tutorial)">❓</button>
+        <button id="botao_dicas" class="btn btn-sm btn-outline-warning" data-i18n-title="ui.botao_dicas"
+            title="Ligar/desligar dicas">💡</button>
+        <button id="botao_narrador" class="btn btn-sm btn-outline-info" data-i18n-title="js.narrador.modo.completo"
+            title="Narrador: todas as falas">🎙️</button>
     </div>
 
     <div id="narrador" class="narrador" role="log" aria-live="polite" style="display: none;">
-        <div class="narrador-header">🎙️ Narrador</div>
+        <div class="narrador-header" data-i18n="ui.narrador.titulo">🎙️ Narrador</div>
         <div id="narrador_log" class="narrador-log"></div>
         <div id="narrador_pensando" class="narrador-pensando" style="display: none;"></div>
     </div>
@@ -49,25 +55,30 @@
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
             <div class="mb-2">
-                <small class="text-light d-block mb-2">Sala atual: <span id="sala_atual"
-                        class="badge text-bg-info">#padrao</span>
+                <small class="text-light d-block mb-2"><span data-i18n="ui.sala.atual">Sala atual:</span> <span
+                        id="sala_atual" class="badge text-bg-info">#padrao</span>
                 </small>
                 <small id="status_conexao" class="text-success d-block mb-2"></small>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
                     <input type="text" id="input_sala" class="form-control text-center" style="width: 160px;"
-                        maxlength="24" placeholder="Código da sala" onkeydown="verificar_enter(event, 'sala')">
-                    <button id="bot_sala_entrar" class="btn btn-outline-info" onclick="entrar_sala()">Entrar</button>
-                    <button id="bot_sala_criar" class="btn btn-info" onclick="criar_sala()">Criar sala</button>
-                    <button id="bot_buscar_partidas" class="btn btn-outline-light" onclick="abrir_busca()">🔍 Buscar
-                        partidas</button>
-                    <button class="btn btn-outline-light" onclick="copiar_link_sala()">Copiar link</button>
+                        maxlength="24" data-i18n-placeholder="ui.sala.codigo_placeholder" placeholder="Código da sala"
+                        onkeydown="verificar_enter(event, 'sala')">
+                    <button id="bot_sala_entrar" class="btn btn-outline-info" data-i18n="ui.sala.entrar"
+                        onclick="entrar_sala()">Entrar</button>
+                    <button id="bot_sala_criar" class="btn btn-info" data-i18n="ui.sala.criar" onclick="criar_sala()">Criar
+                        sala</button>
+                    <button id="bot_buscar_partidas" class="btn btn-outline-light" data-i18n="ui.sala.buscar"
+                        onclick="abrir_busca()">🔍 Buscar partidas</button>
+                    <button class="btn btn-outline-light" data-i18n="ui.sala.copiar" onclick="copiar_link_sala()">Copiar
+                        link</button>
                 </div>
             </div>
 
             <div class="mb-3">
-                <h3 id="nome_partida" class="text-info mb-1">Partida</h3>
+                <h3 id="nome_partida" class="text-info mb-1" data-i18n="ui.partida.titulo">Partida</h3>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
-                    <span id="status_partida" class="badge text-bg-secondary">Aguardando jogadores</span>
+                    <span id="status_partida" class="badge text-bg-secondary"
+                        data-i18n="ui.partida.aguardando">Aguardando jogadores</span>
                     <span id="prontidao_partida" class="badge text-bg-dark">0/0 prontos</span>
                     <small id="motivo_iniciar" class="text-muted d-block w-100"></small>
                 </div>
@@ -80,21 +91,23 @@
                         <div>
                             <input type="text" id="apelido" class="container form-control text-center mx-auto"
                                 style="width: 200px;" onkeydown="verificar_enter(event, 'button')"
-                                placeholder="Escreva seu nome..." maxlength="10">
-                            <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
+                                data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
+                                maxlength="10">
+                            <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
+                                onclick="enviar_apelido()">Pronto</button>
                         </div>
 
                         <div class="container my-2 p-3 bg-dark text-light border border-info rounded gamer-container"
                             id="lista_de_jogadores"
                             style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
-                            <small>Aguardando jogadores...</small>
+                            <small data-i18n="ui.lista.aguardando">Aguardando jogadores...</small>
                         </div>
 
                         <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
-                            <button id="bot_pronto" class="btn btn-warning" onclick="alternar_pronto()">Ficar
-                                pronto</button>
-                            <button id="iniciar_jogo" class="btn btn-success" onclick="iniciar_partida()"
-                                style="display: none;" disabled>Iniciar partida</button>
+                            <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
+                                onclick="alternar_pronto()">Ficar pronto</button>
+                            <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
+                                onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
                         </div>
                     </div>
 
@@ -102,15 +115,17 @@
                         <div id="painel_config"
                             class="container my-2 p-3 bg-dark text-light border border-secondary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
-                            <h5 class="text-info mb-3">Configurações da partida</h5>
+                            <h5 class="text-info mb-3" data-i18n="ui.config.titulo">Configurações da partida</h5>
                             <div class="mb-2">
-                                <label class="form-label small d-block" for="config_nome">Nome da partida</label>
+                                <label class="form-label small d-block" for="config_nome"
+                                    data-i18n="ui.config.nome">Nome da partida</label>
                                 <input type="text" id="config_nome" class="form-control form-control-sm text-center mx-auto"
-                                    maxlength="30" placeholder="Nome da partida">
+                                    maxlength="30" data-i18n-placeholder="ui.config.nome" placeholder="Nome da partida">
                             </div>
                             <div class="row g-2 mb-2">
                                 <div class="col-6">
-                                    <label class="form-label small d-block" for="config_dados">Dados por jogador</label>
+                                    <label class="form-label small d-block" for="config_dados"
+                                        data-i18n="ui.config.dados">Dados por jogador</label>
                                     <select id="config_dados" class="form-select form-select-sm text-center mx-auto">
                                         <option value="1">1</option>
                                         <option value="2">2</option>
@@ -121,7 +136,8 @@
                                     </select>
                                 </div>
                                 <div class="col-6">
-                                    <label class="form-label small d-block" for="config_max">Máximo de jogadores</label>
+                                    <label class="form-label small d-block" for="config_max"
+                                        data-i18n="ui.config.max">Máximo de jogadores</label>
                                     <select id="config_max" class="form-select form-select-sm text-center mx-auto">
                                         <option value="2">2</option>
                                         <option value="3">3</option>
@@ -137,42 +153,46 @@
                             </div>
                             <div class="form-check form-switch d-flex justify-content-center gap-2 mb-1">
                                 <input class="form-check-input" type="checkbox" id="config_coringa">
-                                <label class="form-check-label" for="config_coringa">Coringa (1 conta como qualquer)</label>
+                                <label class="form-check-label" for="config_coringa"
+                                    data-i18n="ui.config.coringa">Coringa (1 conta como qualquer)</label>
                             </div>
                             <div class="form-check form-switch d-flex justify-content-center gap-2">
                                 <input class="form-check-input" type="checkbox" id="config_publica">
-                                <label class="form-check-label" for="config_publica">Pública (aparece na busca)</label>
+                                <label class="form-check-label" for="config_publica"
+                                    data-i18n="ui.config.publica">Pública (aparece na busca)</label>
                             </div>
                             <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
                                 <input class="form-check-input" type="checkbox" id="config_substituir_ia">
-                                <label class="form-check-label" for="config_substituir_ia">Trocar desconectado por
-                                    IA</label>
+                                <label class="form-check-label" for="config_substituir_ia"
+                                    data-i18n="ui.config.substituir_ia">Trocar desconectado por IA</label>
                             </div>
                             <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
                                 <input class="form-check-input" type="checkbox" id="config_verificacao">
-                                <label class="form-check-label" for="config_verificacao">Verificar dados (provably
-                                    fair)</label>
+                                <label class="form-check-label" for="config_verificacao"
+                                    data-i18n="ui.config.verificacao">Verificar dados (provably fair)</label>
                             </div>
-                            <small class="text-muted d-block mt-2">Somente o master edita as configurações. Com a
-                                verificação ligada, a auditoria aparece na tela de vitória.</small>
+                            <small class="text-muted d-block mt-2" data-i18n="ui.config.nota">Somente o master edita as
+                                configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
                         </div>
 
                         <div id="painel_ia"
                             class="container my-2 p-3 bg-dark text-light border border-primary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
-                            <h5 class="text-info mb-3">🤖 Jogadores IA</h5>
+                            <h5 class="text-info mb-3" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
                             <div class="row g-2 mb-2">
                                 <div class="col-6">
-                                    <label class="form-label small d-block" for="ia_nivel">Nível</label>
+                                    <label class="form-label small d-block" for="ia_nivel"
+                                        data-i18n="ui.ia.nivel">Nível</label>
                                     <select id="ia_nivel" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="1">1 - Novato</option>
-                                        <option value="2" selected>2 - Regular</option>
-                                        <option value="3">3 - Perito</option>
-                                        <option value="4">4 - Mestre</option>
+                                        <option value="1" data-i18n="ui.nivel.1">1 - Novato</option>
+                                        <option value="2" selected data-i18n="ui.nivel.2">2 - Regular</option>
+                                        <option value="3" data-i18n="ui.nivel.3">3 - Perito</option>
+                                        <option value="4" data-i18n="ui.nivel.4">4 - Mestre</option>
                                     </select>
                                 </div>
                                 <div class="col-6">
-                                    <label class="form-label small d-block" for="ia_quantidade">Quantidade</label>
+                                    <label class="form-label small d-block" for="ia_quantidade"
+                                        data-i18n="ui.ia.quantidade">Quantidade</label>
                                     <select id="ia_quantidade" class="form-select form-select-sm text-center mx-auto">
                                         <option value="1" selected>1</option>
                                         <option value="2">2</option>
@@ -181,14 +201,15 @@
                                 </div>
                             </div>
                             <div class="d-flex justify-content-center gap-2 flex-wrap">
-                                <button class="btn btn-sm btn-primary" onclick="adicionar_ia()">Adicionar IA</button>
-                                <button class="btn btn-sm btn-success" onclick="completar_com_ias()">Completar
-                                    vagas</button>
-                                <button class="btn btn-sm btn-outline-danger" onclick="remover_ias()">Remover
-                                    IAs</button>
+                                <button class="btn btn-sm btn-primary" data-i18n="ui.ia.adicionar"
+                                    onclick="adicionar_ia()">Adicionar IA</button>
+                                <button class="btn btn-sm btn-success" data-i18n="ui.ia.completar"
+                                    onclick="completar_com_ias()">Completar vagas</button>
+                                <button class="btn btn-sm btn-outline-danger" data-i18n="ui.ia.remover"
+                                    onclick="remover_ias()">Remover IAs</button>
                             </div>
-                            <small class="text-muted d-block mt-2">Bots entram prontos e jogam sozinhos. Só o master
-                                controla.</small>
+                            <small class="text-muted d-block mt-2" data-i18n="ui.ia.nota">Bots entram prontos e jogam
+                                sozinhos. Só o master controla.</small>
                         </div>
                     </div>
 
@@ -202,55 +223,64 @@
         <div id="tela_busca" class="tela_busca container-fluid text-center" style="display: none;">
             <div class="container my-4 p-3 bg-dark text-light border border-info rounded"
                 style="--bs-bg-opacity: .85; max-width: 820px;">
-                <h3 class="text-info mb-1">Buscar partidas</h3>
-                <small class="text-muted d-block mb-3">Entre em uma sala de espera para jogar com outros jogadores.</small>
+                <h3 class="text-info mb-1" data-i18n="ui.busca.titulo">Buscar partidas</h3>
+                <small class="text-muted d-block mb-3" data-i18n="ui.busca.sub">Entre em uma sala de espera para jogar
+                    com outros jogadores.</small>
 
                 <div class="row g-2 align-items-end justify-content-center mb-3">
                     <div class="col-12 col-md-4">
-                        <label class="form-label small d-block" for="filtro_busca">Nome ou código</label>
-                        <input type="text" id="filtro_busca" class="form-control form-control-sm" placeholder="Ex.: amigos"
-                            maxlength="30">
+                        <label class="form-label small d-block" for="filtro_busca"
+                            data-i18n="ui.busca.nome">Nome ou código</label>
+                        <input type="text" id="filtro_busca" class="form-control form-control-sm"
+                            data-i18n-placeholder="ui.busca.nome_ph" placeholder="Ex.: amigos" maxlength="30">
                     </div>
                     <div class="col-6 col-md-2">
-                        <label class="form-label small d-block" for="filtro_status">Status</label>
+                        <label class="form-label small d-block" for="filtro_status"
+                            data-i18n="ui.busca.status">Status</label>
                         <select id="filtro_status" class="form-select form-select-sm">
-                            <option value="todas">Todas</option>
-                            <option value="espera">Em espera</option>
-                            <option value="jogando">Jogando</option>
+                            <option value="todas" data-i18n="ui.busca.status.todas">Todas</option>
+                            <option value="espera" data-i18n="ui.busca.status.espera">Em espera</option>
+                            <option value="jogando" data-i18n="ui.busca.status.jogando">Jogando</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-2">
-                        <label class="form-label small d-block" for="filtro_coringa">Coringa</label>
+                        <label class="form-label small d-block" for="filtro_coringa"
+                            data-i18n="ui.busca.coringa">Coringa</label>
                         <select id="filtro_coringa" class="form-select form-select-sm">
-                            <option value="todas">Tanto faz</option>
-                            <option value="sim">Com coringa</option>
-                            <option value="nao">Sem coringa</option>
+                            <option value="todas" data-i18n="ui.busca.coringa.tanto">Tanto faz</option>
+                            <option value="sim" data-i18n="ui.busca.coringa.sim">Com coringa</option>
+                            <option value="nao" data-i18n="ui.busca.coringa.nao">Sem coringa</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-2">
-                        <label class="form-label small d-block" for="filtro_ordenar">Ordenar</label>
+                        <label class="form-label small d-block" for="filtro_ordenar"
+                            data-i18n="ui.busca.ordenar">Ordenar</label>
                         <select id="filtro_ordenar" class="form-select form-select-sm">
-                            <option value="recentes">Recentes</option>
-                            <option value="jogadores">Nº jogadores</option>
-                            <option value="nome">Nome</option>
+                            <option value="recentes" data-i18n="ui.busca.ord.recentes">Recentes</option>
+                            <option value="jogadores" data-i18n="ui.busca.ord.jogadores">Nº jogadores</option>
+                            <option value="nome" data-i18n="ui.busca.ord.nome">Nome</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-2 text-center">
                         <div class="form-check mt-4">
                             <input class="form-check-input" type="checkbox" id="filtro_vaga" checked>
-                            <label class="form-check-label small" for="filtro_vaga">Com vaga</label>
+                            <label class="form-check-label small" for="filtro_vaga"
+                                data-i18n="ui.busca.com_vaga">Com vaga</label>
                         </div>
                     </div>
                 </div>
 
                 <div class="d-flex justify-content-center gap-2 mb-3 flex-wrap">
-                    <button class="btn btn-info" onclick="buscar_partidas()">Buscar</button>
-                    <button class="btn btn-outline-light" onclick="buscar_partidas()">Atualizar</button>
-                    <button class="btn btn-outline-secondary" onclick="fechar_busca()">Voltar</button>
+                    <button class="btn btn-info" data-i18n="ui.busca.buscar" onclick="buscar_partidas()">Buscar</button>
+                    <button class="btn btn-outline-light" data-i18n="ui.busca.atualizar"
+                        onclick="buscar_partidas()">Atualizar</button>
+                    <button class="btn btn-outline-secondary" data-i18n="ui.busca.voltar"
+                        onclick="fechar_busca()">Voltar</button>
                 </div>
 
                 <div id="lista_partidas" class="text-start">
-                    <small class="text-muted">Clique em "Buscar" para ver as partidas disponíveis.</small>
+                    <small class="text-muted" data-i18n="ui.busca.dica">Clique em "Buscar" para ver as partidas
+                        disponíveis.</small>
                 </div>
             </div>
         </div>
@@ -294,7 +324,8 @@
         <div id="painel_jogada" style="display: none;">
 
             <div class="container-fluid text-center">
-                <span class="fs-4 badge text-bg-primary text-wrap mb-3" style="width: 12rem;">É a sua vez</span>
+                <span class="fs-4 badge text-bg-primary text-wrap mb-3" data-i18n="ui.jogo.sua_vez"
+                    style="width: 12rem;">É a sua vez</span>
             </div>
 
             <div class="container-sm mb-4 bg-dark bg-opacity-50 rounded p-2 shadow-lg"
@@ -351,27 +382,28 @@
 
             <div class="container-fluid text-center">
                 <div class="d-flex justify-content-center align-items-center flex-wrap gap-2">
-                    <input id="desconfiar" class="btn btn-warning mx-2" type="button" value="Desconfiar" disabled
-                        style="width: 130px;">
+                    <input id="desconfiar" class="btn btn-warning mx-2" type="button"
+                        data-i18n-value="ui.jogo.desconfiar" value="Desconfiar" disabled style="width: 130px;">
                     <div class="d-flex align-items-center justify-content-center">
                         <!-- Botão de diminuir -->
                         <button id="decrease" class="btn btn-outline-secondary" type="button">▼</button>
                         <!-- Input para quantidade -->
                         <input id="quantidade" class="form-control mx-2 text-center" type="number"
-                            placeholder="Quantidade" aria-label="Quantidade" min="1" maxlength="2" style="width: 130px;"
-                            value="1">
+                            data-i18n-placeholder="ui.jogo.quantidade" placeholder="Quantidade"
+                            data-i18n-aria-label="ui.jogo.quantidade" aria-label="Quantidade" min="1" maxlength="2"
+                            style="width: 130px;" value="1">
                         <!-- Botão de aumentar -->
                         <button id="increase" class="btn btn-outline-secondary" type="button">▲</button>
                     </div>
-                    <input id="apostar" class="btn btn-success mx-2" type="button" value="Apostar"
-                        style="width: 130px;">
+                    <input id="apostar" class="btn btn-success mx-2" type="button" data-i18n-value="ui.jogo.apostar"
+                        value="Apostar" style="width: 130px;">
                 </div>
             </div>
 
         </div>
         <div class="d-flex justify-content-center align-items-center">
             <span id="painel_aguarde" class="fs-4 badge text-bg-warning text-wrap mb-1 me-1"
-                style="width: 16rem; display: none;">Aguarde a sua vez</span>
+                data-i18n="ui.jogo.aguarde" style="width: 16rem; display: none;">Aguarde a sua vez</span>
         </div>
 
     </div>
@@ -387,13 +419,13 @@
         </div>
         <div class='container my-4 p-3 mb-2 bg-black text-white border border-light rounded'
             style="--bs-bg-opacity: .3;">
-            <h1 class="fw-bold text-primary hero">Conferência</h1>
+            <h1 class="fw-bold text-primary hero" data-i18n="ui.conf.titulo">Conferência</h1>
 
             <div class="row d-flex justify-content-around" id="cards_conferencia">
             </div>
         </div>
         <div class="d-flex justify-content-center align-items-center">
-            <button id="bot_confe_fim" class="btn btn-primary mt-2" onclick="conferencia_final()"
+            <button id="bot_confe_fim" class="btn btn-primary mt-2" data-i18n="ui.ok" onclick="conferencia_final()"
                 style="width: 80px; display: block;">Ok</button>
         </div>
     </div>
@@ -403,15 +435,16 @@
         <h1 id="h1_vencedor" class="display-4 fw-bold text-center hero mb-5" style="font-size: 4rem;">
         </h1>
         <div class="d-flex flex-column justify-content-center align-items-center">
-            <button id="comemorar" class="btn btn-success mt-3" style="z-index: 10; display: none;">Comemorar!</button>
-            <button id="bot_vencedor_fim" class="btn btn-primary mt-3" onclick="vencedor_final()"
+            <button id="comemorar" class="btn btn-success mt-3" data-i18n="ui.vitoria.comemorar"
+                style="z-index: 10; display: none;">Comemorar!</button>
+            <button id="bot_vencedor_fim" class="btn btn-primary mt-3" data-i18n="ui.ok" onclick="vencedor_final()"
                 style="width: 80px; display: block;">Ok</button>
         </div>
 
         <div id="painel_auditoria"
             class="container my-4 p-3 bg-dark text-light border border-info rounded"
             style="display: none; --bs-bg-opacity: .85; max-width: 760px; z-index: 10; position: relative;">
-            <h5 class="text-info mb-2">🔎 Conferir justiça da partida</h5>
+            <h5 class="text-info mb-2" data-i18n="ui.auditoria.titulo">🔎 Conferir justiça da partida</h5>
             <div id="auditoria_resultado" class="text-center"></div>
         </div>
 
@@ -422,83 +455,111 @@
     <div id="tutorial_overlay" class="tutorial-overlay" role="dialog" aria-modal="true">
         <div class="tutorial-modal">
             <div class="tutorial-header">
-                <h3 class="text-info mb-0">📖 Como jogar Dadinho</h3>
+                <h3 class="text-info mb-0" data-i18n="ui.tut.titulo">📖 Como jogar Dadinho</h3>
                 <button class="btn btn-outline-light btn-sm" onclick="fechar_tutorial()">✖</button>
             </div>
 
             <div class="tutorial-body">
                 <section>
-                    <h5>🎯 Objetivo</h5>
-                    <p class="mb-1">Ser o <strong>último jogador com dados</strong> na mesa. Cada jogador começa com a
-                        quantidade de dados definida pelo master. A cada rodada alguém perde um dado; quem fica sem dados
-                        vira <strong>espectador</strong>.</p>
+                    <h5 data-i18n="ui.tut.objetivo.t">🎯 Objetivo</h5>
+                    <p class="mb-1" data-i18n-html="ui.tut.objetivo.p">Ser o <strong>último jogador com dados</strong> na
+                        mesa. Cada jogador começa com a quantidade de dados definida pelo master. A cada rodada alguém
+                        perde um dado; quem fica sem dados vira <strong>espectador</strong>.</p>
                 </section>
 
                 <section>
-                    <h5>🏠 Sala de espera (lobby)</h5>
+                    <h5 data-i18n="ui.tut.lobby.t">🏠 Sala de espera (lobby)</h5>
                     <ul class="mb-1">
-                        <li>Escolha um apelido e clique em <strong>Pronto</strong>.</li>
-                        <li>O <strong>master</strong> define: nome, dados por jogador, máximo de jogadores, coringa e se
-                            a partida é pública.</li>
-                        <li>Todos (menos o master) devem clicar em <strong>Ficar pronto</strong>.</li>
-                        <li>A partida só inicia com <strong>2+ jogadores</strong>, todos com apelido e prontos.</li>
+                        <li data-i18n-html="ui.tut.lobby.li1">Escolha um apelido e clique em <strong>Pronto</strong>.</li>
+                        <li data-i18n-html="ui.tut.lobby.li2">O <strong>master</strong> define: nome, dados por jogador,
+                            máximo de jogadores, coringa e se a partida é pública.</li>
+                        <li data-i18n-html="ui.tut.lobby.li3">Todos (menos o master) devem clicar em <strong>Ficar
+                                pronto</strong>.</li>
+                        <li data-i18n-html="ui.tut.lobby.li4">A partida só inicia com <strong>2+ jogadores</strong>, todos
+                            com apelido e prontos.</li>
                     </ul>
                 </section>
 
                 <section>
-                    <h5>🎲 Rolar os dados</h5>
-                    <p class="mb-1">Clique em <strong>Jogar dados</strong> para rolar os seus. Você só vê o resultado dos
-                        seus dados; os outros jogadores veem apenas os deles. Quando todos rolarem, começam os turnos.</p>
+                    <h5 data-i18n="ui.tut.rolar.t">🎲 Rolar os dados</h5>
+                    <p class="mb-1" data-i18n-html="ui.tut.rolar.p">Clique em <strong>Jogar dados</strong> para rolar os
+                        seus. Você só vê o resultado dos seus dados; os outros jogadores veem apenas os deles. Quando
+                        todos rolarem, começam os turnos.</p>
                 </section>
 
                 <section>
-                    <h5>🗣 Turnos e apostas</h5>
-                    <p class="mb-1">Um jogador começa fazendo uma aposta: <strong>quantidade de dados</strong> +
-                        <strong>número da face</strong>. O próximo deve fazer uma aposta maior <em>ou</em> desconfiar.</p>
+                    <h5 data-i18n="ui.tut.turnos.t">🗣 Turnos e apostas</h5>
+                    <p class="mb-1" data-i18n-html="ui.tut.turnos.p">Um jogador começa fazendo uma aposta:
+                        <strong>quantidade de dados</strong> + <strong>número da face</strong>. O próximo deve fazer uma
+                        aposta maior <em>ou</em> desconfiar.</p>
                     <div class="tutorial-regra">
-                        <strong>Como aumentar a aposta:</strong>
+                        <strong data-i18n="ui.tut.turnos.regra1.strong">Como aumentar a aposta:</strong>
                         <ul class="mb-0">
-                            <li>Quantidade <strong>maior</strong> que a anterior; ou</li>
-                            <li>Mesma quantidade com um <strong>número maior</strong>.</li>
+                            <li data-i18n-html="ui.tut.turnos.regra1.li1">Quantidade <strong>maior</strong> que a
+                                anterior; ou</li>
+                            <li data-i18n-html="ui.tut.turnos.regra1.li2">Mesma quantidade com um <strong>número
+                                    maior</strong>.</li>
                         </ul>
                     </div>
                     <div class="tutorial-regra">
-                        <strong>Coringa (face 1):</strong> quando ativo, o 1 vale como <strong>qualquer número</strong>.
+                        <strong data-i18n="ui.tut.turnos.regra2.strong">Coringa (face 1):</strong>
+                        <span data-i18n-html="ui.tut.turnos.regra2.p">quando ativo, o 1 vale como <strong>qualquer
+                                número</strong>.</span>
                         <ul class="mb-0">
-                            <li>Apostar coringa exige quantidade maior que o coringa atual.</li>
-                            <li>Voltar de coringa para um número exige <strong>o dobro</strong> da quantidade.</li>
-                            <li>Se alguém apostar 1 no primeiro turno, o coringa é <strong>cancelado</strong> na rodada.</li>
-                        </ul>
-                    </div>
-                </section>
-
-                <section>
-                    <h5>🕵 Desconfiar</h5>
-                    <p class="mb-1">Achou que a aposta anterior é mentira? <strong>Desconfie!</strong> O jogo conta todos
-                        os dados da mesa (coringas contam como o número apostado).</p>
-                    <div class="tutorial-regra">
-                        <ul class="mb-0">
-                            <li><strong>Aposta verdadeira:</strong> quem apostou vence e o desconfiador perde um dado.</li>
-                            <li><strong>Aposta mentirosa:</strong> o desconfiador vence e quem apostou perde um dado.</li>
+                            <li data-i18n="ui.tut.turnos.regra2.li1">Apostar coringa exige quantidade maior que o
+                                coringa atual.</li>
+                            <li data-i18n-html="ui.tut.turnos.regra2.li2">Voltar de coringa para um número exige
+                                <strong>o dobro</strong> da quantidade.</li>
+                            <li data-i18n-html="ui.tut.turnos.regra2.li3">Se alguém apostar 1 no primeiro turno, o coringa
+                                é <strong>cancelado</strong> na rodada.</li>
                         </ul>
                     </div>
                 </section>
 
                 <section>
-                    <h5>🏆 Vitória</h5>
-                    <p class="mb-1">Ao final de cada rodada, a conferência mostra os dados e quem perdeu. O último jogador
-                        com dados vence a partida e ganha <strong>1 ponto</strong>. Clique em Ok para voltar ao lobby e
-                        jogar de novo.</p>
+                    <h5 data-i18n="ui.tut.desconfiar.t">🕵 Desconfiar</h5>
+                    <p class="mb-1" data-i18n-html="ui.tut.desconfiar.p">Achou que a aposta anterior é mentira?
+                        <strong>Desconfie!</strong> O jogo conta todos os dados da mesa (coringas contam como o número
+                        apostado).</p>
+                    <div class="tutorial-regra">
+                        <ul class="mb-0">
+                            <li data-i18n-html="ui.tut.desconfiar.li1"><strong>Aposta verdadeira:</strong> quem apostou
+                                vence e o desconfiador perde um dado.</li>
+                            <li data-i18n-html="ui.tut.desconfiar.li2"><strong>Aposta mentirosa:</strong> o desconfiador
+                                vence e quem apostou perde um dado.</li>
+                        </ul>
+                    </div>
                 </section>
+
+                <section>
+                    <h5 data-i18n="ui.tut.vitoria.t">🏆 Vitória</h5>
+                    <p class="mb-1" data-i18n-html="ui.tut.vitoria.p">Ao final de cada rodada, a conferência mostra os
+                        dados e quem perdeu. O último jogador com dados vence a partida e ganha <strong>1 ponto</strong>.
+                        Clique em Ok para voltar ao lobby e jogar de novo.</p>
+                </section>
+
+                <details class="tutorial-tecnico">
+                    <summary data-i18n="ui.tut.verif.summary">🔒 Verificação dos dados (provably fair) — opcional</summary>
+                    <p class="mb-1" data-i18n-html="ui.tut.verif.p1">Se o master ligar <strong>Verificar dados</strong>, o
+                        resultado deixa de depender do servidor. Antes de qualquer jogador contribuir, o servidor
+                        compromete uma entropia externa (um número público do beacon <em>drand</em>); cada jogador gera um
+                        número secreto no próprio navegador. A combinação de tudo vira a semente que define os dados e
+                        quem começa — ninguém consegue prever ou escolher o resultado.</p>
+                    <p class="mb-0" data-i18n-html="ui.tut.verif.p2">No fim da partida, tudo é revelado e a auditoria
+                        aparece na tela de vitória: qualquer jogador pode conferir, no próprio navegador, que os dados
+                        vieram mesmo daquela semente. É um recurso de transparência extra — para jogar normalmente, não
+                        precisa mexer nisso.</p>
+                </details>
             </div>
 
             <div class="tutorial-footer">
                 <div class="form-check form-switch d-flex align-items-center gap-2 mb-0">
                     <input class="form-check-input" type="checkbox" id="tutorial_dicas_switch" checked>
-                    <label class="form-check-label small" for="tutorial_dicas_switch">Mostrar dicas durante a
-                        partida</label>
+                    <label class="form-check-label small" for="tutorial_dicas_switch"
+                        data-i18n="ui.tut.dicas_switch">Mostrar dicas durante a partida</label>
                 </div>
-                <button class="btn btn-info" onclick="fechar_tutorial()">Entendi! Vamos jogar 🎲</button>
+                <button class="btn btn-info" data-i18n="ui.tut.entendi" onclick="fechar_tutorial()">Entendi! Vamos jogar
+                    🎲</button>
             </div>
         </div>
     </div>
@@ -509,9 +570,10 @@
         aria-labelledby="alerta_titulo" aria-describedby="alerta_mensagem">
         <div class="alerta-modal">
             <div id="alerta_icone" class="alerta-icone">⚠️</div>
-            <h4 id="alerta_titulo" class="alerta-titulo">Atenção</h4>
+            <h4 id="alerta_titulo" class="alerta-titulo" data-i18n="alerta.aviso">Atenção</h4>
             <p id="alerta_mensagem" class="alerta-mensagem"></p>
-            <button id="alerta_ok" class="btn btn-info" type="button" onclick="fechar_alerta()">Ok</button>
+            <button id="alerta_ok" class="btn btn-info" type="button" data-i18n="ui.alerta.ok"
+                onclick="fechar_alerta()">Ok</button>
         </div>
     </div>
     <!-- MODAL DE ALERTA FIM -->
@@ -519,10 +581,12 @@
     <!-- PAINEL DE DICAS INICIO -->
     <div id="painel_dicas" class="painel-dicas" role="status">
         <span id="dicas_texto" class="flex-grow-1"></span>
-        <button class="btn-close btn-close-white" onclick="fechar_dica()" aria-label="Fechar dica"></button>
+        <button class="btn-close btn-close-white" onclick="fechar_dica()" data-i18n-aria-label="ui.dica.fechar"
+            aria-label="Fechar dica"></button>
     </div>
     <!-- PAINEL DE DICAS FIM -->
 
+    <script src="/static/i18n.js"></script>
     <script src="/static/script.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"

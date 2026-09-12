@@ -36,6 +36,7 @@
 
 ## Frontend
 - Everything lives in `templates/jogo.html` + `static/script.js` (~950 lines, all inline socket handling) + `static/custom_styles.css`. Server pushes state via events; JS builds the DOM. Images in `static/imagens/`. When touching a server `emit`, find the matching `socket.on` in `script.js` first.
+- **i18n (`static/i18n.js`, Fase 14):** inglês é o idioma base e o fallback de todos os outros; além dele, pt-BR, espanhol, francês e chinês simplificado. Detecção em cascata: `localStorage.dadinho_idioma` → `navigator.language` → inglês. A UI estática usa atributos `data-i18n`/`data-i18n-html`/`data-i18n-title`/`data-i18n-placeholder`/`data-i18n-value`/`data-i18n-aria-label`; o JS usa `t('chave', params)`. O servidor **nunca escolhe o idioma**: emite chaves + parâmetros (narração em `segmentos`, jogada inválida em `txtchave`/`txtparams`, `motivo` de `pode_iniciar`/`iniciar_negado`) e o cliente resolve no idioma do jogador. O `#seletor_idioma` troca o idioma e recarrega (o estado da sala volta pela `chave_secreta` no reconnect). Toda chave nova precisa existir nos 5 dicionários — `python verificar.py` valida a cobertura.
 - `app.secret_key` vem de `DADINHO_SECRET_KEY` (fallback de dev `supersecretkey` em `app.py`); token Upstash via env vars — não comitar segredos.
 
 ## Deploy e operação (Vercel)

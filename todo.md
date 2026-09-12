@@ -14,6 +14,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 9** — UX e melhorias de negócio. ✅ concluída
 - **Fase 10** — Limpeza, organização e tooling. ✅ concluída
 - **Fase 11** — Jogadores IA (4 níveis). ✅ concluída
+- **Fase 14** — i18n (5 idiomas + fallback EN). ✅ concluída
 
 ---
 
@@ -234,3 +235,16 @@ Objetivo: a música de fundo mudar sozinha a cada 12h, de forma compatível com 
 - [x] **Cliente (`static/script.js`)** — `iniciar_musica` passou a buscar `/tema.mid` em vez do arquivo estático.
 
 Verificação (local, `.venv`): `py_compile` de `app.py gerar_musica.py tema.py modelos.py funcoes_gerais.py store.py ia.py api/index.py`; `node --check static/script.js`; `tema_atual` idempotente na mesma janela e distinto na janela seguinte; rota `GET /tema.mid` respondendo 200 `audio/midi` com header `MThd` e bytes idênticos entre requests; CLI `gerar_musica.py -n 1 --seed 42` gerando arquivo válido.
+
+## Fase 14 — i18n com 5 idiomas e fallback para inglês — concluída
+
+Objetivo: jogar em inglês, português (BR), espanhol, francês e chinês simplificado, com o inglês como base/fallback, sem build step e sem quebrar o alvo serverless.
+
+- [x] **Dicionário único (`static/i18n.js`)** — 5 dicionários (EN, pt-BR, es, fr, zh-CN) com a mesma cobertura de chaves; `t(chave, params)`, `t_list` e `traduzirSegmentos(segmentos, texto)`. Detecção `localStorage.dadinho_idioma` → `navigator.language` → inglês; chave ausente cai para o inglês.
+- [x] **UI estática (`templates/jogo.html`)** — textos anotados com `data-i18n`/`data-i18n-html`/`data-i18n-title`/`data-i18n-placeholder`/`data-i18n-value`/`data-i18n-aria-label`; `#seletor_idioma` no canto superior e `i18n.js` carregado antes de `script.js`.
+- [x] **Frontend dinâmico (`static/script.js`)** — todas as strings montadas em JS passam por `t()`; `dicas_por_pagina` e `NARRADOR_MODOS` guardam chaves; a narração é traduzida por `traduzirSegmentos`; o texto da conferência é remontado no cliente a partir de campos estruturados.
+- [x] **Narração server-side (`narrador.py`)** — cada lance devolve `texto` (pt-BR, fallback) + `segmentos` de `{chave, params}` (prefixos, ações, arremates, rodada, vitória). O servidor segue agnóstico de idioma e emite uma única vez para a room.
+- [x] **Mensagens do servidor (`modelos.py`/`app.py`)** — `pode_iniciar` devolve `motivo` `{chave, params}`; `jogada_invalida` emite `txtchave`/`txtparams`; a `conferencia` ganhou `dado_qtd`/`quantidade_real`/`verdadeira` para o cliente montar o texto traduzido.
+- [x] **Verificação (`verificar.py`)** — checa `node --check` de `script.js` e `i18n.js` e a cobertura dos 4 idiomas em relação ao inglês.
+
+Verificação (local, `.venv`): `python verificar.py` (tudo OK: `py_compile`, `node --check static/*.js`, cobertura i18n, boot `VERCEL=1`, round-trip e integração Flask-SocketIO) e `python simular_ia.py --partidas 20 --dados 3` (hierarquia preservada). Teste manual recomendado: abrir em 2 abas, trocar o idioma pelo seletor e jogar uma partida completa.

@@ -4,7 +4,7 @@ Script único de verificação do Dadinho (Fase 10).
 
 Roda, em sequência:
   1. py_compile de todos os módulos Python do projeto;
-  2. node --check do static/script.js (quando o Node está no PATH);
+  2. node --check dos JS de static/ e cobertura dos dicionários i18n (quando o Node está no PATH);
   3. boot com VERCEL=1 respondendo 200 na rota /;
   4. round-trip de serialização + migrações de versão do Lobby (S3);
   5. integração via flask_socketio.test_client cobrindo as Fases 6 e 7.
@@ -73,17 +73,53 @@ def verificar_py_compile():
 # ---------------------------------------------------------------------------
 # 2) node --check
 # ---------------------------------------------------------------------------
+_CODIGO_I18N = r"""
+const fs = require('fs'), vm = require('vm');
+const code = fs.readFileSync(process.argv[1], 'utf8') + '\nglobalThis.__D = I18N_DICIONARIOS;';
+const stub = { querySelectorAll() { return []; }, getElementById() { return null; } };
+const sandbox = {
+  document: Object.assign({ readyState: 'complete', addEventListener() {}, documentElement: {} }, stub),
+  navigator: { language: 'en' },
+  localStorage: { getItem() { return null; }, setItem() {} },
+  window: {},
+  console,
+};
+vm.createContext(sandbox);
+vm.runInContext(code, sandbox);
+const d = sandbox.__D;
+const en = Object.keys(d.en);
+let faltando = 0;
+for (const lang of Object.keys(d)) {
+  if (lang === 'en') continue;
+  const ausentes = en.filter((k) => !(k in d[lang]));
+  if (ausentes.length) {
+    faltando += ausentes.length;
+    console.error(lang + ' faltando: ' + ausentes.join(', '));
+  }
+}
+if (faltando) process.exit(1);
+console.log('idiomas=' + Object.keys(d).length + ' chaves=' + en.length);
+"""
+
+
 def verificar_node():
-    print("2) node --check static/script.js")
+    print("2) node --check static/*.js + cobertura i18n")
     node = shutil.which("node")
     if node is None:
         print("  [PULADO] Node não está no PATH")
         return
+    for arquivo in ("script.js", "i18n.js"):
+        resultado = subprocess.run(
+            [node, "--check", os.path.join(RAIZ, "static", arquivo)],
+            capture_output=True, text=True,
+        )
+        _checar("static/" + arquivo, resultado.returncode == 0, resultado.stderr.strip())
     resultado = subprocess.run(
-        [node, "--check", os.path.join(RAIZ, "static", "script.js")],
+        [node, "-e", _CODIGO_I18N, os.path.join(RAIZ, "static", "i18n.js")],
         capture_output=True, text=True,
     )
-    _checar("static/script.js", resultado.returncode == 0, resultado.stderr.strip())
+    _checar("cobertura i18n", resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +316,10 @@ def teste_b3_aposta_invalida():
     for aposta in invalidas:
         cli_vez.emit("apostar", {"dados": {"chave": chave_vez, **aposta}})
     eventos = cli_vez.get_received()
-    assert _achar_evento(eventos, "jogada_invalida") is not None, "deve receber jogada_invalida"
+    invalida = _achar_evento(eventos, "jogada_invalida")
+    assert invalida is not None, "deve receber jogada_invalida"
+    assert isinstance(invalida, dict) and invalida.get("txtchave"), \
+        "jogada_invalida deve trazer a chave i18n (txtchave)"
     lobby = modulo_store.carregar_sala(SALA)
     rodada = lobby.partidas[-1].rodadas[-1]
     assert len(rodada.turnos) == 0, "aposta inválida não pode criar turno"
@@ -575,6 +614,10 @@ def teste_partida_completa():
     clis, lobby = _conectar_trio(1)
     partida = lobby.partidas[-1]
     _rodada_ate_conferencia(clis)
+    narracoes = [e for e in clis[partida.jogadores[0].username][0].get_received()
+                 if e["name"] == "narracao"]
+    assert narracoes, "a partida deve emitir narracao"
+    assert narracoes[0]["args"][0].get("segmentos"), "narracao deve trazer segmentos i18n"
     for j in partida.jogadores:
         clis[j.username][0].emit("conferencia_final", {"chave": clis[j.username][1]})
     lobby = modulo_store.carregar_sala(SALA)

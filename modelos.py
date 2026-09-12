@@ -580,21 +580,22 @@ class Lobby:
     def pode_iniciar(self):
         """
         Verifica as regras da sala de espera para liberar o início da partida.
-        Retorna (bool, motivo_em_português).
+        Retorna (bool, motivo) onde motivo é None quando liberado ou um dict
+        {'chave', 'params'} com a chave i18n do impedimento (o cliente traduz).
         """
         if self.status != 'espera':
-            return False, 'Esta partida já está em andamento.'
+            return False, {'chave': 'msg.motivo.status_andamento'}
         if len(self.jogadores) < 2:
-            return False, 'São necessários ao menos 2 jogadores.'
+            return False, {'chave': 'msg.motivo.min_jogadores'}
         if self.contar_jogadores(nome=True) != len(self.jogadores):
-            return False, 'Todos os jogadores precisam escolher um apelido.'
+            return False, {'chave': 'msg.motivo.sem_apelido'}
         if len(self.jogadores) > int(self.config.get('max_jogadores', 6)):
-            return False, 'A partida está acima do limite de jogadores.'
+            return False, {'chave': 'msg.motivo.limite'}
         for jogador in self.jogadores:
             if not jogador.master and not jogador.pronto:
-                nome = jogador.username or 'Um jogador'
-                return False, f'{nome} ainda não está pronto.'
-        return True, 'Tudo pronto para começar!'
+                nome = jogador.username or 'Jogador'
+                return False, {'chave': 'msg.motivo.nao_pronto', 'params': {'nome': nome}}
+        return True, {'chave': 'msg.motivo.tudo_pronto'}
 
     def resumo_partida(self):
         """
@@ -844,7 +845,10 @@ class Partida:
                      to=self.sala_room())
                 emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
                 emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
-            emit('narracao', narrador.narracao_rodada(rodada_numero, dados_mesa), to=self.sala_room())
+            emit('narracao',
+                 narrador.narracao_rodada(rodada_numero, dados_mesa, iniciante=vez_atual,
+                                          primeira=(rodada_numero == 1)),
+                 to=self.sala_room())
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
             self.do_lobby.pagina = 1
             return rodada
@@ -981,19 +985,21 @@ class Rodada:
         turno_numero = len(self.turnos) + 1
         # Fase 6 (B3): valida o payload da aposta antes de criar o turno — dado
         # em 1-6 e quantidade >= 1; payload malformado é rejeitado com
-        # jogada_invalida em vez de estourar exceção no handler.
+        # jogada_invalida em vez de estourar exceção no handler. Fase 13: os
+        # alertas explicam ao jogador o motivo exato da recusa.
         if not isinstance(dados, dict):
-            emit('jogada_invalida', {'txtadd': 'dados da jogada ausentes.'}, to=jogador.client_id)
+            emit('jogada_invalida', {'txtchave': 'msg.jogada.dados_ausentes'},
+                 to=jogador.client_id)
             return
         try:
             dado = int(dados['dado'])
             dado_qtd = int(dados['quantidade'])
         except (ValueError, TypeError, KeyError):
-            emit('jogada_invalida', {'txtadd': 'dados da jogada inválidos.'}, to=jogador.client_id)
+            emit('jogada_invalida', {'txtchave': 'msg.jogada.nao_inteiros'},
+                 to=jogador.client_id)
             return
         if not (1 <= dado <= 6) or dado_qtd < 1:
-            emit('jogada_invalida',
-                 {'txtadd': 'escolha um número de 1 a 6 e uma quantidade maior que zero.'},
+            emit('jogada_invalida', {'txtchave': 'msg.jogada.fora_intervalo'},
                  to=jogador.client_id)
             return
         turno = Turno(da_rodada=self, jogador=jogador, dado=dado, dado_qtd=dado_qtd, turno_numero=turno_numero)
@@ -1010,11 +1016,18 @@ class Rodada:
             self.atualizar_front_pro_da_vez(o_da_vez)
             self.vez_atual = o_da_vez
         else:
-            txt = 'tente outra jogada.'
+            turno_ant = turno.obter_turno_anterior_na_partida()
+            motivo = self.explicar_jogada(dado, dado_qtd, turno_ant, turno_numero)
             self.turnos.remove(turno)
             jogador.turnos.remove(turno)
             del turno
-            emit('jogada_invalida', {'txtadd': txt}, to=jogador.client_id)
+            if motivo:
+                emit('jogada_invalida',
+                     {'txtchave': motivo['chave'], 'txtparams': motivo.get('params', {})},
+                     to=jogador.client_id)
+            else:
+                emit('jogada_invalida', {'txtchave': 'msg.jogada.tente_outra'},
+                     to=jogador.client_id)
 
     def jogar_dados(self):
         partida = self.da_partida
@@ -1049,34 +1062,64 @@ class Rodada:
         IA para gerar apenas apostas legais. Espelha a regra de
         Turno.verificar_validade_da_jogada, que delega para cá.
         """
+        return self.explicar_jogada(face, qtd, turno_ant, turno_num) is None
+
+    def explicar_jogada(self, face, qtd, turno_ant=None, turno_num=None):
+        """
+        Mesma regra de jogada_valida, mas devolve None quando a jogada é válida ou
+        um dict {'chave', 'params'} com a chave i18n do motivo da invalidade
+        (Fase 13/i18n). Fonte única da regra de aposta, consumida pela validação e
+        pela IA. Os parâmetros trazem faces/quantidades numéricas; o cliente
+        resolve o nome da face no idioma do jogador.
+        """
         if turno_num is None:
             turno_num = len(self.turnos) + 1
-        if turno_num == 1:
-            return True
-        face_ant = turno_ant.dado_face if turno_ant else 0
-        qtd_ant = turno_ant.dado_qtd if turno_ant else 0
+        if turno_num == 1 or turno_ant is None:
+            return None
+        face_ant = turno_ant.dado_face
+        qtd_ant = turno_ant.dado_qtd
+        base = {'face': face, 'face_num': face, 'face_ant': face_ant, 'face_ant_num': face_ant}
+
+        def _motivo(chave, **extra):
+            params = dict(base)
+            params.update(extra)
+            return {'chave': chave, 'params': params}
+
         if self.com_coringa:
             if face_ant > 1 and face > 1:
                 if qtd > qtd_ant:
-                    return True
+                    return None
                 if face_ant < face and qtd_ant == qtd:
-                    return True
+                    return None
+                if face_ant == face:
+                    return _motivo('msg.jogada.repetir_face', qtd_ant=qtd_ant, qtd=qtd)
+                if qtd < qtd_ant:
+                    return _motivo('msg.jogada.diminuir', qtd=qtd, qtd_ant=qtd_ant)
+                return _motivo('msg.jogada.face_menor', qtd=qtd, qtd_ant=qtd_ant)
             if face_ant > 1 and face == 1:
                 if qtd > self.coringa_atual_qtd:
-                    return True
+                    return None
+                return _motivo('msg.jogada.coringa_superar', coringa=self.coringa_atual_qtd, qtd=qtd)
             if face_ant == 1 and face > 1:
-                if qtd >= (self.coringa_atual_qtd * 2):
-                    return True
+                minimo = self.coringa_atual_qtd * 2
+                if qtd >= minimo:
+                    return None
+                return _motivo('msg.jogada.coringa_dobro', coringa=self.coringa_atual_qtd,
+                               minimo=minimo, qtd=qtd)
             if face_ant == face:
                 if qtd > qtd_ant:
-                    return True
-            return False
+                    return None
+                return _motivo('msg.jogada.coringa_repetir', qtd_ant=qtd_ant)
+            return _motivo('msg.jogada.nao_supera', qtd=qtd, qtd_ant=qtd_ant)
         if face_ant > 0 and face > 0:
             if qtd > qtd_ant:
-                return True
+                return None
             if face_ant < face and qtd_ant == qtd:
-                return True
-        return False
+                return None
+            if qtd < qtd_ant:
+                return _motivo('msg.jogada.diminuir', qtd=qtd, qtd_ant=qtd_ant)
+            return _motivo('msg.jogada.face_menor', qtd=qtd, qtd_ant=qtd_ant)
+        return _motivo('msg.jogada.nao_supera', qtd=qtd, qtd_ant=qtd_ant)
 
     def desconfiar(self, jogador):
         """
@@ -1142,11 +1185,15 @@ class Rodada:
         self.conferencia = {
             'nomes': nomes, 'ganhador': vencedor, 'perdedor': perdedor, 'saiu_da_partida': saiu, 'dados': dados,
             'dado_apostado_face': ultimo_turno.dado_face,
+            'dado_qtd': ultimo_turno.dado_qtd,
+            'quantidade_real': quantidade,
+            'verdadeira': quantidade >= ultimo_turno.dado_qtd,
             'com_coringa': self.com_coringa, 'texto': txt,
         }
         self.da_partida.do_lobby.pagina = 3
         pensou = narrador.tempo_pensamento(jogador.ia_nivel) if jogador.is_ia else 0
-        emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou),
+        emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou,
+                                                        aposta=ultimo_turno),
              to=self.sala_room())
         emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
@@ -1200,14 +1247,18 @@ class Turno:
         # Narração da jogada (vem antes do card para o cliente encaixar o
         # "tempo de pensamento" dos bots na fila de animação).
         pensou = narrador.tempo_pensamento(self.do_jogador.ia_nivel) if self.do_jogador.is_ia else 0
+        anterior = self.obter_turno_anterior_na_partida()
+        dados_mesa = sum(getattr(jogador, 'dados_qtd', 0) or 0 for jogador in self.da_rodada.jogadores)
         emit('narracao',
-             narrador.narracao_aposta(self.do_jogador, self.dado_face, self.dado_qtd, pensou),
+             narrador.narracao_aposta(self.do_jogador, self.dado_face, self.dado_qtd, pensou,
+                                      anterior=anterior, dados_mesa=dados_mesa,
+                                      primeira=(self.turno_num == 1), turno_num=self.turno_num),
              to=self.sala_room())
         # Mostrar sempre os 3 últimos.
         turnos = self.do_jogador.turnos[-3:][::-1]
         lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
         emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos,
-                                 'is_ia': self.do_jogador.is_ia},
+                                 'is_ia': self.do_jogador.is_ia, 'ultimo': True},
              to=self.sala_room())
 
         if self.da_rodada.com_coringa is True:

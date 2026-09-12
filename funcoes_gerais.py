@@ -223,10 +223,13 @@ def enviar_snapshot_sala(lobby, jogador):
         emit('formatador_coletivo', {'jogadores_nomes': nomes,
                                      'jogador_inicial_nome': vez_atual.username if vez_atual else ''},
              to=jogador.client_id)
+        ultimo_turno = rodada.turnos[-1] if rodada.turnos else None
         for j in partida.jogadores:
             if j.turnos:
                 emit('atualizar_turno',
-                     {'jogador': j.username, 'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]]},
+                     {'jogador': j.username,
+                      'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
+                      'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
                      to=jogador.client_id)
         if vez_atual is not None:
             if not espectador and vez_atual == jogador:
