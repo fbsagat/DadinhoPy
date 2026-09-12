@@ -126,6 +126,7 @@ socket.on("master_def", function (data) {
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
+    tocar_som('virar_papel');
     const logo = document.getElementById('titulo_img');
     const logodiv = document.getElementById('div_titulo_img');
     {
@@ -415,6 +416,7 @@ socket.on('construtor_html', function (data) {
 
 // função para atualizar um turno
 socket.on('atualizar_turno', function (dados) {
+    tocar_som_variante('aposta', [1, 2]);
     const jogador = dados.jogador
     const lista_turnos = dados.lista_turnos
     const card_row = document.getElementById(`card_row_${jogador}`)
@@ -465,6 +467,7 @@ socket.on('espera_turno', function (data) {
 
 // Função que atualiza cada rodada, executa a cada inicio de rodada
 socket.on('reset_rodada', function (data) {
+    tocar_som_variante('pegar_dados', [1, 2]);
     const jogadores = data.jogadores_nomes;
     const jogadores_dados = data.jogadores_dados_qtd;
     const botao = document.getElementById('bot_confe_fim');
@@ -547,6 +550,8 @@ socket.on('botao_vencedor_ativ', function () {
 })
 
 socket.on('vencedor_da_partida', function (data) {
+    tocar_som_variante('aposta', [1, 2]);
+    tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
     h1_vencedor.innerHTML = `Vitória de ${data.nome}<br> Nessa bagaça!!!`;
 })
@@ -559,6 +564,8 @@ socket.on('soltar_fogos', function () {
 
 // Função para construir os cards na página conferência
 socket.on('cards_conferencia', function (data) {
+    tocar_som_variante('aposta', [1, 2]);
+    tocar_som('virar_papel');
     const nomes = data.nomes;
     const dados = data.dados;
     const ganhador = data.ganhador;
@@ -638,6 +645,7 @@ socket.on('cards_conferencia', function (data) {
 
 // Ações a aplicar no jogador que virou espectador, broadcast=False
 socket.on('espectador', function (data) {
+    tocar_som_variante('pegar_dados', [1, 2]);
     const painel_jogada = document.getElementById('painel_jogada');
     const bot_confe_fim = document.getElementById('bot_confe_fim');
     const painel_aguarde = document.getElementById('painel_aguarde');
@@ -753,8 +761,9 @@ socket.on("jogar_dados_resultado", function (data) {
     const rollInterval = 100; // Intervalo de troca de imagens em milissegundos
     const rollTime = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000; // Tempo total da rolagem
 
-    // Inicia o som de rolagem
-    tocar_som_dados();
+    // Inicia o som de rolagem, repetido enquanto a animação rola
+    const som_rolagem = setInterval(() => tocar_som('rolar_dados'), 1200);
+    tocar_som('rolar_dados');
 
     // Inicia a animação de rolagem para todos os dados
     const animation = setInterval(() => {
@@ -768,6 +777,7 @@ socket.on("jogar_dados_resultado", function (data) {
     // Após o tempo total de rolagem, exibe o resultado final e para a animação
     setTimeout(() => {
         clearInterval(animation);
+        clearInterval(som_rolagem);
 
         // Cria dinamicamente os resultados finais com base em "dados_lista"
         const finalResults = dados_lista.map(valor => `../static/imagens/dado/${valor}.png`);
@@ -804,6 +814,7 @@ function enviar_apelido() {
 }
 
 function iniciar_partida() {
+    tocar_som_variante('embaralhar', [1, 2]);
     const bot_iniciar = document.getElementById('iniciar_partida');
     const diceCount = document.querySelector('input[name="diceCount"]:checked').value;
     socket.emit('iniciar_partida', { dados_qtd: diceCount });
@@ -824,28 +835,55 @@ function garantir_contexto_audio() {
     return true;
 }
 
-// Simula o som de dados rolando, sem depender de arquivo de áudio externo.
-function tocar_som_dados() {
-    if (!contexto_audio || contexto_audio.state !== 'running') {
+// Sons do jogo, carregados sob demanda a partir de static/sons/.
+const sons_disponiveis = {
+    rolar_dados: 'rolar_dados.mp3',
+    pegar_dados_1: 'pegar_dados_1.mp3',
+    pegar_dados_2: 'pegar_dados_2.mp3',
+    aposta_1: 'aposta_1.mp3',
+    aposta_2: 'aposta_2.mp3',
+    virar_papel: 'virar_papel.mp3',
+    mover_peca: 'mover_peca.mp3',
+    embaralhar_1: 'embaralhar_1.mp3',
+    embaralhar_2: 'embaralhar_2.mp3',
+};
+const sons = {};
+
+// Preferência de som do jogador, persistida entre sessões. Valor padrão: ligado.
+let som_ativado = localStorage.getItem('dadinho_som') !== 'off';
+const botao_som = document.getElementById('botao_som');
+if (botao_som) {
+    botao_som.textContent = som_ativado ? '🔊' : '🔇';
+    botao_som.addEventListener('click', () => {
+        som_ativado = !som_ativado;
+        localStorage.setItem('dadinho_som', som_ativado ? 'on' : 'off');
+        botao_som.textContent = som_ativado ? '🔊' : '🔇';
+    });
+}
+
+// Toca um efeito sonoro do jogo a partir de static/sons/. Os arquivos são
+// carregados sob demanda e reutilizados (cache em 'sons').
+function tocar_som(nome) {
+    if (!som_ativado) {
         return;
     }
-    const duracao = 0.8;
-    const taxa = contexto_audio.sampleRate;
-    const buffer = contexto_audio.createBuffer(1, Math.floor(taxa * duracao), taxa);
-    const canal = buffer.getChannelData(0);
-    // Rajadas curtas de ruído decaindo, simulando dados quicando na mesa.
-    for (let i = 0; i < canal.length; i++) {
-        const rajada = (i % 24) / 24;
-        const caida = 1 - (i / canal.length);
-        canal[i] = (Math.random() * 2 - 1) * (rajada < 0.5 ? 1 : 0.3) * caida;
+    const arquivo = sons_disponiveis[nome];
+    if (!arquivo) {
+        return;
     }
-    const fonte = contexto_audio.createBufferSource();
-    fonte.buffer = buffer;
-    const ganho = contexto_audio.createGain();
-    ganho.gain.setValueAtTime(0.15, contexto_audio.currentTime);
-    fonte.connect(ganho);
-    ganho.connect(contexto_audio.destination);
-    fonte.start();
+    if (!sons[nome]) {
+        sons[nome] = new Audio(`../static/sons/${arquivo}`);
+        sons[nome].load();
+    }
+    const audio = sons[nome];
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+}
+
+// Toca uma das variantes de um som (ex.: pegar_dados_1 / pegar_dados_2).
+function tocar_som_variante(base, variantes) {
+    const escolha = variantes[Math.floor(Math.random() * variantes.length)];
+    tocar_som(`${base}_${escolha}`);
 }
 
 function jogar_dados() {
