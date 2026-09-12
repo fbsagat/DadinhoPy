@@ -1,9 +1,73 @@
 from flask_socketio import emit
 from modelos import Lobby
 import re
+import secrets
 import store
+import threading
+import time
 
 SALA_PADRAO = "padrao"
+
+# Fase 9: código de sala gerado no servidor, com charset sem caracteres
+# ambíguos (sem 0/o, 1/l/i) e checagem de colisão contra o store.
+CARACTERES_SALA = "abcdefghjkmnpqrstuvwxyz23456789"
+TAMANHO_CODIGO_SALA = 5
+
+# Fase 9: janela de reconexão (segundos) para quem cai no meio da partida
+# voltar via chave_secreta antes de ser removido da sala.
+GRACE_RECONEXAO_SEGUNDOS = 30
+
+# Índice em processo client_id -> sala_id (Fase 7, A4). Permite achar a sala sem
+# varrer o store e adquirir o lock da sala antes do read-modify-write dos handlers.
+# É só um cache local: não substitui o estado distribuído.
+_clientes_por_sala = {}
+_sala_por_cliente = {}
+_clientes_guard = threading.Lock()
+
+
+def registrar_cliente(client_id, sala_id):
+    """Registra o client_id no índice em processo da sala (Fase 8: e no store)."""
+    with _clientes_guard:
+        _clientes_por_sala.setdefault(sala_id, set()).add(client_id)
+        _sala_por_cliente[client_id] = sala_id
+    store.registrar_sid(client_id, sala_id)
+
+
+def desregistrar_cliente(client_id, sala_id):
+    """Remove o client_id do índice em processo da sala (Fase 8: e do store)."""
+    with _clientes_guard:
+        clientes = _clientes_por_sala.get(sala_id)
+        if clientes is not None:
+            clientes.discard(client_id)
+            if not clientes:
+                _clientes_por_sala.pop(sala_id, None)
+        _sala_por_cliente.pop(client_id, None)
+    store.desregistrar_sid(client_id)
+
+
+def sala_do_cliente(client_id):
+    """Sala em que o client_id está conectado neste processo, ou None."""
+    with _clientes_guard:
+        return _sala_por_cliente.get(client_id)
+
+
+# Rate limit leve por sid (Fase 7, V2), protegendo o free tier da Upstash.
+_cooldowns = {}
+_cooldowns_guard = threading.Lock()
+
+
+def tem_cooldown(client_id, segundos):
+    """
+    Retorna True se o client_id já disparou um evento dentro da janela informada
+    (e não registra o novo momento); False caso contrário (e registra o acesso).
+    """
+    agora = time.time()
+    with _cooldowns_guard:
+        ultima = _cooldowns.get(client_id, 0.0)
+        if agora - ultima < segundos:
+            return True
+        _cooldowns[client_id] = agora
+        return False
 
 
 def sala_room(sala_id):
@@ -32,9 +96,24 @@ def obter_sala(sala_id):
     sala_id = normalizar_sala(sala_id)
     lobby = store.carregar_sala(sala_id)
     if lobby is None:
-        lobby = Lobby(sala_id=sala_id, lobby_numero=store.contar_salas() + 1)
+        # Fase 8 (B8): número novo via contador distribuído (INCR no Upstash),
+        # sem deserializar todas as salas só para numerar.
+        lobby = Lobby(sala_id=sala_id, lobby_numero=store.proximo_numero())
         store.salvar_sala(lobby)
     return lobby
+
+
+def gerar_codigo_sala():
+    """
+    Gera um código de sala curto e sem caracteres ambíguos, verificando que não
+    colide com uma sala já existente no store (Fase 9). Devolve None se não
+    achar um código livre após algumas tentativas.
+    """
+    for _ in range(10):
+        codigo = "".join(secrets.choice(CARACTERES_SALA) for _ in range(TAMANHO_CODIGO_SALA))
+        if store.carregar_sala(codigo) is None:
+            return codigo
+    return None
 
 
 def salvar_sala(lobby):
@@ -47,8 +126,16 @@ def salvar_sala(lobby):
 
 def buscar_lobby_pelo_client_id(client_id):
     """
-    Procura em todas as salas o Lobby que contém o jogador com o client_id informado.
+    Procura o Lobby que contém o jogador com o client_id informado.
+    Fase 8 (S1): usa o índice distribuído client_id -> sala_id para achar a sala
+    direto (uma leitura pontual), em vez de deserializar todas as salas; a
+    varredura completa fica só como último recurso (índice desatualizado).
     """
+    sala_id = store.sala_do_sid(client_id)
+    if sala_id is not None:
+        lobby = store.carregar_sala(sala_id)
+        if lobby is not None and lobby.buscar_jogador_pelo_client_id(client_id) is not None:
+            return lobby
     for lobby in store.listar_lobbys():
         if lobby.buscar_jogador_pelo_client_id(client_id) is not None:
             return lobby
@@ -57,9 +144,11 @@ def buscar_lobby_pelo_client_id(client_id):
 
 def remover_sala(sala_id):
     """
-    Remove uma sala vazia do store (GC de salas sem ninguém).
+    Remove uma sala vazia do store (GC de salas sem ninguém), junto do resumo
+    dela da busca de partidas.
     """
     store.remover_sala(sala_id)
+    store.remover_resumo(sala_id)
 
 
 def mudar_pagina(num, sala):
@@ -92,6 +181,12 @@ def enviar_snapshot_sala(lobby, jogador):
     rodada = partida.rodadas[-1] if partida.rodadas else None
     espectador = jogador not in partida.jogadores
 
+    # Fase 9: espectador (entrou no meio da partida pela busca) recebe o selo
+    # ESPECTADOR já no snapshot, para não aparecer com os painéis de jogo.
+    # Na página 4 o selo é pulado: o espectador precisa do "Ok" para o reset.
+    if espectador and pagina in (1, 2, 3):
+        emit('espectador', {'nome': jogador.username}, to=jogador.client_id)
+
     if pagina == 1:
         if rodada is not None:
             emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador},
@@ -112,6 +207,14 @@ def enviar_snapshot_sala(lobby, jogador):
         emit('construtor_html',
              {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista, 'coringa_atual': rodada.coringa_atual_qtd,
               'dados_tt': partida.dados_qtd}, to=jogador.client_id)
+        # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
+        # construtor_html usa a base (partida.dados_qtd), então corrige os cards
+        # com reset_rodada (mesmo mecanismo do fluxo normal do jogo).
+        if rodada.rodada_num > 1:
+            emit('reset_rodada',
+                 {'jogadores_nomes': [j.username for j in partida.jogadores],
+                  'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores]},
+                 to=jogador.client_id)
         emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id)
         if rodada.com_coringa is False:
             emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id)
@@ -153,12 +256,6 @@ def enviar_snapshot_sala(lobby, jogador):
             emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id)
             if not espectador and partida.vencedor_final == jogador:
                 emit('botao_vencedor_ativ', to=jogador.client_id)
-        return
-
-    # Jogadores que não estão mais na partida (perderam os dados) entram como espectador:
-    # esconde os painéis e mostra o selo ESPECTADOR por último, para não ser sobrescrito.
-    if espectador:
-        emit('espectador', {'nome': jogador.username}, to=jogador.client_id)
 
 
 def atualizar_lista_usuarios(lobby):
@@ -187,12 +284,17 @@ def atualizar_lista_usuarios(lobby):
         "motivo": motivo,
     }, to=lobby.sala_room())
     salvar_sala(lobby)
+    # Fase 8: índice leve de resumos p/ a busca (evita reidratar os lobbies).
+    store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 
 def listar_resumos_partidas(filtros, sala_atual=None):
     """
     Monta a listagem de partidas públicas para a busca, aplicando os filtros enviados
     pelo front-end. Nada do estado é modificado aqui — apenas leitura do store.
+
+    Fase 8: lê o índice leve de resumos (store.listar_resumos) em vez de reidratar
+    cada Lobby inteiro (que inclui a árvore Partida/Rodada/Turno).
     """
     filtros = filtros if isinstance(filtros, dict) else {}
     busca = str(filtros.get('busca', '') or '').strip().lower()
@@ -202,21 +304,21 @@ def listar_resumos_partidas(filtros, sala_atual=None):
     ordenar = filtros.get('ordenar', 'recentes')
 
     resumos = []
-    for lobby in store.listar_lobbys():
-        if lobby.sala_id == sala_atual:
+    for resumo in store.listar_resumos():
+        sala = resumo.get('sala', '')
+        if sala == sala_atual:
             continue
-        resumo = lobby.resumo_partida()
-        if not resumo['publica']:
+        if not resumo.get('publica'):
             continue
-        if busca and busca not in (resumo['nome'] or '').lower() and busca not in lobby.sala_id.lower():
+        if busca and busca not in (resumo.get('nome') or '').lower() and busca not in sala.lower():
             continue
-        if status in ('espera', 'jogando') and resumo['status'] != status:
+        if status in ('espera', 'jogando') and resumo.get('status') != status:
             continue
-        if com_vaga and not resumo['pode_entrar']:
+        if com_vaga and not resumo.get('pode_entrar'):
             continue
-        if coringa == 'sim' and not resumo['com_coringa']:
+        if coringa == 'sim' and not resumo.get('com_coringa'):
             continue
-        if coringa == 'nao' and resumo['com_coringa']:
+        if coringa == 'nao' and resumo.get('com_coringa'):
             continue
         resumos.append(resumo)
 

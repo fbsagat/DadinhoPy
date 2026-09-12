@@ -1,6 +1,5 @@
 from datetime import datetime
 import secrets
-import random
 from flask_socketio import emit
 
 
@@ -27,6 +26,9 @@ class Jogador:
         self.confirmou_vencedor = False
         # Sala de espera: só inicia quando todos os não-master estiverem prontos.
         self.pronto = False
+        # Janela de reconexão (Fase 9): marca o momento da desconexão durante uma
+        # partida; enquanto não expira, o jogador pode voltar via chave_secreta.
+        self.desconectado_em = None
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -64,6 +66,7 @@ class Jogador:
             'confirmou_rodada': self.confirmou_rodada,
             'confirmou_vencedor': self.confirmou_vencedor,
             'pronto': self.pronto,
+            'desconectado_em': self.desconectado_em.isoformat() if self.desconectado_em else None,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -204,6 +207,8 @@ class Lobby:
             jogador.confirmou_rodada = bool(dados_jogador.get('confirmou_rodada', False))
             jogador.confirmou_vencedor = bool(dados_jogador.get('confirmou_vencedor', False))
             jogador.pronto = bool(dados_jogador.get('pronto', False))
+            desconectado_em = dados_jogador.get('desconectado_em')
+            jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
@@ -310,16 +315,17 @@ class Lobby:
         try:
             if 'max_jogadores' in dados:
                 valor = int(dados['max_jogadores'])
-                if 2 <= valor <= 8:
+                if 2 <= valor <= 10:
                     config['max_jogadores'] = valor
                     aplicado = True
         except (ValueError, TypeError):
             pass
-        if 'com_coringa' in dados:
-            config['com_coringa'] = bool(dados['com_coringa'])
+        # Fase 6 (B6): só aceita bool de verdade (bool("false") é True e "falsa" a config).
+        if 'com_coringa' in dados and isinstance(dados['com_coringa'], bool):
+            config['com_coringa'] = dados['com_coringa']
             aplicado = True
-        if 'publica' in dados:
-            config['publica'] = bool(dados['publica'])
+        if 'publica' in dados and isinstance(dados['publica'], bool):
+            config['publica'] = dados['publica']
             aplicado = True
         self.config = config
         return aplicado
@@ -499,7 +505,7 @@ class Partida:
         self.dados_qtd = dados_qtd
         self.com_coringa = com_coringa
         self.jogadores = jogadores
-        self.jogador_sorteado = random.choice(self.jogadores)
+        self.jogador_sorteado = secrets.choice(self.jogadores)
         self.do_lobby = do_lobby
         self.rodadas = []
         self.vencedor_final = None
@@ -544,7 +550,7 @@ class Partida:
             for jogador in self.jogadores:
                 turnos_lista[jogador.username] = [[0, 0]]
             emit("construtor_html",
-                 {'rodada_n': 0, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
+                 {'rodada_n': rodada_numero, 'turnos_lista': turnos_lista, 'coringa_atual': 0,
                   'dados_tt': self.dados_qtd}, to=self.sala_room())
             emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, to=self.sala_room())
             emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, to=self.sala_room())
@@ -687,8 +693,23 @@ class Rodada:
         Constrói um turno na rodada para o jogador da vez.
         """
         turno_numero = len(self.turnos) + 1
-        dado = int(dados['dado'])
-        dado_qtd = int(dados['quantidade'])
+        # Fase 6 (B3): valida o payload da aposta antes de criar o turno — dado
+        # em 1-6 e quantidade >= 1; payload malformado é rejeitado com
+        # jogada_invalida em vez de estourar exceção no handler.
+        if not isinstance(dados, dict):
+            emit('jogada_invalida', {'txtadd': 'dados da jogada ausentes.'}, to=jogador.client_id)
+            return
+        try:
+            dado = int(dados['dado'])
+            dado_qtd = int(dados['quantidade'])
+        except (ValueError, TypeError, KeyError):
+            emit('jogada_invalida', {'txtadd': 'dados da jogada inválidos.'}, to=jogador.client_id)
+            return
+        if not (1 <= dado <= 6) or dado_qtd < 1:
+            emit('jogada_invalida',
+                 {'txtadd': 'escolha um número de 1 a 6 e uma quantidade maior que zero.'},
+                 to=jogador.client_id)
+            return
         turno = Turno(da_rodada=self, jogador=jogador, dado=dado, dado_qtd=dado_qtd, turno_numero=turno_numero)
         self.turnos.append(turno)
         jogador.turno_atual = turno

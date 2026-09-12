@@ -22,13 +22,16 @@ function ir_para_sala(codigo) {
 }
 
 function criar_sala() {
-    const caracteres = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let codigo = '';
-    for (let i = 0; i < 5; i++) {
-        codigo += caracteres[Math.floor(Math.random() * caracteres.length)];
-    }
-    ir_para_sala(codigo);
+    // Fase 9: o código é gerado no servidor (charset sem ambíguos + colisão);
+    // ao receber 'sala_criada', o cliente navega para a sala criada.
+    socket.emit('criar_sala');
 }
+
+socket.on('sala_criada', function (data) {
+    if (data && data.sala) {
+        ir_para_sala(data.sala);
+    }
+});
 
 function entrar_sala() {
     const input = document.getElementById('input_sala');
@@ -112,10 +115,12 @@ socket.on('partidas_listadas', function (data) {
 
         const botao = document.createElement('button');
         if (jogando) {
-            botao.className = 'btn btn-sm btn-outline-secondary';
-            botao.textContent = 'Assistir';
-            botao.disabled = true; // Entrar no meio de uma partida só pelo link direto
-            botao.title = 'Partidas em andamento só aceitam espectadores pelo link direto';
+            // Fase 9: assistir partidas em andamento pela busca é liberado; quem
+            // entra vira espectador (a sala em jogo não trava mais a entrada).
+            botao.className = 'btn btn-sm btn-outline-info';
+            botao.textContent = '👁 Assistir';
+            botao.title = 'Entrar na partida como espectador';
+            botao.onclick = () => entrar_partida(partida.sala);
         } else if (partida.pode_entrar) {
             botao.className = 'btn btn-sm btn-success';
             botao.textContent = 'Entrar';
@@ -572,6 +577,13 @@ socket.on('construtor_html', function (data) {
     const principal = document.getElementById('cards');
     principal.innerHTML = '';
 
+    // Fase 9: mostra "Rodada N" na tela de turnos (o payload rodada_n já existia).
+    const rodada_txt = document.getElementById('rodada_atual_txt');
+    if (rodada_txt && data.rodada_n) {
+        rodada_txt.textContent = `Rodada ${data.rodada_n}`;
+        rodada_txt.classList.remove('d-none');
+    }
+
     Object.entries(data.turnos_lista).forEach(([jogador, turnos]) => {
         // Criação do container principal
         const divCol = document.createElement('div');
@@ -1002,6 +1014,14 @@ socket.on('jogada_invalida', function (data) {
     window.alert(`Esta jogada é inválida, ${txt}`);
 })
 
+// Fase 9: alguém caiu no meio da partida. Agenda um pedido ao servidor para
+// expurgar a desconexão após a janela de graça — se o jogador voltar antes
+// (chave_secreta no reconnect), o servidor limpa o marcador e nada é removido.
+socket.on('jogador_desconectado', function (data) {
+    const grace_ms = (Math.max(1, Number(data.grace) || 30) * 1000) + 500;
+    setTimeout(() => socket.emit('verificar_desconectados', { chave: chave_secreta }), grace_ms);
+});
+
 // Função para enviar apelido ao servidor
 function enviar_apelido() {
     const textInput = document.getElementById("apelido");
@@ -1020,7 +1040,7 @@ function enviar_apelido() {
 function iniciar_partida() {
     tocar_som_variante('embaralhar', [1, 2]);
     const dados_qtd = document.getElementById('config_dados').value;
-    socket.emit('iniciar_partida', { dados_qtd: dados_qtd });
+    socket.emit('iniciar_partida', { chave: chave_secreta, dados_qtd: dados_qtd });
 }
 
 let contexto_audio = null;
@@ -1209,7 +1229,7 @@ function tocar_som_variante(base, variantes) {
 }
 
 function jogar_dados() {
-    socket.emit('jogar_dados');
+    socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
     const dadobt = document.getElementById('dadobotao');
     dadobt.disabled = true; // Desativa o input
@@ -1217,18 +1237,18 @@ function jogar_dados() {
 
 function conferencia_final() {
     const botao = document.getElementById('bot_confe_fim');
-    socket.emit('conferencia_final');
+    socket.emit('conferencia_final', { chave: chave_secreta });
     botao.disabled = true; // Desativa o input
 }
 
 function vencedor_final() {
     const botao = document.getElementById('bot_vencedor_fim');
-    socket.emit('vencedor_final');
+    socket.emit('vencedor_final', { chave: chave_secreta });
     botao.disabled = true; // Desativa o input
 }
 
 document.getElementById('comemorar').addEventListener('click', () => {
-    socket.emit('foguetear_click');
+    socket.emit('foguetear_click', { chave: chave_secreta });
 });
 
 function verificar_enter(event, button) {
