@@ -1,7 +1,8 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
-                            atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input, validar_numero)
+                            atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input, validar_numero,
+                            enviar_snapshot_sala)
 from modelos import Jogador
 import os
 import random
@@ -47,17 +48,33 @@ def handle_connect():
     Esta função é executada no momento da conexão de um cliente web do servidor.
     Ela deve determinar a sala do cliente (via ?sala= na URL/front-end), juntá-lo à room da sala,
     criar uma instância de jogador, e decidir se ele é master, caso não haja algum na sala.
+
+    Fase 4: se já existir um jogador com este sid (reconexão da mesma sessão) ou com a
+    chave secreta guardada no sessionStorage (refresh), reaproveita-o em vez de duplicar,
+    e envia um snapshot da sala para o cliente reconstruir a tela (página atual intacta).
     """
     client_id = request.sid
     sala_id = normalizar_sala(request.args.get('sala'))
     lobby = obter_sala(sala_id)
     join_room(lobby.sala_room(), sid=client_id)
-    master = False if lobby.verificar_jogador_master() else True
-    jogador = Jogador.criar_jogador(client_id=client_id, master=master)
-    lobby.adicionar_jogador(jogador)
+
+    jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+    if jogador is None:
+        chave_resumo = request.args.get('chave_secreta', '')
+        jogador = lobby.buscar_jogador_pela_chave(chave_resumo)
+        if jogador is not None:
+            # Retomando a mesma identidade: religa o sid novo ao mesmo Jogador.
+            jogador.client_id = client_id
+        else:
+            master = False if lobby.verificar_jogador_master() else True
+            jogador = Jogador.criar_jogador(client_id=client_id, master=master)
+            lobby.adicionar_jogador(jogador)
+
     emit("connect_start",
-         {"is_master": master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id})
+         {"is_master": jogador.master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id,
+          'username': jogador.username})
     atualizar_lista_usuarios(lobby)
+    enviar_snapshot_sala(lobby, jogador)
     salvar_sala(lobby)
 
 
@@ -68,13 +85,39 @@ def handle_disconnect():
     Ela deve remover o jogador da sala e caso este jogador seja um master e haja mais jogadores no lobby
     dele, selecionar outro jogador, por ordem de entrada, mais antigo pro mais novo, para se tornar o novo master do
     lobby, caso não seja um master, apenas remover, caso apenas ele no lobby, reinicia tudo.
+
+    Fase 4: se o desconectado ainda estiver numa partida em andamento, ele é removido também da
+    partida (senão travaria a rolagem/conferência/turno já que a partida continua esperando ele);
+    se for a vez dele, o turno passa pro próximo; se sobrar apenas um, ele é declarado vencedor.
     """
     client_id = request.sid
-    lobby, _ = achar_jogador(client_id)
+    lobby, jogador = achar_jogador(client_id)
     if lobby is None:
         return
     leave_room(lobby.sala_room(), sid=client_id)
+
     lobby.remover_jogador(client_id)
+
+    partida = jogador.partida_atual
+    if partida is not None and jogador in partida.jogadores:
+        rodada = jogador.rodada_atual
+        indice_antigo = partida.jogadores.index(jogador)
+        partida.jogadores.remove(jogador)
+        if len(partida.jogadores) == 1:
+            # Sobrou só um jogador com dado: é o vencedor da partida.
+            partida.declarar_vencedor(partida.jogadores[0])
+        elif len(partida.jogadores) > 1:
+            if rodada is not None and rodada.vez_atual == jogador:
+                # Era a vez do desconectado: passa o turno pro próximo.
+                proximo = partida.jogadores[min(indice_antigo, len(partida.jogadores) - 1)]
+                rodada.vez_atual = proximo
+                rodada.atualizar_front_pro_da_vez(proximo)
+            # Se a rolagem só esperava este jogador, desbloqueia quem já jogou.
+            if rodada is not None and rodada.verificar_se_todos_ja_jogaram_seus_dados():
+                lobby.pagina = 2
+                time.sleep(random.randint(4, 5))
+                mudar_pagina(2, sala=lobby.sala_id)
+
     if lobby.contar_jogadores() > 0:
         lobby.definir_master()
     atualizar_lista_usuarios(lobby)
@@ -153,6 +196,8 @@ def joguei_dados(dados):
         rodada = jogador.rodada_atual
         # Executar isso \/ quando o último jogar os dados
         if rodada.verificar_se_todos_ja_jogaram_seus_dados():
+            jogador.lobby_atual.pagina = 2
+            salvar_sala(jogador.lobby_atual)
             time.sleep(random.randint(4, 5))
             mudar_pagina(2, sala=jogador.lobby_atual.sala_id)
 
@@ -205,7 +250,10 @@ def conferencia_final():
     lobby, jogador = achar_jogador(client_id)
     if jogador is None or jogador.rodada_atual is None or jogador.partida_atual is None:
         return
+    if jogador.confirmou_rodada:
+        return
     rodada = jogador.rodada_atual
+    jogador.confirmou_rodada = True
     rodada.conferiram += 1
     if rodada.conferiram == len(rodada.jogadores):
         jogador.partida_atual.construir_rodada()
@@ -222,7 +270,10 @@ def vencedor_final():
     _, jogador = achar_jogador(client_id)
     if jogador is None or jogador.lobby_atual is None:
         return
+    if jogador.confirmou_vencedor:
+        return
     lobby = jogador.lobby_atual
+    jogador.confirmou_vencedor = True
     lobby.conferiram_vencedor += 1
     if lobby.conferiram_vencedor == len(lobby.jogadores):
         lobby.resetar_para_lobby()
