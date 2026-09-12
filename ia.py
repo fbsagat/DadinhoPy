@@ -26,10 +26,53 @@ NOMES_NIVEIS = {
     4: 'Mestre',
 }
 
+# Apelidos dos bots: sorteados a cada criação, misturando designações
+# robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
+# A unicidade fica a cargo de Lobby.verificar_apelido.
+NOMES_ROBOTICOS = [
+    'Chip', 'Bolt', 'Neo', 'Zeta', 'Vex', 'Kilo', 'Orb', 'Pino', 'Byte',
+    'Hex', 'Volt', 'Nix', 'Zen', 'Dado', 'Asimo', 'Teco', 'Bino',
+]
 
-def nome_base(nivel):
-    """Apelido base de um bot do nível informado (o lobby garante a unicidade)."""
-    return f"🤖 {NOMES_NIVEIS.get(int(nivel), 'Bot')}"
+PREFIXOS_ROBO = ['XJ', 'R2', 'C3', 'TK', 'ZX', 'QB', 'MK', 'AX', 'NV', 'IO',
+                 'BOT', 'UNIT', 'NULL']
+
+NOMES_HUMANOS = [
+    'Ana', 'Bia', 'Bruno', 'Carla', 'Davi', 'Elisa', 'Fábio', 'Gabi',
+    'Heitor', 'Igor', 'Joana', 'Kelly', 'Lucas', 'Marina', 'Nando',
+    'Olívia', 'Pedro', 'Rafa', 'Sofia', 'Tati', 'Vitor', 'Zeca',
+]
+
+PREFIXOS_HIBRIDOS = ['Robô', 'Cyber', 'Mega', 'Nano', 'Proto', 'Auto']
+
+SUFIXOS_HIBRIDOS = ['Bot', '-9000', '.exe', ' Tron', '-X', ' 2.0', 'Tech', '-Byte']
+
+_TABELA_LEET = str.maketrans('aAeEiIoOsS', '4433110055')
+
+
+def _nome_robotico():
+    """Nome puramente robótico: designação (ex.: 'BOT-42') ou apelido avulso."""
+    if secrets.randbelow(2):
+        prefixo = secrets.choice(PREFIXOS_ROBO)
+        return f"{prefixo}-{secrets.randbelow(99) + 1:02d}"
+    return secrets.choice(NOMES_ROBOTICOS)
+
+
+def _nome_hibrido():
+    """Nome humano robotizado (ex.: 'Robô Ana', 'Lucas.exe', 'C4rl4')."""
+    nome = secrets.choice(NOMES_HUMANOS)
+    estilo = secrets.randbelow(3)
+    if estilo == 0:
+        return f"{secrets.choice(PREFIXOS_HIBRIDOS)} {nome}"
+    if estilo == 1:
+        return f"{nome}{secrets.choice(SUFIXOS_HIBRIDOS)}"
+    return nome.translate(_TABELA_LEET)
+
+
+def gerar_nome():
+    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖."""
+    apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
+    return f"🤖 {apelido}"
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +92,7 @@ def adicionar_bots(lobby, nivel, quantidade):
     for _ in range(quantidade):
         if len(lobby.jogadores) >= limite:
             break
-        username = lobby.verificar_apelido(nome_base(nivel))
+        username = lobby.verificar_apelido(gerar_nome())
         jogador = Jogador.criar_ia(nivel, username)
         lobby.adicionar_jogador(jogador)
         criados.append(jogador)
