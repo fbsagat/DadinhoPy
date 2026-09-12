@@ -754,6 +754,38 @@ def teste_sala_so_com_bot_e_removida():
     _ok("sala só com bot é removida (B3)")
 
 
+def teste_sala_orfa_e_fechada():
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    assert modulo_store.carregar_sala(SALA) is not None
+
+    # Ana cai: fica na janela de graça porque Bia segue ativa.
+    c1.disconnect()
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby is not None
+    assert any(j.desconectado_em is not None for j in lobby.jogadores)
+
+    # Bia cai: não resta humano ATIVO (Ana é fantasma na graça), então a sala
+    # precisa fechar em vez de ficar persistida sem ninguém conectado.
+    c2.disconnect()
+    assert modulo_store.carregar_sala(SALA) is None, "sala sem humano ativo deve fechar"
+
+    # Resumo de sala vazia não pode aparecer na busca.
+    modulo_store.salvar_resumo("orfa", {"sala": "orfa", "publica": True, "jogadores": 0})
+    try:
+        resumos = funcoes_gerais.listar_resumos_partidas({})
+        assert all(r.get("sala") != "orfa" for r in resumos), "sala vazia não pode ser listada"
+    finally:
+        modulo_store.remover_resumo("orfa")
+    _limpar()
+    _ok("sala órfã (sem humano ativo) é fechada")
+
+
 def teste_sala_padrao_cria_nova():
     # Fase 16: a sala padrão compartilhada foi aposentada. Sem código (ou com
     # `?sala=padrao`), o connect devolve um código novo em vez de lotar a padrão.
@@ -1017,6 +1049,7 @@ def verificar_integracao():
         ("B1-gate", teste_gate_pagina_confirmacoes),
         ("B2-espectador", teste_espectador_nao_e_jogador),
         ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
+        ("B4-orfa-fechada", teste_sala_orfa_e_fechada),
         ("sala-padrao", teste_sala_padrao_cria_nova),
     ]
     testes_hardening = [

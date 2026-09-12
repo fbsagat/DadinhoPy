@@ -327,6 +327,9 @@ def listar_resumos_partidas(filtros, sala_atual=None):
         sala = resumo.get('sala', '')
         if sala == sala_atual:
             continue
+        # Sala órfã (sem ninguém): não aparece na busca (o GC fecha no disconnect).
+        if int(resumo.get('jogadores') or 0) < 1:
+            continue
         if not resumo.get('publica'):
             continue
         if busca and busca not in (resumo.get('nome') or '').lower() and busca not in sala.lower():

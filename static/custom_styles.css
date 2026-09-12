@@ -325,6 +325,12 @@ canvas {
     background-color: rgba(13, 110, 253, 0.15) !important;
 }
 
+/* O tema do Bootstrap é claro, então `.text-muted` fica cinza-escuro sobre o
+   painel escuro da busca (ilegível). Força um tom claro legível no contexto. */
+.tela_busca .text-muted {
+    color: #bfe3ff !important;
+}
+
 .tela_busca select,
 .tela_busca input[type="text"] {
     background-color: #002952;
