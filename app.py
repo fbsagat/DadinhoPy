@@ -4,7 +4,7 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input,
                             enviar_snapshot_sala, listar_resumos_partidas,
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
-                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES)
+                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO)
 from modelos import Jogador
 from store import trancar_sala, esquecer_sala
 from datetime import datetime
@@ -305,9 +305,19 @@ def handle_connect():
     Fase 4: se já existir um jogador com este sid (reconexão da mesma sessão) ou com a
     chave secreta guardada no sessionStorage (refresh), reaproveita-o em vez de duplicar,
     e envia um snapshot da sala para o cliente reconstruir a tela (página atual intacta).
+
+    Fase 16: a sala padrão compartilhada foi aposentada. Quem chega sem código (ou com
+    `?sala=padrao`, que `normalizar_sala` usa como fallback de inválidos) recebe uma sala
+    própria em vez de disputar vagas de uma sala única que enche e trava todo mundo. O
+    cliente navega para o código devolvido e reconecta já na sala nova.
     """
     client_id = request.sid
     sala_id = normalizar_sala(request.args.get('sala'))
+    if sala_id == SALA_PADRAO:
+        codigo = gerar_codigo_sala()
+        if codigo:
+            emit('sala_criada', {'sala': codigo}, to=client_id)
+        return
     with trancar_sala(sala_id):
         lobby = obter_sala(sala_id)
         join_room(lobby.sala_room(), sid=client_id)

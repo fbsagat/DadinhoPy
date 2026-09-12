@@ -754,6 +754,39 @@ def teste_sala_so_com_bot_e_removida():
     _ok("sala só com bot é removida (B3)")
 
 
+def teste_sala_padrao_cria_nova():
+    # Fase 16: a sala padrão compartilhada foi aposentada. Sem código (ou com
+    # `?sala=padrao`), o connect devolve um código novo em vez de lotar a padrão.
+    _limpar()
+    modulo_store.remover_sala(funcoes_gerais.SALA_PADRAO)
+    c1 = socketio.test_client(app, query_string="sala=padrao")
+    eventos = c1.get_received()
+    criada = _achar_evento(eventos, "sala_criada")
+    assert criada and criada.get("sala"), "connect na sala padrão deve devolver um código novo"
+    assert criada["sala"] != funcoes_gerais.SALA_PADRAO
+    assert _achar_evento(eventos, "connect_start") is None, "não pode entrar na sala padrão"
+    assert modulo_store.carregar_sala(funcoes_gerais.SALA_PADRAO) is None, \
+        "a sala padrão não pode ser materializada"
+    c1.disconnect()
+
+    # Código inválido também gera sala nova (normalizar_sala cai no sentinela).
+    c2 = socketio.test_client(app, query_string="sala=invalida!")
+    criada2 = _achar_evento(c2.get_received(), "sala_criada")
+    assert criada2 and criada2.get("sala"), "sala inválida deve gerar código novo"
+    c2.disconnect()
+
+    # O código devolvido funciona como uma sala normal.
+    nova = criada["sala"]
+    c3 = socketio.test_client(app, query_string=f"sala={nova}")
+    eventos3 = c3.get_received()
+    assert _achar_evento(eventos3, "connect_start") is not None
+    assert modulo_store.carregar_sala(nova) is not None
+    c3.disconnect()
+    modulo_store.remover_sala(nova)
+    _limpar()
+    _ok("sala padrão cria sala nova (Fase 16)")
+
+
 def teste_resumo_malformado_nao_quebra_busca():
     _limpar()
     modulo_store.salvar_resumo("quebrado", {"sala": "quebrado", "publica": True})
@@ -984,6 +1017,7 @@ def verificar_integracao():
         ("B1-gate", teste_gate_pagina_confirmacoes),
         ("B2-espectador", teste_espectador_nao_e_jogador),
         ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
+        ("sala-padrao", teste_sala_padrao_cria_nova),
     ]
     testes_hardening = [
         ("B6-resumo", teste_resumo_malformado_nao_quebra_busca),

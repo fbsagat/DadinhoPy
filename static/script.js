@@ -317,13 +317,9 @@ socket.on('partidas_listadas', function (data) {
 });
 
 socket.on('sala_cheia', function () {
+    // Sala pedida lotada: em vez de travar no alerta, cria uma sala nova.
     mostrar_alerta(t('msg.sala_cheia'), 'aviso')
-        .then(() => {
-            // Evita loop de reload quando a própria sala padrão está cheia.
-            if (sala_atual !== 'padrao') {
-                ir_para_sala('padrao');
-            }
-        });
+        .then(() => criar_sala());
 });
 
 socket.on('iniciar_negado', function (data) {

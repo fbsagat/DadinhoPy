@@ -82,7 +82,9 @@ def tem_cooldown(client_id, segundos):
 
 def normalizar_sala(sala_id):
     """
-    Normaliza e valida o id de sala vindo da URL/front-end. Inválidos caem na sala padrão.
+    Normaliza e valida o id de sala vindo da URL/front-end. Inválidos caem no
+    sentinela SALA_PADRAO; o connect trata esse sentinela gerando uma sala nova
+    (a antiga sala padrão compartilhada enchia e bloqueava novos jogadores).
     """
     if not isinstance(sala_id, str):
         return SALA_PADRAO
