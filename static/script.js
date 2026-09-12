@@ -361,6 +361,7 @@ socket.on("mudar_pagina", function (data) {
             logo.style.width = '40%';
         }
     }
+    mostrar_dica(data.pag_numero);
 });
 
 // Função para preencher os dados do jogador na página de partida
@@ -1062,6 +1063,125 @@ if (botao_som) {
         botao_som.textContent = som_ativado ? '🔊' : '🔇';
     });
 }
+
+// --- Sistema de ajuda: tutorial + dicas durante a partida ---
+// Preferência de dicas do jogador, persistida entre sessões. Valor padrão: ligado.
+let dicas_ativadas = localStorage.getItem('dadinho_dicas') !== 'off';
+
+// Dicas contextuais mostradas conforme a página da partida (0 a 4).
+const dicas_por_pagina = {
+    0: [
+        'Escolha um apelido e clique em "Pronto" para entrar na partida.',
+        'O master define nome, dados por jogador, coringa e se a partida é pública.',
+        'A partida só começa com 2+ jogadores, todos com apelido e prontos.',
+        'Os pontos são acumulados no lobby a cada vitória.',
+    ],
+    1: [
+        'Clique em "Jogar dados" para rolar os seus dados.',
+        'Você só vê os seus dados; os outros jogadores veem apenas os deles.',
+        'Quando todos rolarem, começam os turnos de aposta.',
+    ],
+    2: [
+        'Na sua vez, aposte uma quantidade e um número (face do dado).',
+        'Você também pode desconfiar da aposta anterior em vez de apostar.',
+        'A aposta deve aumentar: quantidade maior, ou mesma quantidade com número maior.',
+        'O 1 é coringa: conta como qualquer número, mas voltar pra número exige o dobro.',
+        'Desconfiou certo? Quem apostou perde um dado. Errou? Você perde um dado.',
+        'Quem perde todos os dados vira espectador da partida.',
+    ],
+    3: [
+        'Veja quem ganhou e quem perdeu um dado na rodada.',
+        'Os dados destacados em vermelho mostram a aposta conferida.',
+        'Clique em Ok para começar a próxima rodada.',
+    ],
+    4: [
+        'Parabéns ao vencedor! Clique em Ok para voltar ao lobby.',
+        'O vencedor ganha 1 ponto na pontuação da sala.',
+    ],
+};
+
+const botao_tutorial = document.getElementById('botao_tutorial');
+const botao_dicas = document.getElementById('botao_dicas');
+const overlay_tutorial = document.getElementById('tutorial_overlay');
+const painel_dicas = document.getElementById('painel_dicas');
+const switch_tutorial = document.getElementById('tutorial_dicas_switch');
+
+function aplicar_estado_dicas() {
+    if (!botao_dicas) {
+        return;
+    }
+    botao_dicas.classList.toggle('btn-outline-warning', dicas_ativadas);
+    botao_dicas.classList.toggle('btn-outline-secondary', !dicas_ativadas);
+    if (switch_tutorial) {
+        switch_tutorial.checked = dicas_ativadas;
+    }
+}
+
+function mostrar_dica(pag_numero) {
+    if (!dicas_ativadas || !painel_dicas) {
+        return;
+    }
+    const dicas = dicas_por_pagina[pag_numero] || [];
+    if (dicas.length === 0) {
+        return;
+    }
+    document.getElementById('dicas_texto').textContent = dicas[Math.floor(Math.random() * dicas.length)];
+    painel_dicas.style.display = 'flex';
+}
+
+function fechar_dica() {
+    if (painel_dicas) {
+        painel_dicas.style.display = 'none';
+    }
+}
+
+function alternar_dicas() {
+    dicas_ativadas = !dicas_ativadas;
+    localStorage.setItem('dadinho_dicas', dicas_ativadas ? 'on' : 'off');
+    aplicar_estado_dicas();
+    if (dicas_ativadas) {
+        mostrar_dica(indiceAtual);
+    } else {
+        fechar_dica();
+    }
+}
+
+function abrir_tutorial() {
+    if (overlay_tutorial) {
+        overlay_tutorial.style.display = 'flex';
+    }
+}
+
+function fechar_tutorial() {
+    if (overlay_tutorial) {
+        overlay_tutorial.style.display = 'none';
+    }
+}
+
+if (botao_tutorial) {
+    botao_tutorial.addEventListener('click', abrir_tutorial);
+}
+if (botao_dicas) {
+    botao_dicas.addEventListener('click', alternar_dicas);
+}
+if (switch_tutorial) {
+    switch_tutorial.addEventListener('change', alternar_dicas);
+}
+if (overlay_tutorial) {
+    overlay_tutorial.addEventListener('click', (event) => {
+        if (event.target === overlay_tutorial) {
+            fechar_tutorial();
+        }
+    });
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        fechar_tutorial();
+    }
+});
+
+aplicar_estado_dicas();
 
 // Toca um efeito sonoro do jogo a partir de static/sons/. Os arquivos são
 // carregados sob demanda e reutilizados (cache em 'sons').

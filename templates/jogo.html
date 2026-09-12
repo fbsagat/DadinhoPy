@@ -19,6 +19,11 @@
     <button id="botao_som" class="btn btn-sm btn-outline-light position-fixed top-0 end-0 m-2"
         style="z-index: 50;" title="Som ligado/desligado">🔊</button>
 
+    <div class="position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">
+        <button id="botao_tutorial" class="btn btn-sm btn-outline-light" title="Como jogar (tutorial)">❓</button>
+        <button id="botao_dicas" class="btn btn-sm btn-outline-warning" title="Ligar/desligar dicas">💡</button>
+    </div>
+
     <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 45vh;">
         <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
             style="display: block; width: 40%; height: auto;">
@@ -342,6 +347,99 @@
 
     </div>
     <!-- TELA VITORIA FIM -->
+
+    <!-- TUTORIAL INICIO -->
+    <div id="tutorial_overlay" class="tutorial-overlay" role="dialog" aria-modal="true">
+        <div class="tutorial-modal">
+            <div class="tutorial-header">
+                <h3 class="text-info mb-0">📖 Como jogar Dadinho</h3>
+                <button class="btn btn-outline-light btn-sm" onclick="fechar_tutorial()">✖</button>
+            </div>
+
+            <div class="tutorial-body">
+                <section>
+                    <h5>🎯 Objetivo</h5>
+                    <p class="mb-1">Ser o <strong>último jogador com dados</strong> na mesa. Cada jogador começa com a
+                        quantidade de dados definida pelo master. A cada rodada alguém perde um dado; quem fica sem dados
+                        vira <strong>espectador</strong>.</p>
+                </section>
+
+                <section>
+                    <h5>🏠 Sala de espera (lobby)</h5>
+                    <ul class="mb-1">
+                        <li>Escolha um apelido e clique em <strong>Pronto</strong>.</li>
+                        <li>O <strong>master</strong> define: nome, dados por jogador, máximo de jogadores, coringa e se
+                            a partida é pública.</li>
+                        <li>Todos (menos o master) devem clicar em <strong>Ficar pronto</strong>.</li>
+                        <li>A partida só inicia com <strong>2+ jogadores</strong>, todos com apelido e prontos.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h5>🎲 Rolar os dados</h5>
+                    <p class="mb-1">Clique em <strong>Jogar dados</strong> para rolar os seus. Você só vê o resultado dos
+                        seus dados; os outros jogadores veem apenas os deles. Quando todos rolarem, começam os turnos.</p>
+                </section>
+
+                <section>
+                    <h5>🗣 Turnos e apostas</h5>
+                    <p class="mb-1">Um jogador começa fazendo uma aposta: <strong>quantidade de dados</strong> +
+                        <strong>número da face</strong>. O próximo deve fazer uma aposta maior <em>ou</em> desconfiar.</p>
+                    <div class="tutorial-regra">
+                        <strong>Como aumentar a aposta:</strong>
+                        <ul class="mb-0">
+                            <li>Quantidade <strong>maior</strong> que a anterior; ou</li>
+                            <li>Mesma quantidade com um <strong>número maior</strong>.</li>
+                        </ul>
+                    </div>
+                    <div class="tutorial-regra">
+                        <strong>Coringa (face 1):</strong> quando ativo, o 1 vale como <strong>qualquer número</strong>.
+                        <ul class="mb-0">
+                            <li>Apostar coringa exige quantidade maior que o coringa atual.</li>
+                            <li>Voltar de coringa para um número exige <strong>o dobro</strong> da quantidade.</li>
+                            <li>Se alguém apostar 1 no primeiro turno, o coringa é <strong>cancelado</strong> na rodada.</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section>
+                    <h5>🕵 Desconfiar</h5>
+                    <p class="mb-1">Achou que a aposta anterior é mentira? <strong>Desconfie!</strong> O jogo conta todos
+                        os dados da mesa (coringas contam como o número apostado).</p>
+                    <div class="tutorial-regra">
+                        <ul class="mb-0">
+                            <li><strong>Aposta verdadeira:</strong> quem apostou vence e o desconfiador perde um dado.</li>
+                            <li><strong>Aposta mentirosa:</strong> o desconfiador vence e quem apostou perde um dado.</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section>
+                    <h5>🏆 Vitória</h5>
+                    <p class="mb-1">Ao final de cada rodada, a conferência mostra os dados e quem perdeu. O último jogador
+                        com dados vence a partida e ganha <strong>1 ponto</strong>. Clique em Ok para voltar ao lobby e
+                        jogar de novo.</p>
+                </section>
+            </div>
+
+            <div class="tutorial-footer">
+                <div class="form-check form-switch d-flex align-items-center gap-2 mb-0">
+                    <input class="form-check-input" type="checkbox" id="tutorial_dicas_switch" checked>
+                    <label class="form-check-label small" for="tutorial_dicas_switch">Mostrar dicas durante a
+                        partida</label>
+                </div>
+                <button class="btn btn-info" onclick="fechar_tutorial()">Entendi! Vamos jogar 🎲</button>
+            </div>
+        </div>
+    </div>
+    <!-- TUTORIAL FIM -->
+
+    <!-- PAINEL DE DICAS INICIO -->
+    <div id="painel_dicas" class="painel-dicas" role="status">
+        <span id="dicas_texto" class="flex-grow-1"></span>
+        <button class="btn-close btn-close-white" onclick="fechar_dica()" aria-label="Fechar dica"></button>
+    </div>
+    <!-- PAINEL DE DICAS FIM -->
 
     <script src="/static/script.js"></script>
 

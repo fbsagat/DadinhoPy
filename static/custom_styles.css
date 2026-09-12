@@ -272,3 +272,90 @@ canvas {
     background-color: #001125;
     color: #ffffff;
 }
+
+/* Sistema de ajuda: tutorial e dicas durante a partida. */
+.painel-dicas {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    width: min(92vw, 640px);
+    padding: 10px 14px;
+    background-color: rgba(0, 41, 82, 0.95);
+    border: 1px solid #0dcaf0;
+    border-radius: 12px;
+    box-shadow: 0 0 15px rgba(13, 202, 240, 0.4);
+    font-size: 0.9rem;
+    color: #ffffff;
+}
+
+.painel-dicas .btn-close {
+    flex-shrink: 0;
+}
+
+.tutorial-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 8, 20, 0.75);
+    padding: 16px;
+}
+
+.tutorial-modal {
+    background-color: #001125;
+    border: 2px solid #0dcaf0;
+    border-radius: 16px;
+    box-shadow: 0 0 30px rgba(13, 202, 240, 0.5);
+    width: min(94vw, 760px);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.tutorial-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(13, 202, 240, 0.4);
+}
+
+.tutorial-body {
+    padding: 16px 18px;
+    overflow-y: auto;
+}
+
+.tutorial-body h5 {
+    color: #0dcaf0;
+    margin-top: 16px;
+}
+
+.tutorial-body section:first-of-type h5 {
+    margin-top: 0;
+}
+
+.tutorial-regra {
+    background-color: rgba(0, 41, 82, 0.6);
+    border-left: 3px solid #ffc107;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 6px 0;
+}
+
+.tutorial-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 18px;
+    border-top: 1px solid rgba(13, 202, 240, 0.4);
+}
