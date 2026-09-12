@@ -10,6 +10,111 @@ const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
 const socket = io({ autoConnect: true, query: { sala: sala_atual, chave_secreta: chave_resumo } });
 socket.connect();
 
+// ---------------------------------------------------------------------------
+// Fila de animação + narrador.
+// O servidor pode anexar "atraso" (ms) ao payload de um evento para simular o
+// tempo de pensamento dos bots. Todos os eventos passam por uma fila serial no
+// cliente, preservando a ordem original e encaixando as pausas — sem timers no
+// servidor (serverless-safe).
+// ---------------------------------------------------------------------------
+const _onevent_original = socket.onevent.bind(socket);
+const fila_eventos = [];
+let processando_eventos = false;
+
+function _processar_fila_eventos() {
+    if (fila_eventos.length === 0) {
+        processando_eventos = false;
+        esconder_pensando();
+        return;
+    }
+    const item = fila_eventos.shift();
+    if (item.ia_nome) {
+        mostrar_pensando(item.ia_nome, item.atraso);
+    }
+    setTimeout(function () {
+        try {
+            _onevent_original(item.packet);
+        } catch (erro) {
+            console.error('Erro ao processar evento', erro);
+        }
+        _processar_fila_eventos();
+    }, item.atraso);
+}
+
+socket.onevent = function (packet) {
+    const dados = packet && Array.isArray(packet.data) ? packet.data : [];
+    const nome = dados[0];
+    const payload = dados.length > 1 ? dados[1] : null;
+    let atraso = 0;
+    if (payload && typeof payload === 'object' && Number.isFinite(Number(payload.atraso))) {
+        atraso = Math.max(0, Math.floor(Number(payload.atraso)));
+    }
+    const ia_nome = (nome === 'narracao' && payload && payload.is_ia) ? (payload.jogador || 'Bot') : null;
+    fila_eventos.push({ packet: packet, atraso: atraso, ia_nome: ia_nome });
+    if (!processando_eventos) {
+        processando_eventos = true;
+        _processar_fila_eventos();
+    }
+};
+
+function narrador_linha(texto) {
+    const log = document.getElementById('narrador_log');
+    if (!log) {
+        return;
+    }
+    const linha = document.createElement('div');
+    linha.className = 'narrador-linha';
+    linha.textContent = texto;
+    log.appendChild(linha);
+    while (log.children.length > 40) {
+        log.removeChild(log.firstChild);
+    }
+    log.scrollTop = log.scrollHeight;
+}
+
+function mostrar_pensando(nome, ms) {
+    const el = document.getElementById('narrador_pensando');
+    if (!el) {
+        return;
+    }
+    el.style.display = 'flex';
+    el.innerHTML = '';
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner-grow spinner-grow-sm text-info me-1';
+    spinner.setAttribute('role', 'status');
+    el.appendChild(spinner);
+    el.appendChild(document.createTextNode(`${nome || 'Bot'} está pensando...`));
+    clearTimeout(el._timer);
+    el._timer = setTimeout(function () {
+        el.style.display = 'none';
+    }, ms + 800);
+}
+
+function esconder_pensando() {
+    const el = document.getElementById('narrador_pensando');
+    if (el) {
+        el.style.display = 'none';
+    }
+}
+
+function limpar_narrador() {
+    const log = document.getElementById('narrador_log');
+    if (log) {
+        log.innerHTML = '';
+    }
+    esconder_pensando();
+}
+
+socket.on('narracao', function (data) {
+    esconder_pensando();
+    if (data && data.texto) {
+        narrador_linha(data.texto);
+    }
+    if (data && data.tipo === 'vitoria') {
+        tocar_fanfarra();
+    }
+});
+
 function getParamSala() {
     const params = new URLSearchParams(window.location.search);
     return (params.get('sala') || 'padrao').trim() || 'padrao';
@@ -378,6 +483,10 @@ socket.on("mudar_pagina", function (data) {
     if (tela_busca) {
         tela_busca.style.display = 'none'; // Fecha a busca caso esteja aberta (navegação do servidor)
     }
+    const painel_narrador = document.getElementById('narrador');
+    if (painel_narrador) {
+        painel_narrador.style.display = data.pag_numero === 0 ? 'none' : 'flex';
+    }
     const logo = document.getElementById('titulo_img');
     const logodiv = document.getElementById('div_titulo_img');
     if (data.pag_numero === 0) {
@@ -385,6 +494,8 @@ socket.on("mudar_pagina", function (data) {
         if (painel_aud) {
             painel_aud.style.display = 'none';
         }
+        limpar_narrador();
+        parar_celebracao();
     }
     {
         const paginas = [
@@ -407,14 +518,14 @@ socket.on("mudar_pagina", function (data) {
             logo.style.width = '25%';
         } else if (data.pag_numero === 3) {
             // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-            logodiv.style.height = '45vh';
+            logodiv.style.height = '26vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '40%';
+            logo.style.width = '34%';
         } else {
             // logo.style.display = "block"; // Exibe o logotipo
-            logodiv.style.height = '45vh';
+            logodiv.style.height = '24vh';
             logo.src = "../static/imagens/titulo.png";
-            logo.style.width = '40%';
+            logo.style.width = '34%';
         }
     }
     mostrar_dica(data.pag_numero);
@@ -732,7 +843,7 @@ socket.on('espera_turno', function (data) {
 
 // Função que atualiza cada rodada, executa a cada inicio de rodada
 socket.on('reset_rodada', function (data) {
-    tocar_som_variante('pegar_dados', [1, 2]);
+    tocar_som_variante('nova_rodada', [1, 2]);
     const jogadores = data.jogadores_nomes;
     const jogadores_dados = data.jogadores_dados_qtd;
     const botao = document.getElementById('bot_confe_fim');
@@ -777,6 +888,8 @@ socket.on('reset_partida', function () {
     if (painel_aud) {
         painel_aud.style.display = 'none';
     }
+    parar_celebracao();
+    limpar_narrador();
 });
 
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
@@ -824,12 +937,11 @@ socket.on('vencedor_da_partida', function (data) {
     tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
     h1_vencedor.innerHTML = `Vitória de ${data.nome}<br> Nessa bagaça!!!`;
+    iniciar_celebracao();
 })
 
 socket.on('soltar_fogos', function () {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height / 2;
-    createFirework(x, y);
+    soltar_fogos();
 })
 
 // Função para construir os cards na página conferência
@@ -1058,6 +1170,7 @@ socket.on("jogar_dados_resultado", function (data) {
         dados.forEach((dado, index) => {
             dado.src = finalResults[index];
         });
+        tocar_som_variante('dado_impacto', [1, 2]);
 
         // Envia confirmação para o servidor
         socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
@@ -1119,12 +1232,21 @@ const sons_disponiveis = {
     rolar_dados: 'rolar_dados.mp3',
     pegar_dados_1: 'pegar_dados_1.mp3',
     pegar_dados_2: 'pegar_dados_2.mp3',
+    pegar_dados_3: 'pegar_dados_3.mp3',
     aposta_1: 'aposta_1.mp3',
     aposta_2: 'aposta_2.mp3',
     virar_papel: 'virar_papel.mp3',
+    virar_papel_2: 'virar_papel_2.mp3',
     mover_peca: 'mover_peca.mp3',
+    mover_peca_2: 'mover_peca_2.mp3',
     embaralhar_1: 'embaralhar_1.mp3',
     embaralhar_2: 'embaralhar_2.mp3',
+    dado_impacto_1: 'dado_impacto_1.mp3',
+    dado_impacto_2: 'dado_impacto_2.mp3',
+    nova_rodada_1: 'nova_rodada_1.mp3',
+    nova_rodada_2: 'nova_rodada_2.mp3',
+    distribuir_1: 'distribuir_1.mp3',
+    distribuir_2: 'distribuir_2.mp3',
 };
 const sons = {};
 
@@ -1284,6 +1406,439 @@ function tocar_som_variante(base, variantes) {
     tocar_som(`${base}_${escolha}`);
 }
 
+// Fanfarra de vitória sintetizada (Web Audio), sem depender de arquivo externo.
+function tocar_fanfarra() {
+    if (!som_ativado || !garantir_contexto_audio()) {
+        return;
+    }
+    const agora = contexto_audio.currentTime;
+    const notas = [523.25, 659.25, 783.99, 1046.5];
+    notas.forEach((freq, i) => {
+        const osc = contexto_audio.createOscillator();
+        const ganho = contexto_audio.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const inicio = agora + i * 0.14;
+        ganho.gain.setValueAtTime(0.0001, inicio);
+        ganho.gain.exponentialRampToValueAtTime(0.22, inicio + 0.03);
+        ganho.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.55);
+        osc.connect(ganho).connect(contexto_audio.destination);
+        osc.start(inicio);
+        osc.stop(inicio + 0.6);
+    });
+}
+
+// Estouro/chiado dos fogos, sintetizado (ruído filtrado com decaimento).
+function tocar_estouro() {
+    if (!som_ativado || !garantir_contexto_audio()) {
+        return;
+    }
+    const agora = contexto_audio.currentTime;
+    const tamanho = Math.floor(contexto_audio.sampleRate * 0.28);
+    const buffer = contexto_audio.createBuffer(1, tamanho, contexto_audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < tamanho; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / tamanho, 2.5);
+    }
+    const fonte = contexto_audio.createBufferSource();
+    fonte.buffer = buffer;
+    const filtro = contexto_audio.createBiquadFilter();
+    filtro.type = 'lowpass';
+    filtro.frequency.value = 2000;
+    const ganho = contexto_audio.createGain();
+    ganho.gain.value = 0.22;
+    fonte.connect(filtro).connect(ganho).connect(contexto_audio.destination);
+    fonte.start(agora);
+}
+
+// ---------------------------------------------------------------------------
+// Música de fundo oficial: tema chiptune em MIDI (rota /tema.mid, que troca a
+// composição a cada 12h — ver tema.py). O navegador não toca MIDI nativamente,
+// então o arquivo é lido, interpretado e sintetizado via Web Audio
+// (onda quadrada/serra/triângulo e ruído) em loop.
+// A composição é original, inspirada em jogos de tabuleiro de SNES/Mega Drive.
+// O som da música é controlado por um botão próprio, independente dos efeitos.
+// ---------------------------------------------------------------------------
+let musica_ativada = localStorage.getItem('dadinho_musica') !== 'off';
+
+// Lê um inteiro em 'variable-length quantity' do MIDI.
+function ler_varint(view, estado) {
+    let valor = 0;
+    while (true) {
+        const byte = view.getUint8(estado.pos++);
+        valor = (valor << 7) | (byte & 0x7f);
+        if (!(byte & 0x80)) {
+            return valor;
+        }
+    }
+}
+
+function ler_texto(view, pos, tamanho) {
+    let texto = '';
+    for (let i = 0; i < tamanho; i++) {
+        texto += String.fromCharCode(view.getUint8(pos + i));
+    }
+    return texto;
+}
+
+// Converte um tick (pulsos) em segundos, respeitando a mapa de andamento.
+function tick_para_segundos(tick, tempos, ppq) {
+    let total = 0;
+    let tick_base = 0;
+    let us_por_batida = tempos[0].us;
+    for (let i = 0; i < tempos.length; i++) {
+        const ponto = tempos[i];
+        if (ponto.tick >= tick) {
+            break;
+        }
+        total += ((ponto.tick - tick_base) / ppq) * (us_por_batida / 1e6);
+        tick_base = ponto.tick;
+        us_por_batida = ponto.us;
+    }
+    total += ((tick - tick_base) / ppq) * (us_por_batida / 1e6);
+    return total;
+}
+
+// Interpreta um arquivo MIDI (formatos 0 e 1) e devolve as notas em segundos.
+function parsear_midi(buffer) {
+    const view = new DataView(buffer);
+    if (buffer.byteLength < 14 || ler_texto(view, 0, 4) !== 'MThd') {
+        throw new Error('Arquivo MIDI inválido');
+    }
+    const tamanho_cabecalho = view.getUint32(4);
+    const total_trilhas = view.getUint16(10);
+    const ppq = view.getUint16(12) || 480;
+    const estado = { pos: 8 + tamanho_cabecalho };
+    const eventos = [];
+    const tempos = [{ tick: 0, us: 500000 }];
+
+    for (let t = 0; t < total_trilhas && estado.pos + 8 <= buffer.byteLength; t++) {
+        if (ler_texto(view, estado.pos, 4) !== 'MTrk') {
+            break;
+        }
+        const tamanho = view.getUint32(estado.pos + 4);
+        estado.pos += 8;
+        const fim = estado.pos + tamanho;
+        let tick = 0;
+        let status = 0;
+        while (estado.pos < fim) {
+            tick += ler_varint(view, estado);
+            let byte = view.getUint8(estado.pos);
+            if (byte & 0x80) {
+                if (byte >= 0x80 && byte <= 0xef) {
+                    status = byte;
+                }
+                estado.pos++;
+            } else {
+                byte = status; // running status
+            }
+            if (byte === 0xff) {
+                const tipo = view.getUint8(estado.pos++);
+                const len = ler_varint(view, estado);
+                if (tipo === 0x51 && len === 3) {
+                    const us = (view.getUint8(estado.pos) << 16) |
+                        (view.getUint8(estado.pos + 1) << 8) |
+                        view.getUint8(estado.pos + 2);
+                    tempos.push({ tick: tick, us: us });
+                }
+                estado.pos += len;
+            } else if (byte === 0xf0 || byte === 0xf7) {
+                estado.pos += ler_varint(view, estado);
+            } else if (byte >= 0x80 && byte <= 0xef) {
+                const tipo = byte & 0xf0;
+                const canal = byte & 0x0f;
+                if (tipo === 0x90 || tipo === 0x80) {
+                    const altura = view.getUint8(estado.pos++);
+                    const velocidade = view.getUint8(estado.pos++);
+                    eventos.push({
+                        tick: tick, canal: canal, altura: altura, velocidade: velocidade,
+                        liga: tipo === 0x90 && velocidade > 0
+                    });
+                } else if (tipo === 0xc0) {
+                    eventos.push({ tick: tick, canal: canal, programa: view.getUint8(estado.pos++) });
+                } else if (tipo === 0xd0) {
+                    estado.pos += 1;
+                } else {
+                    estado.pos += 2;
+                }
+            } else {
+                break; // evento desconhecido: evita laço infinito
+            }
+        }
+        estado.pos = fim;
+    }
+
+    tempos.sort(function (a, b) { return a.tick - b.tick; });
+    const pendentes = new Map();
+    const programas = new Map();
+    const notas = [];
+    let fim_tick = 0;
+
+    eventos.forEach(function (ev) {
+        if (ev.programa !== undefined) {
+            programas.set(ev.canal, ev.programa);
+            return;
+        }
+        const chave = ev.canal + ':' + ev.altura;
+        if (ev.liga) {
+            if (!pendentes.has(chave)) {
+                pendentes.set(chave, []);
+            }
+            pendentes.get(chave).push({
+                tick: ev.tick, velocidade: ev.velocidade,
+                programa: programas.has(ev.canal) ? programas.get(ev.canal) : 0
+            });
+        } else {
+            const pilha = pendentes.get(chave);
+            if (pilha && pilha.length) {
+                const inicio = pilha.shift();
+                const inicio_s = tick_para_segundos(inicio.tick, tempos, ppq);
+                notas.push({
+                    inicio: inicio_s,
+                    dur: Math.max(0.03, tick_para_segundos(ev.tick, tempos, ppq) - inicio_s),
+                    altura: ev.altura,
+                    velocidade: inicio.velocidade,
+                    canal: ev.canal,
+                    programa: inicio.programa
+                });
+                fim_tick = Math.max(fim_tick, ev.tick);
+            }
+        }
+    });
+
+    return { notas: notas, duracao: tick_para_segundos(fim_tick, tempos, ppq) };
+}
+
+// Escolhe a forma de onda do Web Audio a partir do programa General MIDI.
+function onda_do_programa(programa) {
+    if (programa === 81) {
+        return 'sawtooth'; // arpejo estilo Mega Drive
+    }
+    if (programa === 38 || programa === 32 || programa === 33) {
+        return 'triangle'; // baixo
+    }
+    if (programa >= 88 && programa <= 95) {
+        return 'sine';
+    }
+    return 'square'; // melodia estilo SNES
+}
+
+function volume_do_programa(programa) {
+    if (programa === 38 || programa === 32 || programa === 33) {
+        return 0.26;
+    }
+    if (programa === 81) {
+        return 0.055;
+    }
+    if (programa === 82) {
+        return 0.085;
+    }
+    return 0.12;
+}
+
+function criar_buffer_ruido(ctx, segundos) {
+    const tamanho = Math.floor(ctx.sampleRate * segundos);
+    const buffer = ctx.createBuffer(1, tamanho, ctx.sampleRate);
+    const dados = buffer.getChannelData(0);
+    for (let i = 0; i < tamanho; i++) {
+        dados[i] = Math.random() * 2 - 1;
+    }
+    return buffer;
+}
+
+// Percussão sintetizada (bumbo senoidal; caixa/chimbais/pratos com ruído).
+function agendar_percussao(ctx, destino, altura, t0, ruido) {
+    if (altura === 35 || altura === 36) {
+        const osc = ctx.createOscillator();
+        const ganho = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, t0);
+        osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.12);
+        ganho.gain.setValueAtTime(0.55, t0);
+        ganho.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+        osc.connect(ganho).connect(destino);
+        osc.start(t0);
+        osc.stop(t0 + 0.2);
+        return;
+    }
+    const fonte = ctx.createBufferSource();
+    fonte.buffer = ruido;
+    const filtro = ctx.createBiquadFilter();
+    const ganho = ctx.createGain();
+    let duracao = 0.06;
+    if (altura === 38 || altura === 40) { // caixa
+        filtro.type = 'bandpass';
+        filtro.frequency.value = 1800;
+        filtro.Q.value = 0.9;
+        ganho.gain.setValueAtTime(0.32, t0);
+        duracao = 0.16;
+    } else if (altura === 46 || altura === 44) { // chimbal aberto
+        filtro.type = 'highpass';
+        filtro.frequency.value = 6000;
+        ganho.gain.setValueAtTime(0.16, t0);
+        duracao = 0.26;
+    } else if (altura === 49 || altura === 51 || altura === 57) { // prato
+        filtro.type = 'highpass';
+        filtro.frequency.value = 4000;
+        ganho.gain.setValueAtTime(0.22, t0);
+        duracao = 0.9;
+    } else { // chimbal fechado
+        filtro.type = 'highpass';
+        filtro.frequency.value = 7000;
+        ganho.gain.setValueAtTime(0.12, t0);
+        duracao = 0.06;
+    }
+    ganho.gain.exponentialRampToValueAtTime(0.001, t0 + duracao);
+    fonte.connect(filtro).connect(ganho).connect(destino);
+    fonte.start(t0);
+    fonte.stop(t0 + duracao + 0.02);
+}
+
+function agendar_nota(ctx, destino, nota_midi, ruido) {
+    const t0 = nota_midi.inicio;
+    const t1 = nota_midi.inicio + nota_midi.dur;
+    if (nota_midi.canal === 9) {
+        agendar_percussao(ctx, destino, nota_midi.altura, t0, ruido);
+        return;
+    }
+    const osc = ctx.createOscillator();
+    const ganho = ctx.createGain();
+    osc.type = onda_do_programa(nota_midi.programa);
+    osc.frequency.value = 440 * Math.pow(2, (nota_midi.altura - 69) / 12);
+    const volume = volume_do_programa(nota_midi.programa) * (nota_midi.velocidade / 127);
+    const fim_ataque = t0 + 0.012;
+    ganho.gain.setValueAtTime(0.0001, t0);
+    ganho.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), fim_ataque);
+    ganho.gain.setValueAtTime(Math.max(0.0002, volume), Math.max(fim_ataque, t1 - 0.03));
+    ganho.gain.exponentialRampToValueAtTime(0.0001, t1);
+    osc.connect(ganho).connect(destino);
+    osc.start(t0);
+    osc.stop(t1 + 0.02);
+}
+
+// Renderiza o MIDI inteiro para um AudioBuffer (permite loop sem cliques).
+async function renderizar_musica(buffer) {
+    const dados = parsear_midi(buffer);
+    if (!dados.notas.length || dados.duracao <= 0) {
+        return null;
+    }
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineCtx) {
+        return null;
+    }
+    const taxa = 44100;
+    const offline = new OfflineCtx(2, Math.ceil(dados.duracao * taxa), taxa);
+    const mestre = offline.createGain();
+    mestre.gain.value = 0.9;
+    const compressor = offline.createDynamicsCompressor();
+    compressor.threshold.value = -16;
+    compressor.knee.value = 24;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.18;
+    mestre.connect(compressor).connect(offline.destination);
+    const ruido = criar_buffer_ruido(offline, 1.2);
+    dados.notas.forEach(function (n) {
+        agendar_nota(offline, mestre, n, ruido);
+    });
+    return await offline.startRendering();
+}
+
+let ganho_musica = null;
+let fonte_musica = null;
+let buffer_musica = null;
+let promessa_musica = null;
+
+async function iniciar_musica() {
+    if (!musica_ativada || fonte_musica || !garantir_contexto_audio()) {
+        return;
+    }
+    if (!buffer_musica) {
+        if (!promessa_musica) {
+            promessa_musica = (async function () {
+                try {
+                    const resposta = await fetch('/tema.mid');
+                    if (!resposta.ok) {
+                        throw new Error('HTTP ' + resposta.status);
+                    }
+                    buffer_musica = await renderizar_musica(await resposta.arrayBuffer());
+                } catch (erro) {
+                    console.error('Falha ao carregar a música:', erro);
+                    buffer_musica = null;
+                }
+            })();
+        }
+        await promessa_musica;
+        promessa_musica = null;
+    }
+    if (!buffer_musica || !musica_ativada || fonte_musica) {
+        return;
+    }
+    if (!ganho_musica) {
+        ganho_musica = contexto_audio.createGain();
+        ganho_musica.gain.value = 0.5;
+        ganho_musica.connect(contexto_audio.destination);
+    }
+    fonte_musica = contexto_audio.createBufferSource();
+    fonte_musica.buffer = buffer_musica;
+    fonte_musica.loop = true;
+    fonte_musica.connect(ganho_musica);
+    fonte_musica.start();
+}
+
+function parar_musica() {
+    if (!fonte_musica) {
+        return;
+    }
+    try {
+        fonte_musica.stop();
+    } catch (erro) {
+        // fonte já finalizada
+    }
+    fonte_musica.disconnect();
+    fonte_musica = null;
+}
+
+// Botão próprio da música: liga/desliga sem afetar os efeitos sonoros.
+const botao_musica = document.getElementById('botao_musica');
+
+function aplicar_estado_musica() {
+    if (!botao_musica) {
+        return;
+    }
+    botao_musica.textContent = '🎵';
+    botao_musica.classList.toggle('btn-outline-light', musica_ativada);
+    botao_musica.classList.toggle('btn-outline-secondary', !musica_ativada);
+    botao_musica.title = musica_ativada
+        ? 'Música ligada (clique para desligar)'
+        : 'Música desligada (clique para ligar)';
+}
+
+if (botao_musica) {
+    aplicar_estado_musica();
+    botao_musica.addEventListener('click', function () {
+        musica_ativada = !musica_ativada;
+        localStorage.setItem('dadinho_musica', musica_ativada ? 'on' : 'off');
+        aplicar_estado_musica();
+        if (musica_ativada) {
+            iniciar_musica();
+        } else {
+            parar_musica();
+        }
+    });
+}
+
+// A política de autoplay dos navegadores exige um gesto do usuário: a música
+// começa no primeiro clique/toque/tecla e segue em loop até ser desligada.
+function desbloquear_audio() {
+    garantir_contexto_audio();
+    if (musica_ativada) {
+        iniciar_musica();
+    }
+}
+window.addEventListener('pointerdown', desbloquear_audio, { once: true });
+window.addEventListener('keydown', desbloquear_audio, { once: true });
+
 function jogar_dados() {
     socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
@@ -1352,49 +1907,170 @@ document.querySelectorAll('.image-button').forEach(button => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// Fogos de artifício + confetes na comemoração.
+// ---------------------------------------------------------------------------
 const canvas = document.getElementById('fireworks');
 const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+let largura_canvas = window.innerWidth;
+let altura_canvas = window.innerHeight;
+
+function ajustar_canvas() {
+    largura_canvas = window.innerWidth;
+    altura_canvas = window.innerHeight;
+    const escala = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(largura_canvas * escala);
+    canvas.height = Math.floor(altura_canvas * escala);
+    canvas.style.width = largura_canvas + 'px';
+    canvas.style.height = altura_canvas + 'px';
+    ctx.setTransform(escala, 0, 0, escala, 0, 0);
+}
+
+ajustar_canvas();
+window.addEventListener('resize', ajustar_canvas);
 
 let particles = [];
+let confetes = [];
+let celebrando = false;
+let intervalo_fogos = null;
 
-function createFirework(x, y) {
-    const colors = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33A8'];
-    const numParticles = 50;
+const CORES_FOGOS = ['#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33a8', '#00e5ff', '#ffffff'];
 
-    for (let i = 0; i < numParticles; i++) {
+function createFirework(x, y, cor) {
+    const base = cor || CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)];
+    const quantidade = 90 + Math.floor(Math.random() * 70);
+    const preenchido = Math.random() < 0.35;
+    for (let i = 0; i < quantidade; i++) {
+        const angulo = (Math.PI * 2 * i) / quantidade + (Math.random() - 0.5) * 0.25;
+        let velocidade = 1.6 + Math.random() * 4.6;
+        if (preenchido) {
+            velocidade *= 0.35 + Math.random() * 0.65;
+        }
         particles.push({
             x: x,
             y: y,
-            angle: Math.random() * 2 * Math.PI,
-            speed: Math.random() * 5 + 2,
-            radius: Math.random() * 2 + 1,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            life: 100
+            px: x,
+            py: y,
+            vx: Math.cos(angulo) * velocidade,
+            vy: Math.sin(angulo) * velocidade,
+            vida: 1,
+            decaimento: 0.008 + Math.random() * 0.014,
+            cor: Math.random() < 0.22 ? '#ffffff' : base,
+            tamanho: 1.4 + Math.random() * 1.8
         });
     }
 }
 
+function criar_confete(no_topo) {
+    return {
+        x: Math.random() * largura_canvas,
+        y: no_topo ? -20 - Math.random() * 60 : Math.random() * altura_canvas,
+        vx: (Math.random() - 0.5) * 1.6,
+        vy: 1.8 + Math.random() * 3.4,
+        w: 6 + Math.random() * 7,
+        h: 9 + Math.random() * 10,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 0.35,
+        cor: CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)],
+        balanco: Math.random() * Math.PI * 2,
+        balanco_vel: 0.02 + Math.random() * 0.045
+    };
+}
+
+function iniciar_celebracao() {
+    celebrando = true;
+    if (confetes.length === 0) {
+        for (let i = 0; i < 180; i++) {
+            confetes.push(criar_confete(true));
+        }
+    }
+    if (!intervalo_fogos) {
+        disparar_fogos(3);
+        intervalo_fogos = setInterval(function () {
+            if (celebrando) {
+                disparar_fogos(2);
+            }
+        }, 900);
+    }
+    // Evita fogos/confetes rodando sem parar caso o jogador não clique em Ok.
+    clearTimeout(iniciar_celebracao._timer);
+    iniciar_celebracao._timer = setTimeout(parar_celebracao, 30000);
+}
+
+function parar_celebracao() {
+    celebrando = false;
+    confetes = [];
+    clearTimeout(iniciar_celebracao._timer);
+    if (intervalo_fogos) {
+        clearInterval(intervalo_fogos);
+        intervalo_fogos = null;
+    }
+}
+
+function disparar_fogos(quantidade) {
+    for (let i = 0; i < quantidade; i++) {
+        const x = largura_canvas * (0.15 + Math.random() * 0.7);
+        const y = altura_canvas * (0.12 + Math.random() * 0.45);
+        createFirework(x, y);
+    }
+    tocar_estouro();
+}
+
+function soltar_fogos() {
+    disparar_fogos(2 + Math.floor(Math.random() * 3));
+}
+
 function updateParticles() {
-    particles = particles.filter(p => p.life > 0);
-    particles.forEach(p => {
-        p.x += Math.cos(p.angle) * p.speed;
-        p.y += Math.sin(p.angle) * p.speed;
-        p.life -= 2;
-        p.radius *= 0.98; // Decay the radius
+    particles.forEach(function (p) {
+        p.px = p.x;
+        p.py = p.y;
+        p.vy += 0.055; // gravidade
+        p.vx *= 0.99;
+        p.vy *= 0.99;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vida -= p.decaimento;
+    });
+    particles = particles.filter(function (p) {
+        return p.vida > 0 && p.y < altura_canvas + 40;
     });
 }
 
 function drawParticles() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    particles.forEach(p => {
+    ctx.clearRect(0, 0, largura_canvas, altura_canvas);
+
+    // Fogos com rastro (blend aditivo).
+    ctx.globalCompositeOperation = 'lighter';
+    particles.forEach(function (p) {
+        ctx.globalAlpha = Math.max(0, p.vida);
+        ctx.strokeStyle = p.cor;
+        ctx.lineWidth = p.tamanho;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.fill();
-        ctx.closePath();
+        ctx.moveTo(p.px, p.py);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
     });
+    ctx.globalAlpha = 1;
+
+    // Confetes caindo de cima da tela.
+    ctx.globalCompositeOperation = 'source-over';
+    confetes.forEach(function (c) {
+        c.balanco += c.balanco_vel;
+        c.x += c.vx + Math.sin(c.balanco) * 0.9;
+        c.y += c.vy;
+        c.rot += c.vrot;
+        if (c.y > altura_canvas + 30) {
+            Object.assign(c, criar_confete(true));
+        }
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rot);
+        ctx.fillStyle = c.cor;
+        ctx.globalAlpha = 0.95;
+        ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+        ctx.restore();
+    });
+    ctx.globalAlpha = 1;
 }
 
 function animate() {

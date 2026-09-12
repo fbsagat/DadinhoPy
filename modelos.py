@@ -2,6 +2,7 @@ from datetime import datetime
 import secrets
 from flask_socketio import emit
 
+import narrador
 import seed
 
 
@@ -794,6 +795,7 @@ class Partida:
                      to=self.sala_room())
                 emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
                 emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
+            emit('narracao', narrador.narracao_rodada(rodada_numero, dados_mesa), to=self.sala_room())
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
             self.do_lobby.pagina = 1
             return rodada
@@ -851,6 +853,7 @@ class Partida:
         jogador.pontos += 1
         self.vencedor_final = jogador
         self.do_lobby.pagina = 4
+        emit('narracao', narrador.narracao_vitoria(jogador), to=self.sala_room())
         emit('vencedor_da_partida', {'nome': jogador.username}, to=self.sala_room())
         emit('botao_vencedor_ativ', to=jogador.client_id)
         emit("mudar_pagina", {'pag_numero': 4}, to=self.sala_room())
@@ -1098,6 +1101,9 @@ class Rodada:
             'com_coringa': self.com_coringa, 'texto': txt,
         }
         self.da_partida.do_lobby.pagina = 3
+        pensou = narrador.tempo_pensamento(jogador.ia_nivel) if jogador.is_ia else 0
+        emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou),
+             to=self.sala_room())
         emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
 
@@ -1147,10 +1153,17 @@ class Turno:
 
     def executar_turno(self):
         """Executa o turno no front end"""
+        # Narração da jogada (vem antes do card para o cliente encaixar o
+        # "tempo de pensamento" dos bots na fila de animação).
+        pensou = narrador.tempo_pensamento(self.do_jogador.ia_nivel) if self.do_jogador.is_ia else 0
+        emit('narracao',
+             narrador.narracao_aposta(self.do_jogador, self.dado_face, self.dado_qtd, pensou),
+             to=self.sala_room())
         # Mostrar sempre os 3 últimos.
         turnos = self.do_jogador.turnos[-3:][::-1]
         lista_turnos = [[turno.dado_face, turno.dado_qtd] for turno in turnos]
-        emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos},
+        emit('atualizar_turno', {'jogador': self.do_jogador.username, 'lista_turnos': lista_turnos,
+                                 'is_ia': self.do_jogador.is_ia},
              to=self.sala_room())
 
         if self.da_rodada.com_coringa is True:

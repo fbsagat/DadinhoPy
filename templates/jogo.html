@@ -20,25 +20,35 @@
 <body>
     <canvas id="fireworks"></canvas>
 
-    <button id="botao_som" class="btn btn-sm btn-outline-light position-fixed top-0 end-0 m-2"
-        style="z-index: 50;" title="Som ligado/desligado">🔊</button>
+    <div class="position-fixed top-0 end-0 m-2 d-flex flex-column gap-2" style="z-index: 50;">
+        <button id="botao_som" class="btn btn-sm btn-outline-light"
+            title="Efeitos sonoros ligados/desligados">🔊</button>
+        <button id="botao_musica" class="btn btn-sm btn-outline-light"
+            title="Música ligada/desligada">🎵</button>
+    </div>
 
     <div class="position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">
         <button id="botao_tutorial" class="btn btn-sm btn-outline-light" title="Como jogar (tutorial)">❓</button>
         <button id="botao_dicas" class="btn btn-sm btn-outline-warning" title="Ligar/desligar dicas">💡</button>
     </div>
 
-    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 45vh;">
-        <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
-            style="display: block; width: 40%; height: auto;">
+    <div id="narrador" class="narrador" role="log" aria-live="polite" style="display: none;">
+        <div class="narrador-header">🎙️ Narrador</div>
+        <div id="narrador_log" class="narrador-log"></div>
+        <div id="narrador_pensando" class="narrador-pensando" style="display: none;"></div>
     </div>
 
-    <div class="mt-4 container-fluid align-items-center app-main">
+    <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 24vh;">
+        <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
+            style="display: block; width: 34%; height: auto;">
+    </div>
+
+    <div class="mt-2 container-fluid align-items-center app-main">
 
         <!-- TELA JOGADORES INICIO (0) / Sala de Espera -->
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
-            <div class="mb-4">
+            <div class="mb-2">
                 <small class="text-light d-block mb-2">Sala atual: <span id="sala_atual"
                         class="badge text-bg-info">#padrao</span>
                 </small>
@@ -64,9 +74,9 @@
             </div>
 
             <div class="container">
-                <div class="row justify-content-center g-3">
+                <div class="row justify-content-center g-3 align-items-start">
 
-                    <div class="col-md-5">
+                    <div class="col-12 col-lg-5">
                         <div>
                             <input type="text" id="apelido" class="container form-control text-center mx-auto"
                                 style="width: 200px;" onkeydown="verificar_enter(event, 'button')"
@@ -74,7 +84,7 @@
                             <button id="botapel" class="btn btn-primary mt-2" onclick="enviar_apelido()">Pronto</button>
                         </div>
 
-                        <div class="container my-3 p-3 bg-dark text-light border border-info rounded gamer-container"
+                        <div class="container my-2 p-3 bg-dark text-light border border-info rounded gamer-container"
                             id="lista_de_jogadores"
                             style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
                             <small>Aguardando jogadores...</small>
@@ -88,10 +98,10 @@
                         </div>
                     </div>
 
-                    <div class="col-md-5">
+                    <div class="col-12 col-lg-7 d-flex flex-wrap justify-content-center gap-3">
                         <div id="painel_config"
-                            class="container my-3 p-3 bg-dark text-light border border-secondary rounded text-center"
-                            style="--bs-bg-opacity: .8; max-width: 420px;">
+                            class="container my-2 p-3 bg-dark text-light border border-secondary rounded text-center"
+                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
                             <h5 class="text-info mb-3">Configurações da partida</h5>
                             <div class="mb-2">
                                 <label class="form-label small d-block" for="config_nome">Nome da partida</label>
@@ -148,8 +158,8 @@
                         </div>
 
                         <div id="painel_ia"
-                            class="container my-3 p-3 bg-dark text-light border border-primary rounded text-center"
-                            style="--bs-bg-opacity: .8; max-width: 420px;">
+                            class="container my-2 p-3 bg-dark text-light border border-primary rounded text-center"
+                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
                             <h5 class="text-info mb-3">🤖 Jogadores IA</h5>
                             <div class="row g-2 mb-2">
                                 <div class="col-6">

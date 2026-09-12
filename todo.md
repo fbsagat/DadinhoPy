@@ -1,6 +1,6 @@
 # TODO — Dadinho
 
-<!-- Fases 0 a 9 e 11 concluídas. Fase 10 aberta: limpeza/organização e tooling. -->
+<!-- Fases 0 a 9, 11 e 12 concluídas. Fase 10 aberta: limpeza/organização e tooling. -->
 
 Plano em fases para o objetivo atual: **subir o jogo na Vercel, com múltiplas salas, casual only** (sem contas, sem ranking, sem VPS).
 
@@ -213,6 +213,17 @@ Objetivo: bots server-side para preencher partidas reais e permitir testes sem v
 Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py ia.py simular_ia.py api/index.py`; `node --check static/script.js`; boot respondendo 200; simulador headless `python simular_ia.py` (milhares de partidas — hierarquia 4>3>2>1 consistente em 1-4 dados e com/sem coringa, sem travamentos); integração `flask_socketio.test_client` com 1 humano + 2 bots até o fim (humano virou espectador, bots fecharam e voltaram ao lobby); testes de serialização v3, `definir_master`, prontidão dos bots após reset e substituição por IA. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\` (`teste_integracao_ia.py`, `teste_modelo_ia.py`, `teste_substituicao_ia.py`, `sweep_ia.py`).
 
 Notas/limitações registradas (aceitos para o casual):
-- As ações dos bots são instantâneas (serverless-safe): a cadeia inteira de lances aparece de uma vez ao fim do request, sem animação espaçada no cliente.
+- As ações dos bots chegam juntas no fim do request, mas o **cliente** as apresenta em sequência: uma fila serial (`script.js`) aplica o "tempo de pensamento" de cada nível (de `narrador.py`) antes de revelar a jogada, sem timers no servidor.
 - `simular_ia.py` neutraliza `emit` e monta o `Lobby` direto no modelo — é ferramenta de verificação/balanceamento, não roda dentro do app.
 - Sala só com bots é removida no disconnect do último humano; a substituição por IA exige outro humano ativo (senão não faria sentido continuar).
+
+## Fase 12 — Tema oficial rotativo (12h) — concluída
+
+Objetivo: a música de fundo mudar sozinha a cada 12h, de forma compatível com o alvo serverless (sem timers, threads de fundo ou estado persistente).
+
+- [x] **Gerador parametrizável (`gerar_musica.py`)** — a composição passou a ser sorteada dentro de regras musicais (tonalidade, progressão, melodia, arpejo, baixo, contracanto, bateria e BPM); `gerar_variante(seed)` devolve `(midi_bytes, bpm)` e a CLI ganhou `-n/--quantidade` e `--seed` para gerar lotes e escolher uma.
+- [x] **Tema derivado do relógio (`tema.py`)** — `tema_atual()` calcula a janela de 12h (00:00/12:00 UTC), deriva o `seed` por SHA-256 e gera o MIDI; determinístico entre instâncias e cacheado por janela em processo. `DADINHO_TEMA_SEED` congela uma música escolhida.
+- [x] **Rota `GET /tema.mid` (`app.py`)** — serve o MIDI vigente com `Cache-Control` expirando na virada da janela (e headers `X-Dadinho-Tema-Seed`/`Bpm`); fallback para o `static/sons/dadinho_tema.mid` versionado se a geração falhar. Única exceção REST além de `/`.
+- [x] **Cliente (`static/script.js`)** — `iniciar_musica` passou a buscar `/tema.mid` em vez do arquivo estático.
+
+Verificação (local, `.venv`): `py_compile` de `app.py gerar_musica.py tema.py modelos.py funcoes_gerais.py store.py ia.py api/index.py`; `node --check static/script.js`; `tema_atual` idempotente na mesma janela e distinto na janela seguinte; rota `GET /tema.mid` respondendo 200 `audio/midi` com header `MThd` e bytes idênticos entre requests; CLI `gerar_musica.py -n 1 --seed 42` gerando arquivo válido.

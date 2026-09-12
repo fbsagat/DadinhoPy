@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, Response, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
                             atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input,
@@ -13,6 +13,7 @@ import functools
 import os
 import store
 import ia
+import tema
 import threading
 
 app = Flask(__name__)
@@ -230,6 +231,27 @@ def evento_leitura(func):
 @app.route("/")
 def index():
     return render_template("jogo.html")
+
+
+@app.route("/tema.mid")
+def tema_midi():
+    """
+    Serve o tema oficial vigente (Fase 12). A música é gerada
+    deterministicamente a partir da janela de 12h (ver `tema.py`), então todas
+    as instâncias devolvem a mesma composição sem persistência nem timers.
+    Cache-Control expira exatamente na virada da janela; se a geração falhar,
+    cai no MIDI estático versionado como fallback.
+    """
+    try:
+        midi, bpm, seed = tema.tema_atual()
+    except Exception:
+        return send_from_directory(os.path.join(app.root_path, 'static', 'sons'),
+                                   'dadinho_tema.mid', mimetype='audio/midi')
+    resposta = Response(midi, mimetype='audio/midi')
+    resposta.headers['Cache-Control'] = f'public, max-age={max(0, tema.segundos_ate_virada())}'
+    resposta.headers['X-Dadinho-Tema-Seed'] = str(seed)
+    resposta.headers['X-Dadinho-Tema-Bpm'] = str(bpm)
+    return resposta
 
 
 @socketio.on('connect')
