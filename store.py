@@ -18,6 +18,7 @@ se a função serverless morrer sem disparar o GC do disconnect — antes a sala
 
 - dadinho:sala:<id>      -> JSON do Lobby (TTL renovado a cada salvar_sala)
 - dadinho:resumo:<id>    -> resumo leve p/ a busca de partidas (TTL)
+- dadinho:resumos        -> SET com os ids que têm resumo (evita SCAN na busca)
 - dadinho:sid:<client_id> -> sala_id do jogador (TTL; índice p/ achar_jogador
                              sem varrer o store)
 - dadinho:lobby_seq      -> contador INCR p/ numerar lobbies novos (B8)
@@ -71,6 +72,7 @@ class ArmazenamentoMemoria:
         self._resumos = {}
         self._sids = {}
         self._contador = 0
+        self._contador_trava = threading.Lock()
 
     def carregar_sala(self, sala_id):
         return self._salas.get(sala_id)
@@ -85,8 +87,11 @@ class ArmazenamentoMemoria:
         return list(self._salas.values())
 
     def proximo_numero(self):
-        self._contador += 1
-        return self._contador
+        # INCR local precisa ser atômico: com async_mode 'threading' várias
+        # requisições da instância quente chamam isto em paralelo (Fase 15).
+        with self._contador_trava:
+            self._contador += 1
+            return self._contador
 
     def salvar_resumo(self, sala_id, resumo):
         self._resumos[sala_id] = resumo
@@ -117,6 +122,9 @@ class ArmazenamentoUpstash:
     PREFIXO_RESUMO = "dadinho:resumo:"
     PREFIXO_SID = "dadinho:sid:"
     CHAVE_SEQUENCIA = "dadinho:lobby_seq"
+    # Índice (SET) com os ids das salas que têm resumo, para a busca não varrer
+    # o keyspace com SCAN a cada listagem.
+    CHAVE_RESUMOS = "dadinho:resumos"
     # TTL (segundos): janela generosa; como é renovado a cada salvar_sala, salas
     # ativas nunca expiram — só as órfãs (instância morreu sem disconnect).
     TTL_SALA = 7 * 24 * 3600
@@ -147,6 +155,19 @@ class ArmazenamentoUpstash:
         """
         dados = json.dumps(list(args), ensure_ascii=False).encode("utf-8")
         pedido = urllib.request.Request(self._base, data=dados, method="POST")
+        pedido.add_header("Authorization", "Bearer " + self._token)
+        pedido.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(pedido, timeout=10) as resposta:
+            texto = resposta.read().decode("utf-8")
+        return json.loads(texto) if texto else None
+
+    def _pipeline(self, comandos):
+        """
+        Executa vários comandos num único request (endpoint /pipeline da Upstash):
+        reduz round-trips em operações que gravam mais de uma chave (sala+resumo).
+        """
+        dados = json.dumps(comandos, ensure_ascii=False).encode("utf-8")
+        pedido = urllib.request.Request(f"{self._base}/pipeline", data=dados, method="POST")
         pedido.add_header("Authorization", "Bearer " + self._token)
         pedido.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(pedido, timeout=10) as resposta:
@@ -221,23 +242,53 @@ class ArmazenamentoUpstash:
 
     def salvar_resumo(self, sala_id, resumo):
         bloco = json.dumps(resumo, ensure_ascii=False)
-        self._comando("SET", self._chave_resumo(sala_id), bloco, "EX", self.TTL_RESUMO)
+        # Grava o resumo e inscreve a sala no índice de busca num só request.
+        self._pipeline([
+            ["SET", self._chave_resumo(sala_id), bloco, "EX", self.TTL_RESUMO],
+            ["SADD", self.CHAVE_RESUMOS, sala_id],
+        ])
 
     def remover_resumo(self, sala_id):
-        self._comando("DEL", self._chave_resumo(sala_id))
+        self._pipeline([
+            ["DEL", self._chave_resumo(sala_id)],
+            ["SREM", self.CHAVE_RESUMOS, sala_id],
+        ])
 
     def listar_resumos(self):
+        # Caminho rápido: SMEMBERS no índice + MGET nos resumos (2 comandos),
+        # em vez de SCAN + um GET por sala.
+        resposta = self._comando("SMEMBERS", self.CHAVE_RESUMOS)
+        ids = (resposta or {}).get("result") or []
+        if not ids:
+            # Índice vazio (deploy antigo): reconstrói a partir do keyspace.
+            ids = [chave[len(self.PREFIXO_RESUMO):] for chave in self._varrer_chaves(self.PREFIXO_RESUMO)]
+            for lote in self._lotes(ids, 100):
+                self._comando("SADD", self.CHAVE_RESUMOS, *lote)
+            if not ids:
+                return []
+
         resumos = []
-        for chave in self._varrer_chaves(self.PREFIXO_RESUMO):
-            resposta = self._pedido("GET", f"get/{urllib.parse.quote(chave)}")
-            bloco = (resposta or {}).get("result")
-            if not bloco:
-                continue
-            try:
-                resumos.append(json.loads(bloco))
-            except (ValueError, TypeError):
-                continue
+        mortos = []
+        for lote in self._lotes(ids, 100):
+            resposta = self._comando("MGET", *[self._chave_resumo(i) for i in lote])
+            valores = (resposta or {}).get("result") or []
+            for sala_id, bloco in zip(lote, valores):
+                if not bloco:
+                    mortos.append(sala_id)
+                    continue
+                try:
+                    resumos.append(json.loads(bloco))
+                except (ValueError, TypeError):
+                    continue
+        if mortos:
+            # Resumos expirados (TTL) saem do índice na próxima listagem.
+            self._comando("SREM", self.CHAVE_RESUMOS, *mortos)
         return resumos
+
+    @staticmethod
+    def _lotes(lista, tamanho):
+        for inicio in range(0, len(lista), tamanho):
+            yield lista[inicio:inicio + tamanho]
 
     def registrar_sid(self, client_id, sala_id):
         self._comando(
@@ -288,11 +339,29 @@ def proximo_numero():
     return armazenamento.proximo_numero()
 
 
+_resumos_assinatura = {}
+_resumos_assinatura_guard = threading.Lock()
+
+
 def salvar_resumo(sala_id, resumo):
+    """
+    Evita reescrever o resumo da busca quando o conteúdo não mudou: muitos
+    eventos chamam `atualizar_lista_usuarios` sem alterar os campos relevantes
+    (ex.: revelação de seed, reconexões), e cada gravação custa comandos na
+    Upstash. O cache é por instância; entre instâncias a próxima divergência
+    corrige.
+    """
+    assinatura = json.dumps(resumo, ensure_ascii=False, sort_keys=True)
+    with _resumos_assinatura_guard:
+        if _resumos_assinatura.get(sala_id) == assinatura:
+            return
+        _resumos_assinatura[sala_id] = assinatura
     armazenamento.salvar_resumo(sala_id, resumo)
 
 
 def remover_resumo(sala_id):
+    with _resumos_assinatura_guard:
+        _resumos_assinatura.pop(sala_id, None)
     armazenamento.remover_resumo(sala_id)
 
 

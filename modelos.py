@@ -14,7 +14,7 @@ def sala_room(sala_id):
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 3
+VERSAO_ATUAL = 5
 
 
 def _migrar_v1_para_v2(dados):
@@ -39,9 +39,25 @@ def _migrar_v2_para_v3(dados):
     return dados
 
 
+def _migrar_v3_para_v4(dados):
+    """v3 -> v4 (Fase 15): espectadores deixam de ser jogadores do lobby."""
+    dados.setdefault('espectadores', [])
+    return dados
+
+
+def _migrar_v4_para_v5(dados):
+    """v4 -> v5 (Fase 15): numeração de partida própria, p/ podar histórico."""
+    if 'proxima_partida_num' not in dados:
+        ultimo = max((p.get('partida_num', 0) for p in dados.get('partidas', []) or []), default=0)
+        dados['proxima_partida_num'] = int(ultimo) + 1
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
+    3: _migrar_v3_para_v4,
+    4: _migrar_v4_para_v5,
 }
 
 
@@ -75,11 +91,12 @@ class Jogador:
         # Bots não têm socket e nunca viram master.
         self.is_ia = False
         self.ia_nivel = None
-        # Verificação de integridade (provably fair): compromisso público e o
-        # nonce secreto do jogador (revelado na auditoria). Bots têm o nonce
-        # gerado pelo servidor; humanos geram no cliente.
+        # Verificação de integridade (provably fair): o jogador publica só o
+        # compromisso (hash) na sala de espera; o nonce é revelado depois, na
+        # fase de revelação, e nunca fica com o servidor antes disso.
         self.compromisso_seed = None
         self.nonce_seed = None
+        self.revelado_seed = False
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -96,9 +113,11 @@ class Jogador:
         jogador.is_ia = True
         jogador.ia_nivel = int(nivel)
         jogador.pronto = True
-        # Bots também contribuem com nonce (gerado pelo servidor) para a seed.
+        # Bots também contribuem com nonce (gerado pelo servidor) para a seed e
+        # já vêm revelados (o servidor não precisa de fase de revelação p/ eles).
         jogador.nonce_seed = seed.gerar_nonce()
         jogador.compromisso_seed = seed.compromisso(jogador.nonce_seed)
+        jogador.revelado_seed = True
         return jogador
 
     def para_dict(self, lobby):
@@ -133,6 +152,7 @@ class Jogador:
             'ia_nivel': self.ia_nivel,
             'compromisso_seed': self.compromisso_seed,
             'nonce_seed': self.nonce_seed,
+            'revelado_seed': self.revelado_seed,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -157,6 +177,13 @@ class Lobby:
         self.sala_id = sala_id
         self.lobby_num = lobby_numero
         self.jogadores = []
+        # Quem assiste a uma partida em andamento sem jogar. Fica fora de
+        # `jogadores` para não contar em vitória, lotação ou limite de dados;
+        # vira jogador quando o lobby reinicia (resetar_para_lobby).
+        self.espectadores = []
+        # Numeração monotônica das partidas (mesmo podando o histórico antigo,
+        # o `partida_num` usado pela seed/auditoria nunca se repete).
+        self.proxima_partida_num = 1
         self.partidas = []
         self.conferiram_vencedor = 0
         # Página atual da sala (0=lobby, 1=rolar dados, 2=turnos, 3=conferência, 4=vitória).
@@ -247,7 +274,9 @@ class Lobby:
             'criado_em': self.criado_em.isoformat() if self.criado_em else None,
             'config': self.config,
             'seed_info': self.seed_info,
+            'proxima_partida_num': self.proxima_partida_num,
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
+            'espectadores': [jogador.para_dict(self) for jogador in self.espectadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
         }
 
@@ -272,6 +301,50 @@ class Lobby:
             dados['versao'] = VERSAO_ATUAL
         return dados
 
+    @staticmethod
+    def _jogador_de_dict(dados_jogador):
+        """Reconstrói um Jogador a partir do dict serializado (sem vínculos de árvore)."""
+        jogador = Jogador(client_id=dados_jogador['client_id'],
+                          master=dados_jogador.get('master', False))
+        jogador.username = dados_jogador.get('username')
+        jogador.chave_secreta = dados_jogador.get('chave_secreta', '')
+        jogador.pontos = dados_jogador.get('pontos', 0)
+        jogador.dados = list(dados_jogador.get('dados') or [])
+        jogador.dados_qtd = dados_jogador.get('dados_qtd', 0)
+        jogador.joguei_dados = bool(dados_jogador.get('joguei_dados', False))
+        entrou = dados_jogador.get('entrou')
+        jogador.entrou = datetime.fromisoformat(entrou) if entrou else datetime.now()
+        jogador.confirmou_rodada = bool(dados_jogador.get('confirmou_rodada', False))
+        jogador.confirmou_vencedor = bool(dados_jogador.get('confirmou_vencedor', False))
+        jogador.pronto = bool(dados_jogador.get('pronto', False))
+        desconectado_em = dados_jogador.get('desconectado_em')
+        jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
+        jogador.is_ia = bool(dados_jogador.get('is_ia', False))
+        jogador.ia_nivel = dados_jogador.get('ia_nivel')
+        jogador.compromisso_seed = dados_jogador.get('compromisso_seed')
+        jogador.nonce_seed = dados_jogador.get('nonce_seed')
+        jogador.revelado_seed = bool(dados_jogador.get('revelado_seed', False))
+        return jogador
+
+    @staticmethod
+    def _religar_jogador(dados_jogador, jogador, lobby):
+        """Religa as referências vivas (partida/rodada/turno atuais e históricos)."""
+        partida_idx = dados_jogador.get('partida_atual_idx')
+        if partida_idx is not None and 0 <= partida_idx < len(lobby.partidas):
+            partida = lobby.partidas[partida_idx]
+            jogador.partida_atual = partida
+            rodada_idx = dados_jogador.get('rodada_atual_idx')
+            if rodada_idx is not None and 0 <= rodada_idx < len(partida.rodadas):
+                rodada = partida.rodadas[rodada_idx]
+                jogador.rodada_atual = rodada
+                turno_idx = dados_jogador.get('turno_atual_idx')
+                if turno_idx is not None and 0 <= turno_idx < len(rodada.turnos):
+                    jogador.turno_atual = rodada.turnos[turno_idx]
+        jogador.partidas = [p for p in lobby.partidas if jogador in p.jogadores]
+        jogador.rodadas = []
+        for partida in jogador.partidas:
+            jogador.rodadas.extend(r for r in partida.rodadas if jogador in r.jogadores)
+
     @classmethod
     def de_dict(cls, dados):
         """
@@ -291,31 +364,23 @@ class Lobby:
         lobby.config = dict(cls.config_padrao())
         lobby.config.update(dados.get('config') or {})
         lobby.seed_info = dados.get('seed_info')
+        ultimo_num = max((p.get('partida_num', 0) for p in dados.get('partidas', []) or []), default=0)
+        lobby.proxima_partida_num = dados.get('proxima_partida_num') or (int(ultimo_num) + 1)
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):
-            jogador = Jogador(client_id=dados_jogador['client_id'],
-                              master=dados_jogador.get('master', False))
-            jogador.username = dados_jogador.get('username')
-            jogador.chave_secreta = dados_jogador.get('chave_secreta', '')
-            jogador.pontos = dados_jogador.get('pontos', 0)
-            jogador.dados = list(dados_jogador.get('dados') or [])
-            jogador.dados_qtd = dados_jogador.get('dados_qtd', 0)
-            jogador.joguei_dados = bool(dados_jogador.get('joguei_dados', False))
-            entrou = dados_jogador.get('entrou')
-            jogador.entrou = datetime.fromisoformat(entrou) if entrou else datetime.now()
-            jogador.confirmou_rodada = bool(dados_jogador.get('confirmou_rodada', False))
-            jogador.confirmou_vencedor = bool(dados_jogador.get('confirmou_vencedor', False))
-            jogador.pronto = bool(dados_jogador.get('pronto', False))
-            desconectado_em = dados_jogador.get('desconectado_em')
-            jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
-            jogador.is_ia = bool(dados_jogador.get('is_ia', False))
-            jogador.ia_nivel = dados_jogador.get('ia_nivel')
-            jogador.compromisso_seed = dados_jogador.get('compromisso_seed')
-            jogador.nonce_seed = dados_jogador.get('nonce_seed')
+            jogador = cls._jogador_de_dict(dados_jogador)
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
+
+        # Espectadores ficam fora do registro de jogadores (não participam das
+        # partidas), mas precisam existir como Jogador para auth/snapshot.
+        lobby.espectadores = []
+        for dados_jogador in dados.get('espectadores', []):
+            espectador = cls._jogador_de_dict(dados_jogador)
+            espectador.lobby_atual = lobby
+            lobby.espectadores.append(espectador)
 
         for dados_partida in dados.get('partidas', []):
             jogadores_partida = [jogadores[cid] for cid in dados_partida.get('jogadores_ids', [])
@@ -358,21 +423,9 @@ class Lobby:
             lobby.partidas.append(partida)
 
         for dados_jogador, jogador in zip(dados.get('jogadores', []), lobby.jogadores):
-            partida_idx = dados_jogador.get('partida_atual_idx')
-            if partida_idx is not None and 0 <= partida_idx < len(lobby.partidas):
-                partida = lobby.partidas[partida_idx]
-                jogador.partida_atual = partida
-                rodada_idx = dados_jogador.get('rodada_atual_idx')
-                if rodada_idx is not None and 0 <= rodada_idx < len(partida.rodadas):
-                    rodada = partida.rodadas[rodada_idx]
-                    jogador.rodada_atual = rodada
-                    turno_idx = dados_jogador.get('turno_atual_idx')
-                    if turno_idx is not None and 0 <= turno_idx < len(rodada.turnos):
-                        jogador.turno_atual = rodada.turnos[turno_idx]
-            jogador.partidas = [p for p in lobby.partidas if jogador in p.jogadores]
-            jogador.rodadas = []
-            for partida in jogador.partidas:
-                jogador.rodadas.extend(r for r in partida.rodadas if jogador in r.jogadores)
+            cls._religar_jogador(dados_jogador, jogador, lobby)
+        for dados_jogador, espectador in zip(dados.get('espectadores', []), lobby.espectadores):
+            cls._religar_jogador(dados_jogador, espectador, lobby)
 
         return lobby
 
@@ -384,7 +437,8 @@ class Lobby:
         está ativa; None no fluxo legado.
         """
         emit('reset_partida', to=self.sala_room())  # Arruma algumas coisas da partida anterior no front-end
-        partida_numero = len(self.partidas) + 1
+        partida_numero = self.proxima_partida_num
+        self.proxima_partida_num += 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
                           dados_qtd=dados_qtd, com_coringa=bool(self.config.get('com_coringa', True)),
                           seed_info=seed_info)
@@ -462,28 +516,23 @@ class Lobby:
     def preparar_seed(self):
         """
         Garante que o servidor já tem uma entropia comprometida ANTES de aceitar
-        nonces de jogadores: gera o nonce do servidor e, se possível, fixa um
-        round futuro do beacon drand (a entropia externa). Idempotente.
+        nonces de jogadores. A entropia é o nonce secreto do servidor (só
+        revelado na auditoria), o que mantém os dados imprevisíveis mesmo com as
+        revelações públicas dos nonces dos jogadores. Idempotente.
         """
         if self.seed_info is not None:
             return self.seed_info
         nonce_servidor = seed.gerar_nonce()
-        info = {
+        self.seed_info = {
             'versao': seed.VERSAO_ATUAL,
             'fonte': 'servidor',
             'entropia_externa': nonce_servidor,
             'nonce_servidor': nonce_servidor,
             'compromisso_servidor': seed.compromisso(nonce_servidor),
-            'beacon': None,
             'compromissos': {},
             'seed_final': None,
         }
-        plano = seed.beacon_planejar()
-        if plano:
-            info['fonte'] = 'beacon'
-            info['beacon'] = plano
-        self.seed_info = info
-        return info
+        return self.seed_info
 
     def sincronizar_compromissos(self):
         """Copia para o seed_info os compromissos de todos os jogadores (inclusive bots)."""
@@ -496,19 +545,54 @@ class Lobby:
             if jogador.compromisso_seed
         }
 
-    def registrar_compromisso(self, jogador, nonce, compromisso_valor):
+    def registrar_compromisso(self, jogador, compromisso_valor):
         """
-        Valida e guarda o nonce/compromisso de um jogador. Devolve True se aceito.
+        Fase de compromisso (provably fair): aceita apenas o hash do nonce do
+        jogador, sem receber o nonce. O primeiro compromisso é imutável (impede
+        o jogador de "escolher" o nonce depois). Devolve True se aceito.
         """
-        if not seed.valido_nonce(nonce):
+        if not seed.valido_nonce(compromisso_valor):
             return False
-        if seed.compromisso(nonce) != compromisso_valor:
+        if jogador.compromisso_seed:
+            # Já comprometeu: ignora tentativas de troca.
             return False
-        jogador.nonce_seed = nonce
-        jogador.compromisso_seed = compromisso_valor
+        # Garante que a entropia do servidor foi comprometida ANTES deste nonce.
         self.preparar_seed()
+        if self.seed_info is None:
+            return False
+        jogador.compromisso_seed = compromisso_valor
+        jogador.nonce_seed = None
+        jogador.revelado_seed = False
         self.seed_info.setdefault('compromissos', {})[jogador.client_id] = compromisso_valor
         return True
+
+    def registrar_revelacao(self, jogador, nonce):
+        """
+        Fase de revelação: valida o nonce contra o compromisso já publicado e o
+        guarda para derivar a seed. Devolve True se aceito.
+        """
+        if not jogador.compromisso_seed:
+            return False
+        if not seed.valido_nonce(nonce):
+            return False
+        if seed.compromisso(nonce) != jogador.compromisso_seed:
+            return False
+        jogador.nonce_seed = nonce
+        jogador.revelado_seed = True
+        return True
+
+    def compromissos_completos(self):
+        """True se todos os jogadores (inclusive bots) já publicaram o compromisso."""
+        return all(jogador.compromisso_seed for jogador in self.jogadores)
+
+    def revelacoes_pendentes(self):
+        """
+        True se algum humano comprometeu-se mas ainda não revelou o nonce (a
+        partida não deve começar antes da revelação, senão o nonce cairia no
+        fallback H(compromisso)).
+        """
+        return any(jogador.compromisso_seed and not jogador.revelado_seed and not jogador.is_ia
+                   for jogador in self.jogadores)
 
     def info_publica_seed(self):
         """Payload público do estado do commit-reveal (sem revelar nonces)."""
@@ -525,26 +609,16 @@ class Lobby:
 
     def finalizar_seed(self):
         """
-        Resolve a entropia externa (beacon, com fallback para o nonce do servidor),
-        coleta os nonces dos participantes e fixa a seed_final. Devolve o dict de
-        auditoria (também guardado no seed_info) ou None se a verificação está off.
+        Fixa a seed_final usando o nonce secreto do servidor como entropia e os
+        nonces revelados pelos participantes (revelação pública). Devolve o dict
+        de auditoria (também guardado no seed_info) ou None se a verificação off.
         """
         if not self.config.get('verificacao_ativa'):
             return None
         info = self.preparar_seed()
 
-        entropia = None
-        if info.get('beacon'):
-            beacon = info['beacon']
-            entropia = seed.beacon_buscar(beacon.get('chain'), beacon.get('round'))
-            if entropia:
-                info['fonte'] = 'beacon'
-                info['beacon'] = dict(beacon, randomness=entropia)
-        if not entropia:
-            info['fonte'] = 'servidor'
-            info['beacon'] = None
-            entropia = info['nonce_servidor']
-        info['entropia_externa'] = entropia
+        info['fonte'] = 'servidor'
+        info['entropia_externa'] = info['nonce_servidor']
 
         nonces = {}
         participantes = []
@@ -570,7 +644,7 @@ class Lobby:
             })
 
         info['participantes'] = participantes
-        info['seed_final'] = seed.derivar_seed(info['fonte'], entropia, nonces)
+        info['seed_final'] = seed.derivar_seed(info['fonte'], info['entropia_externa'], nonces)
         return info
 
     def contar_prontos(self):
@@ -595,6 +669,11 @@ class Lobby:
             if not jogador.master and not jogador.pronto:
                 nome = jogador.username or 'Jogador'
                 return False, {'chave': 'msg.motivo.nao_pronto', 'params': {'nome': nome}}
+        # Verificação ativa: a partida só começa quando todos revelaram o nonce
+        # (senão a seed usaria H(compromisso) para alguém e a auditoria do
+        # jogador acusaria "sem revelação").
+        if self.config.get('verificacao_ativa') and self.revelacoes_pendentes():
+            return False, {'chave': 'msg.motivo.aguardando_revelacao'}
         return True, {'chave': 'msg.motivo.tudo_pronto'}
 
     def resumo_partida(self):
@@ -633,24 +712,45 @@ class Lobby:
         # auditoria) e gera novos para os bots da próxima partida.
         self.seed_info = None
         for jogador in self.jogadores:
-            jogador.compromisso_seed = None
-            jogador.nonce_seed = None
-            if jogador.is_ia:
-                jogador.nonce_seed = seed.gerar_nonce()
-                jogador.compromisso_seed = seed.compromisso(jogador.nonce_seed)
-            jogador.partida_atual = None
-            jogador.rodada_atual = None
-            jogador.turno_atual = None
-            jogador.dados = []
-            jogador.dados_qtd = 0
-            jogador.joguei_dados = False
-            jogador.confirmou_rodada = False
-            jogador.confirmou_vencedor = False
-            # Bots continuam prontos para a próxima partida; humanos recomeçam.
-            jogador.pronto = jogador.is_ia
-            jogador.partidas = []
-            jogador.rodadas = []
-            jogador.turnos = []
+            self._resetar_estado_jogador(jogador)
+        # Espectadores viram jogadores na próxima partida (precisam de apelido e
+        # de ficar prontos como qualquer humano).
+        for espectador in self.espectadores:
+            self._resetar_estado_jogador(espectador)
+            self.jogadores.append(espectador)
+        self.espectadores = []
+        # Poda o histórico: a árvore antiga (rodadas/turnos/dados) não é mais
+        # usada e faria o blob persistido crescer a cada partida. Mantém só a
+        # última (snapshot/auditoria imediatos) e a numeração continua pela
+        # `proxima_partida_num`.
+        if len(self.partidas) > 1:
+            self.partidas = self.partidas[-1:]
+
+    @staticmethod
+    def _resetar_estado_jogador(jogador):
+        """
+        Zera o estado de partida/rodada de um jogador, preservando apelido,
+        pontos e master. Bots seguem prontos; humanos recomeçam não prontos.
+        """
+        jogador.compromisso_seed = None
+        jogador.nonce_seed = None
+        jogador.revelado_seed = False
+        if jogador.is_ia:
+            jogador.nonce_seed = seed.gerar_nonce()
+            jogador.compromisso_seed = seed.compromisso(jogador.nonce_seed)
+            jogador.revelado_seed = True
+        jogador.partida_atual = None
+        jogador.rodada_atual = None
+        jogador.turno_atual = None
+        jogador.dados = []
+        jogador.dados_qtd = 0
+        jogador.joguei_dados = False
+        jogador.confirmou_rodada = False
+        jogador.confirmou_vencedor = False
+        jogador.pronto = jogador.is_ia
+        jogador.partidas = []
+        jogador.rodadas = []
+        jogador.turnos = []
 
     def verificar_apelido(self, nome):
         """
@@ -658,6 +758,7 @@ class Lobby:
         :param nome: Nome que vem do front-end.
         """
         nomes = [jogador.username for jogador in self.jogadores]
+        nomes += [espectador.username for espectador in self.espectadores]
         if nome not in nomes:  # Verifica se o nome é único
             return nome  # Se for único, retorna o nome original
             # Se o nome já existe, adiciona um índice até que o nome se torne único
@@ -690,8 +791,9 @@ class Lobby:
                 humanos[0].master = True
 
     def tem_humano(self):
-        """True se ainda há ao menos um jogador humano na sala (ativo ou na janela de graça)."""
-        return any(not j.is_ia for j in self.jogadores)
+        """True se ainda há ao menos um humano (jogador ou espectador) na sala."""
+        return (any(not j.is_ia for j in self.jogadores)
+                or any(not j.is_ia for j in self.espectadores))
 
     def adicionar_jogador(self, jogador):
         """
@@ -717,6 +819,9 @@ class Lobby:
         for jogador in self.jogadores:
             if jogador.client_id == client_id:
                 return jogador
+        for espectador in self.espectadores:
+            if espectador.client_id == client_id:
+                return espectador
         return None
 
     def buscar_jogador_pela_chave(self, chave_secreta):
@@ -730,6 +835,9 @@ class Lobby:
         for jogador in self.jogadores:
             if jogador.chave_secreta == chave_secreta:
                 return jogador
+        for espectador in self.espectadores:
+            if espectador.chave_secreta == chave_secreta:
+                return espectador
         return None
 
     def contar_jogadores(self, nome=False):
@@ -1198,6 +1306,19 @@ class Rodada:
         emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
 
+    def contexto_aposta(self):
+        """
+        Estado da aposta usado pelo cliente para calibrar o mínimo do input de
+        quantidade (mesma regra de `explicar_jogada`, resolvida no navegador).
+        """
+        ultima = self.turnos[-1] if self.turnos else None
+        return {
+            'turno_num': len(self.turnos),
+            'com_coringa': self.com_coringa,
+            'coringa_atual_qtd': self.coringa_atual_qtd,
+            'ultima_aposta': ({'face': ultima.dado_face, 'qtd': ultima.dado_qtd} if ultima else None),
+        }
+
     def atualizar_front_pro_da_vez(self, jogador_atual):
         """
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
@@ -1206,8 +1327,9 @@ class Rodada:
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              to=self.sala_room())
-        emit('meu_turno', {'username': jogador_atual.username, 'turno_num': len(self.turnos)},
-             to=jogador_atual.client_id)
+        payload = {'username': jogador_atual.username}
+        payload.update(self.contexto_aposta())
+        emit('meu_turno', payload, to=jogador_atual.client_id)
         for jogador in self.da_partida.jogadores:
             if jogador != jogador_atual:
                 emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)

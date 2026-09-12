@@ -636,6 +636,31 @@ h5,
     filter: drop-shadow(0 8px 22px rgba(13, 202, 240, 0.22));
 }
 
+/* Subtítulo / assinatura do jogo (MemeTrigger). */
+.tagline-jogo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.85;
+    margin: 0;
+}
+
+.tagline-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.tagline-link:hover,
+.tagline-link:focus {
+    color: inherit;
+    opacity: 1;
+    border-bottom-color: currentColor;
+}
+
 /* Narrador em telas pequenas: sobe para não disputar espaço com o conteúdo. */
 @media (max-width: 768px) {
     .narrador {
@@ -736,7 +761,7 @@ h5,
 }
 
 .jogada-destaque::after {
-    content: 'ÚLTIMA';
+    content: attr(data-rotulo);
     position: absolute;
     top: -9px;
     right: 6px;

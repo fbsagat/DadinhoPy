@@ -3,6 +3,8 @@ let chave_secreta = '';
 let nome_jogador = '';
 let sala_atual = getParamSala();
 let sou_master = false;
+// Contexto da aposta recebido em `meu_turno` para calibrar o mínimo do input.
+let contexto_min_aposta = null;
 
 // Imagens dos dados (1-6): constante global reutilizada na animação de rolagem.
 const diceImages = [
@@ -316,7 +318,12 @@ socket.on('partidas_listadas', function (data) {
 
 socket.on('sala_cheia', function () {
     mostrar_alerta(t('msg.sala_cheia'), 'aviso')
-        .then(() => ir_para_sala('padrao'));
+        .then(() => {
+            // Evita loop de reload quando a própria sala padrão está cheia.
+            if (sala_atual !== 'padrao') {
+                ir_para_sala('padrao');
+            }
+        });
 });
 
 socket.on('iniciar_negado', function (data) {
@@ -441,10 +448,12 @@ socket.on("update_user_list", (data) => {
 });
 
 socket.on('atualizar_pontos', function (data) {
-    data.nomes.forEach((nome, index) => {
+    (data.nomes || []).forEach((nome, index) => {
         const pontos = document.getElementById(`pontos_${nome}`);
-        pontos.textContent = data.pontos[index];
-    })
+        if (pontos) {
+            pontos.textContent = data.pontos[index];
+        }
+    });
 })
 
 // Funções para o "master" do servidor
@@ -604,6 +613,11 @@ socket.on("mudar_pagina", function (data) {
         logo.src = "../static/imagens/titulo.png";
         logo.style.width = '34%';
     }
+    // Assinatura do jogo: some durante as telas de jogo (1 e 2) para dar espaço.
+    const subtitulo = document.getElementById('subtitulo_jogo');
+    if (subtitulo) {
+        subtitulo.style.display = (data.pag_numero === 1 || data.pag_numero === 2) ? 'none' : 'block';
+    }
     mostrar_dica(data.pag_numero);
 });
 
@@ -692,6 +706,7 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
     if (destaque) {
         diceDiv.classList.add('jogada-destaque');
+        diceDiv.setAttribute('data-rotulo', t('js.jogada.ultima'));
     }
 
     const imgDiv = document.createElement('div');
@@ -927,6 +942,14 @@ socket.on('meu_turno', function (data) {
             botao.disabled = false; // Ativa o botão desconfiar
         }
     }
+
+    // Mínimo legal da aposta: ajusta o input de quantidade automaticamente.
+    contexto_min_aposta = {
+        com_coringa: data.com_coringa === true,
+        coringa_atual_qtd: Number(data.coringa_atual_qtd) || 0,
+        ultima_aposta: data.ultima_aposta || null
+    };
+    ajustar_quantidade_minima(true);
 })
 
 // Função coletiva para os jogadores que não estão na vez e construir formatação dinâmina para eles
@@ -2214,6 +2237,62 @@ btnDecrease.addEventListener("click", () => {
 
 let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
 
+// Menor quantidade legal para apostar uma face, espelhando Rodada.explicar_jogada.
+function minimo_quantidade(face) {
+    const ctx = contexto_min_aposta;
+    if (!ctx || !ctx.ultima_aposta) {
+        return 1;
+    }
+    const face_ant = Number(ctx.ultima_aposta.face);
+    const qtd_ant = Number(ctx.ultima_aposta.qtd);
+    const f = Number(face) || 1;
+    if (ctx.com_coringa) {
+        if (face_ant === 1) {
+            // O coringa acabou de ser apostado.
+            if (f === 1) {
+                return qtd_ant + 1;
+            }
+            return Math.max(1, 2 * (Number(ctx.coringa_atual_qtd) || qtd_ant));
+        }
+        if (f === 1) {
+            // Apostar o coringa exige superar o último coringa da mesa.
+            return Math.max(1, (Number(ctx.coringa_atual_qtd) || 0) + 1);
+        }
+        // Face maior com a mesma quantidade; senão, quantidade maior.
+        return f > face_ant ? qtd_ant : qtd_ant + 1;
+    }
+    return f > face_ant ? qtd_ant : qtd_ant + 1;
+}
+
+// Menor quantidade legal considerando qualquer face (usada antes da escolha).
+function minimo_quantidade_global() {
+    if (!contexto_min_aposta || !contexto_min_aposta.ultima_aposta) {
+        return 1;
+    }
+    let minimo = Infinity;
+    for (let f = 1; f <= 6; f++) {
+        minimo = Math.min(minimo, minimo_quantidade(f));
+    }
+    return Number.isFinite(minimo) ? minimo : 1;
+}
+
+// Atualiza o input de quantidade para o mínimo legal. Com `forcar_valor`,
+// substitui o valor atual (usado ao começar a vez); senão, só sobe se estiver
+// abaixo do mínimo da face escolhida.
+function ajustar_quantidade_minima(forcar_valor) {
+    const input = document.getElementById('quantidade');
+    if (!input) {
+        return;
+    }
+    const face = selectedImageValue ? Number(selectedImageValue) : null;
+    const minimo = face ? minimo_quantidade(face) : minimo_quantidade_global();
+    input.min = String(minimo);
+    const atual = parseInt(input.value, 10);
+    if (forcar_valor || !atual || atual < minimo) {
+        input.value = String(minimo);
+    }
+}
+
 // Adiciona evento para cada imagem
 document.querySelectorAll('.image-button').forEach(button => {
     button.addEventListener('click', () => {
@@ -2224,6 +2303,7 @@ document.querySelectorAll('.image-button').forEach(button => {
         // Marca o botão clicado
         button.classList.add('selected');
         selectedImageValue = button.getAttribute('data-value');
+        ajustar_quantidade_minima(false);
     });
 });
 
@@ -2409,6 +2489,10 @@ let seed_estado = null;
 let nonce_local = null;
 let compromisso_local = null;
 let seed_commit_enviado = null;
+let seed_revelacao_enviada = null;
+// Nonces revelados publicamente nesta partida (client_id -> nonce), usados na
+// auditoria para não depender do que o servidor diz ter usado na seed.
+let revelacoes_publicas = {};
 
 const CHAVE_NONCE = 'dadinho_seed_nonce';
 const CHAVE_SEED_CTX = 'dadinho_seed_ctx';
@@ -2457,6 +2541,9 @@ function gerarNonceHex() {
 function reset_seed_local() {
     nonce_local = null;
     compromisso_local = null;
+    seed_commit_enviado = null;
+    seed_revelacao_enviada = null;
+    revelacoes_publicas = {};
     sessionStorage.removeItem(CHAVE_NONCE);
     sessionStorage.removeItem(CHAVE_SEED_CTX);
 }
@@ -2464,6 +2551,11 @@ function reset_seed_local() {
 // Gera (uma vez por partida) o nonce local e publica o compromisso dele.
 async function garantir_compromisso_seed() {
     if (!seed_estado || !crypto.subtle || !chave_secreta) {
+        return;
+    }
+    // O servidor precisa ter comprometido a entropia dele ANTES de aceitar o
+    // nonce do jogador; sem compromisso publicado, não compromete.
+    if (!seed_estado.compromisso_servidor) {
         return;
     }
     const ctx = `${sala_atual}|${seed_estado.compromisso_servidor}`;
@@ -2482,13 +2574,36 @@ async function garantir_compromisso_seed() {
         sessionStorage.setItem(CHAVE_SEED_CTX, ctx);
     }
     compromisso_local = await sha256Hex('dadinho:v1:commit|' + nonce_local);
-    socket.emit('comprometer_seed', { chave: chave_secreta, nonce: nonce_local, compromisso: compromisso_local });
+    // Fase de compromisso: só o hash vai para o servidor; o nonce fica local
+    // até a fase de revelação ('seed_revelar').
+    socket.emit('comprometer_seed', { chave: chave_secreta, compromisso: compromisso_local });
     seed_commit_enviado = ctx;
 }
 
 socket.on('seed_compromissos', function (data) {
     seed_estado = data;
     garantir_compromisso_seed();
+});
+
+// O servidor pediu a revelação (todos já comprometeram): envia o nonce local.
+socket.on('seed_revelar', function () {
+    if (!seed_estado || !nonce_local || !chave_secreta) {
+        return;
+    }
+    const ctx = `${sala_atual}|${seed_estado.compromisso_servidor}`;
+    if (seed_revelacao_enviada === ctx) {
+        return; // já revelou nesta partida
+    }
+    socket.emit('revelar_seed', { chave: chave_secreta, nonce: nonce_local });
+    seed_revelacao_enviada = ctx;
+});
+
+// Revelação pública de um jogador: guardada para a auditoria recalcular a seed
+// com os nonces que realmente foram revelados (e não com o que o servidor diz).
+socket.on('seed_revelacao', function (data) {
+    if (data && data.client_id) {
+        revelacoes_publicas[data.client_id] = data.nonce;
+    }
 });
 
 // Valor derivado (1-6) de um dado — mesma fórmula do servidor.
@@ -2508,14 +2623,22 @@ async function verificar_auditoria(data) {
         itens.push([t('js.audit.servidor_ok'), hSrv === data.compromisso_servidor]);
     }
     for (const p of (data.participantes || [])) {
-        if (p.compromisso && p.nonce && !p.sem_reveal) {
-            const h = await sha256Hex('dadinho:v1:commit|' + p.nonce);
+        // Prefere o nonce que foi revelado publicamente na partida; se o
+        // servidor tiver usado outro valor na seed, a conferência abaixo falha.
+        const revelado = revelacoes_publicas[p.client_id];
+        const nonce = revelado || (p.sem_reveal ? null : p.nonce);
+        if (p.compromisso && nonce) {
+            const h = await sha256Hex('dadinho:v1:commit|' + nonce);
             itens.push([t('js.audit.participante', { nome: p.nome || p.client_id }), h === p.compromisso]);
         }
     }
     const nonces = {};
     for (const p of (data.participantes || [])) {
-        if (p.nonce) {
+        // Usa a revelação pública quando existir; só cai no fallback do
+        // compromisso para quem realmente não revelou.
+        if (revelacoes_publicas[p.client_id]) {
+            nonces[p.client_id] = revelacoes_publicas[p.client_id];
+        } else if (p.nonce) {
             nonces[p.client_id] = p.nonce;
         }
     }
@@ -2554,7 +2677,8 @@ async function verificar_auditoria(data) {
 
     if (nonce_local) {
         const meu = (data.participantes || []).find(p => p.nonce === nonce_local);
-        itens.push([t('js.audit.nonce_ok'), !!meu]);
+        const publico = Object.values(revelacoes_publicas).includes(nonce_local);
+        itens.push([t('js.audit.nonce_ok'), !!meu || publico]);
     }
     return itens;
 }

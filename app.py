@@ -4,7 +4,7 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input,
                             enviar_snapshot_sala, listar_resumos_partidas,
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
-                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS)
+                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES)
 from modelos import Jogador
 from store import trancar_sala, esquecer_sala
 from datetime import datetime
@@ -75,6 +75,9 @@ socketio = SocketIO(
     ping_interval=15,
     ping_timeout=20,
     http_compression=False,
+    # Fase 15: os payloads do cliente são minúsculos (aposta, chave, nonce).
+    # Limitar a entrada (default 1 MB) reduz a superfície de abuso/DoS.
+    max_http_buffer_size=100_000,
 )
 
 
@@ -132,8 +135,9 @@ def _remover_jogador_da_sala(lobby, jogador):
             partida.declarar_vencedor(partida.jogadores[0])
         elif len(partida.jogadores) > 1:
             if rodada is not None and rodada.vez_atual == jogador:
-                # Era a vez do desconectado: passa o turno pro próximo.
-                proximo = partida.jogadores[min(indice_antigo, len(partida.jogadores) - 1)]
+                # Era a vez do desconectado: passa o turno pro próximo da ordem
+                # circular (se ele era o último da lista, volta pro primeiro).
+                proximo = partida.jogadores[indice_antigo % len(partida.jogadores)]
                 rodada.vez_atual = proximo
                 rodada.atualizar_front_pro_da_vez(proximo)
             # Se a rolagem só esperava este jogador, desbloqueia quem já jogou.
@@ -211,7 +215,7 @@ def evento_mutavel(func):
                 return func(*args, **kwargs)
             with trancar_sala(sala_id):
                 return func(*args, **kwargs)
-        except (ValueError, TypeError, KeyError, AttributeError):
+        except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError):
             return
     return wrapper
 
@@ -317,9 +321,19 @@ def handle_connect():
                 # e encerra a janela de reconexão (Fase 9).
                 jogador.client_id = client_id
                 jogador.desconectado_em = None
+            elif lobby.status == 'jogando':
+                # Fase 15: entrou no meio da partida (pela busca) — vira
+                # espectador, sem ocupar vaga nem contar como jogador.
+                if len(lobby.espectadores) >= MAX_ESPECTADORES:
+                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                    leave_room(lobby.sala_room(), sid=client_id)
+                    return
+                jogador = Jogador(client_id=client_id, master=False)
+                jogador.lobby_atual = lobby
+                lobby.espectadores.append(jogador)
             else:
                 # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
-                if lobby.status == 'espera' and len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
+                if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
                     emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
                     leave_room(lobby.sala_room(), sid=client_id)
                     return
@@ -367,13 +381,19 @@ def handle_disconnect():
             return
         leave_room(lobby.sala_room(), sid=client_id)
 
-        # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
-        # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
-        # voltar via chave_secreta (handle_connect limpa o marcador). Fora de
-        # partida (lobby), ou sem nenhum jogador ativo sobrando, remove na hora.
-        if jogador.partida_atual is not None:
-            outros_ativos = sum(1 for j in lobby.jogadores
-                                if j is not jogador and j.desconectado_em is None)
+        # Fase 15: espectador não é jogador — sai na hora, sem janela de graça.
+        if jogador in lobby.espectadores:
+            lobby.espectadores.remove(jogador)
+        elif jogador.partida_atual is not None:
+            # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
+            # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
+            # voltar via chave_secreta (handle_connect limpa o marcador).
+            # Fase 15: só faz sentido esperar se restar outro HUMANO ativo — um
+            # bot não justifica segurar a sala (senão ela ficaria órfã).
+            outros_ativos = sum(
+                1 for j in lobby.jogadores
+                if j is not jogador and not j.is_ia and j.desconectado_em is None
+            )
             if outros_ativos < 1:
                 _remover_jogador_da_sala(lobby, jogador)
             else:
@@ -386,8 +406,8 @@ def handle_disconnect():
 
         if lobby.contar_jogadores() > 0:
             lobby.definir_master()
-        # Fase 11: sala só com bots (nenhum humano, nem na janela de graça) é removida.
-        if lobby.contar_jogadores() == 0 or not lobby.tem_humano():
+        # Fase 11/15: sala sem nenhum humano (jogador ou espectador) é removida.
+        if not lobby.tem_humano():
             remover_sala(lobby.sala_id)
             sala_esvaziou = True
         else:
@@ -474,15 +494,38 @@ def ficar_pronto(dados, lobby, jogador):
 @autenticar()
 def comprometer_seed(dados, lobby, jogador):
     """
-    Verificação de integridade (provably fair): o cliente envia o nonce gerado
-    localmente + o compromisso SHA-256 dele na sala de espera. O servidor valida
-    a coerência e publica o compromisso para todos (base da auditoria).
+    Verificação de integridade (provably fair), fase de compromisso: o cliente
+    envia apenas o compromisso SHA-256 do nonce dele (o nonce fica no cliente).
+    O servidor publica o compromisso e, quando todos comprometeram, pede a
+    revelação dos nonces.
     """
     if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
         return
-    if lobby.registrar_compromisso(jogador, dados.get('nonce'), dados.get('compromisso')):
+    if lobby.registrar_compromisso(jogador, dados.get('compromisso')):
         emit('seed_compromissos', lobby.info_publica_seed(), to=lobby.sala_room())
+        if lobby.compromissos_completos():
+            emit('seed_revelar', {'sala': lobby.sala_id}, to=lobby.sala_room())
         salvar_sala(lobby)
+
+
+@socketio.on('revelar_seed')
+@evento_mutavel
+@autenticar()
+def revelar_seed(dados, lobby, jogador):
+    """
+    Verificação de integridade (provably fair), fase de revelação: o cliente
+    revela o nonce e o servidor confere contra o compromisso publicado. A
+    revelação é transmitida à sala (pública) para que qualquer cliente recompute
+    a seed e detecte substituição do nonce pelo servidor. A partida só libera
+    quando todos revelam (ver `Lobby.pode_iniciar`).
+    """
+    if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
+        return
+    if lobby.registrar_revelacao(jogador, dados.get('nonce')):
+        emit('seed_revelacao', {'client_id': jogador.client_id, 'nonce': jogador.nonce_seed},
+             to=lobby.sala_room())
+        # Recalcula `pode_iniciar`/motivo e atualiza os botões de todos.
+        atualizar_lista_usuarios(lobby)
 
 
 @socketio.on('solicitar_auditoria')
@@ -659,6 +702,10 @@ def conferencia_final(dados, lobby, jogador):
     """
     if jogador.rodada_atual is None or jogador.partida_atual is None:
         return
+    # Fase 15: só vale na tela de conferência (3). Sem este gate, um cliente
+    # podia confirmar durante os turnos e adiantar/encerrar a rodada.
+    if lobby.pagina != 3:
+        return
     if jogador.confirmou_rodada:
         return
     rodada = jogador.rodada_atual
@@ -679,6 +726,10 @@ def vencedor_final(dados, lobby, jogador):
     uma nova partida no lobby.
     """
     if jogador.confirmou_vencedor:
+        return
+    # Fase 15: só vale na tela de vitória (4) e para jogadores da sala — um
+    # espectador não pode contar para o reset.
+    if lobby.pagina != 4 or jogador not in lobby.jogadores:
         return
     jogador.confirmou_vencedor = True
     lobby.conferiram_vencedor += 1

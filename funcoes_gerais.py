@@ -17,6 +17,10 @@ TAMANHO_CODIGO_SALA = 5
 # voltar via chave_secreta antes de ser removido da sala.
 GRACE_RECONEXAO_SEGUNDOS = 30
 
+# Fase 15: limite de espectadores simultâneos por sala (entram assistindo uma
+# partida em andamento); evita que conexões de leitura inchem o estado da sala.
+MAX_ESPECTADORES = 20
+
 # Índice em processo client_id -> sala_id (Fase 7, A4). Permite achar a sala sem
 # varrer o store e adquirir o lock da sala antes do read-modify-write dos handlers.
 # É só um cache local: não substitui o estado distribuído.
@@ -63,6 +67,12 @@ def tem_cooldown(client_id, segundos):
     """
     agora = time.time()
     with _cooldowns_guard:
+        # Evita crescimento sem limite do dicionário numa instância quente:
+        # ao passar do teto, expurga entradas que já expiraram faz tempo.
+        if len(_cooldowns) > 4096:
+            limite = agora - 60
+            for cid in [c for c, instante in _cooldowns.items() if instante < limite]:
+                _cooldowns.pop(cid, None)
         ultima = _cooldowns.get(client_id, 0.0)
         if agora - ultima < segundos:
             return True
@@ -233,8 +243,9 @@ def enviar_snapshot_sala(lobby, jogador):
                      to=jogador.client_id)
         if vez_atual is not None:
             if not espectador and vez_atual == jogador:
-                emit('meu_turno', {'username': jogador.username, 'turno_num': len(rodada.turnos)},
-                     to=jogador.client_id)
+                payload = {'username': jogador.username}
+                payload.update(rodada.contexto_aposta())
+                emit('meu_turno', payload, to=jogador.client_id)
             else:
                 emit('espera_turno', {'username': vez_atual.username}, to=jogador.client_id)
         return
@@ -269,10 +280,13 @@ def atualizar_lista_usuarios(lobby):
     o_master = lobby.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
-    # Verificação ativa: o servidor compromete a entropia (nonce/beacon) antes de
-    # os clientes enviarem os nonces deles.
+    # Verificação ativa: o servidor compromete a entropia (nonce secreto) antes
+    # de os clientes enviarem os nonces deles e, quando todos já comprometeram,
+    # pede a revelação (cobre reconexões que perderam o pedido original).
     if lobby.config.get('verificacao_ativa') and lobby.status == 'espera':
         lobby.preparar_seed()
+        if lobby.compromissos_completos() and lobby.revelacoes_pendentes():
+            emit("seed_revelar", {'sala': lobby.sala_id}, to=lobby.sala_room())
     pode_iniciar, motivo = lobby.pode_iniciar()
     emit("update_user_list", {
         "users": usernames,
@@ -326,11 +340,11 @@ def listar_resumos_partidas(filtros, sala_atual=None):
         resumos.append(resumo)
 
     if ordenar == 'jogadores':
-        resumos.sort(key=lambda r: (-r['jogadores'], (r['nome'] or '').lower()))
+        resumos.sort(key=lambda r: (-int(r.get('jogadores') or 0), (r.get('nome') or '').lower()))
     elif ordenar == 'nome':
-        resumos.sort(key=lambda r: (r['nome'] or '').lower())
+        resumos.sort(key=lambda r: (r.get('nome') or '').lower())
     else:
-        resumos.sort(key=lambda r: r['criada_em'] or '', reverse=True)
+        resumos.sort(key=lambda r: r.get('criada_em') or '', reverse=True)
     return resumos
 
 

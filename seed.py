@@ -3,10 +3,13 @@
 Aleatoriedade verificável (provably fair) do Dadinho — contrato v1.
 
 A seed da partida é derivada por commit-reveal: o servidor compromete uma
-entropia externa (beacon drand) e cada jogador contribui com um nonce gerado no
-cliente. Ninguém escolhe o resultado: o servidor não via os nonces dos jogadores
-ao comprometer, e os jogadores não veem os nonces uns dos outros antes das
-jogadas. No fim da partida tudo é revelado e qualquer um recomputa os dados.
+entropia secreta (seu nonce, só revelado na auditoria) e cada jogador contribui
+com um nonce gerado no cliente, revelado publicamente. Ninguém escolhe o
+resultado: o servidor não via os nonces dos jogadores ao comprometer, e como a
+entropia secreta não é conhecida durante o jogo, nem os jogadores conseguem
+prever os dados. No fim da partida tudo é revelado e qualquer um recomputa os
+dados. (As funções de beacon drand abaixo não são mais usadas na seed: com
+revelações públicas o valor do beacon vazaria os dados antes do jogo.)
 
 Fórmula v1 (pública, byte-a-byte):
 

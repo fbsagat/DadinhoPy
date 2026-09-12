@@ -7,7 +7,7 @@ Roda, em sequência:
   2. node --check dos JS de static/ e cobertura dos dicionários i18n (quando o Node está no PATH);
   3. boot com VERCEL=1 respondendo 200 na rota /;
   4. round-trip de serialização + migrações de versão do Lobby (S3);
-  5. integração via flask_socketio.test_client cobrindo as Fases 6 e 7.
+  5. integração via flask_socketio.test_client cobrindo as Fases 6, 7 e 15.
 
 Uso (do root do repo, com a .venv ativa):
     python verificar.py
@@ -166,12 +166,18 @@ def verificar_roundtrip():
         jogador.username = nome
         jogador.pronto = True
         lobby.adicionar_jogador(jogador)
+    espectador = modelos.Jogador(client_id="spec1")
+    espectador.username = "Eva"
+    espectador.lobby_atual = lobby
+    lobby.espectadores.append(espectador)
     dados = lobby.para_dict()
     _checar("grava versão atual", dados.get("versao") == modelos.VERSAO_ATUAL, str(dados.get("versao")))
 
     copia = modelos.Lobby.de_dict(dados)
     _checar("round-trip jogadores", [j.username for j in copia.jogadores] == ["Ana", "Bia"])
+    _checar("round-trip espectadores", [e.username for e in copia.espectadores] == ["Eva"])
     _checar("round-trip config", copia.config == lobby.config)
+    _checar("round-trip numero de partida", copia.proxima_partida_num == lobby.proxima_partida_num)
 
     # v1 -> v3: campos da sala de espera e prontidão passam a existir.
     v1 = {"sala_id": "v1", "lobby_num": 1, "versao": 1,
@@ -197,6 +203,17 @@ def verificar_roundtrip():
     futuro = {"sala_id": "v4", "versao": 99, "jogadores": [], "partidas": []}
     migrado = modelos.Lobby._migrar(dict(futuro))
     _checar("versão futura preservada", migrado.get("versao") == 99, str(migrado.get("versao")))
+
+    # v3 -> v4: espectadores ganham lista própria (vazia em salas antigas).
+    v3 = {"sala_id": "v3", "lobby_num": 1, "versao": 3,
+          "jogadores": [{"client_id": "z"}], "partidas": []}
+    m3 = modelos.Lobby.de_dict(dict(v3))
+    _checar("migração v3 -> v4", m3.espectadores == [] and len(m3.jogadores) == 1)
+
+    # v4 -> v5: numeração de partida passa a ser própria (max + 1).
+    m4_dir = modelos._migrar_v4_para_v5({"versao": 4, "partidas": [{"partida_num": 7}]})
+    _checar("migração v4 -> v5", m4_dir.get("proxima_partida_num") == 8,
+            str(m4_dir.get("proxima_partida_num")))
 
 
 # ---------------------------------------------------------------------------
@@ -656,8 +673,293 @@ def teste_partida_completa():
     _ok("partida completa (Fases 6/7)")
 
 
+def teste_gate_pagina_confirmacoes():
+    _limpar()
+    clis, lobby = _conectar_trio(1)  # 3 jogadores, página 2 (turnos)
+    assert lobby.pagina == 2
+
+    # Fase 15: confirmar a conferência durante os turnos não pode adiantar a rodada.
+    for c, chave in clis.values():
+        c.emit("conferencia_final", {"chave": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    assert lobby.pagina == 2, f"gate: conferência precoce não pode sair dos turnos (pagina={lobby.pagina})"
+    assert len(partida.rodadas) == 1, "gate: turnos não podem criar nova rodada"
+    assert all(not j.confirmou_rodada for j in partida.jogadores)
+
+    # Fase 15: confirmar a vitória durante os turnos não pode resetar o lobby.
+    for j in partida.jogadores:
+        clis[j.username][0].emit("vencedor_final", {"chave": clis[j.username][1]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2 and lobby.status == "jogando", "gate: vitória precoce não pode resetar"
+    assert lobby.conferiram_vencedor == 0, "gate: contador de vitória não pode subir nos turnos"
+
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("gate de página das confirmações (B1)")
+
+
+def teste_espectador_nao_e_jogador():
+    _limpar()
+    clis, lobby = _conectar_trio(1)  # 3 jogadores, página 2
+    assert len(lobby.jogadores) == 3 and not lobby.espectadores
+
+    c4, _, eventos4 = _conectar()  # entra no meio da partida
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    assert len(lobby.jogadores) == 3, "espectador não pode virar jogador do lobby (B2)"
+    assert len(lobby.espectadores) == 1, "espectador deve ir para lobby.espectadores"
+    assert all(j not in partida.jogadores for j in lobby.espectadores)
+    assert _achar_evento(eventos4, "espectador") is not None, "snapshot deve marcar ESPECTADOR"
+
+    # Duas desistências declaram o terceiro vencedor. O espectador não entra na
+    # conta da vitória (len(lobby.jogadores)).
+    for nome in ("Bia", "Caio"):
+        clis[nome][0].disconnect()
+    _purgar_grace(clis)
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    assert partida.vencedor_final is not None
+    assert len(lobby.jogadores) == 1, "só o vencedor humano resta no lobby"
+    assert len(lobby.espectadores) == 1
+
+    vencedor = partida.vencedor_final
+    clis[vencedor.username][0].emit("vencedor_final", {"chave": clis[vencedor.username][1]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 0 and lobby.status == "espera", "vitória deve resetar com 1 jogador"
+    # O espectador é promovido a jogador na próxima partida, sem duplicar.
+    assert not lobby.espectadores, "espectadores devem ser promovidos no reset"
+    assert len(lobby.jogadores) == 2
+
+    c4.disconnect()
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("espectador não é jogador (B2)")
+
+
+def teste_sala_so_com_bot_e_removida():
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert any(j.is_ia for j in lobby.jogadores)
+
+    # Fase 15: um bot não conta como "outro ativo" — o humano sai na hora e a
+    # sala (só com bots) é removida em vez de ficar órfã na janela de graça.
+    c1.disconnect()
+    assert modulo_store.carregar_sala(SALA) is None, "sala só com bots deve ser removida (B3)"
+    _limpar()
+    _ok("sala só com bot é removida (B3)")
+
+
+def teste_resumo_malformado_nao_quebra_busca():
+    _limpar()
+    modulo_store.salvar_resumo("quebrado", {"sala": "quebrado", "publica": True})
+    try:
+        for ordenar in ("jogadores", "nome", "recentes"):
+            funcoes_gerais.listar_resumos_partidas({"ordenar": ordenar})
+    except Exception as erro:  # noqa: BLE001
+        raise AssertionError(f"resumo malformado não pode quebrar a busca: {erro!r}")
+    finally:
+        modulo_store.remover_resumo("quebrado")
+    _ok("resumo malformado na busca (B6)")
+
+
+def teste_cooldown_expurga_antigos():
+    with funcoes_gerais._cooldowns_guard:
+        funcoes_gerais._cooldowns.clear()
+        agora = funcoes_gerais.time.time()
+        for i in range(5000):
+            funcoes_gerais._cooldowns[f"antigo{i}"] = agora - 120
+    try:
+        assert funcoes_gerais.tem_cooldown("novo", 0.5) is False
+        with funcoes_gerais._cooldowns_guard:
+            restantes = len(funcoes_gerais._cooldowns)
+        assert restantes < 5000, "cooldowns antigos devem ser expurgados (B8)"
+    finally:
+        with funcoes_gerais._cooldowns_guard:
+            funcoes_gerais._cooldowns.clear()
+    _ok("cooldown com expurgo (B8)")
+
+
+def teste_poda_partidas():
+    import modelos
+    emit_original = modelos.emit
+    modelos.emit = lambda *a, **k: None  # fora de request não há room/namespace
+    try:
+        lobby = modelos.Lobby(sala_id="poda", lobby_numero=1)
+        for cid, nome in (("a", "A"), ("b", "B")):
+            jogador = modelos.Jogador(client_id=cid)
+            jogador.username = nome
+            lobby.adicionar_jogador(jogador)
+        lobby.jogadores[0].master = True
+        p1 = lobby.construir_partida(dados_qtd=1)
+        assert p1.partida_num == 1
+        lobby.resetar_para_lobby()
+        p2 = lobby.construir_partida(dados_qtd=1)
+        assert p2.partida_num == 2, "numeração deve continuar após a poda"
+        lobby.resetar_para_lobby()
+        assert len(lobby.partidas) <= 1, "histórico antigo deve ser podado"
+        copia = modelos.Lobby.de_dict(lobby.para_dict())
+        assert copia.proxima_partida_num == 3, "numeração deve sobreviver ao round-trip"
+    finally:
+        modelos.emit = emit_original
+    _ok("poda de partidas antigas")
+
+
+def teste_commit_reveal():
+    import seed
+
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"verificacao_ativa": True}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    assert modulo_store.carregar_sala(SALA).config["verificacao_ativa"] is True
+
+    # Fase de compromisso: só o hash vai para o servidor (o nonce fica local).
+    n1, n2 = seed.gerar_nonce(), seed.gerar_nonce()
+    c1.emit("comprometer_seed", {"chave": cs1["chave_secreta"], "compromisso": seed.compromisso(n1)})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.compromisso_seed == seed.compromisso(n1) and ana.nonce_seed is None, \
+        "o servidor não pode receber o nonce no commit"
+    pode, motivo = lobby.pode_iniciar()
+    assert not pode and motivo["chave"] == "msg.motivo.aguardando_revelacao"
+
+    c2.emit("comprometer_seed", {"chave": cs2["chave_secreta"], "compromisso": seed.compromisso(n2)})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.compromissos_completos() and lobby.revelacoes_pendentes()
+
+    # Compromisso imutável: o primeiro vale.
+    n1b = seed.gerar_nonce()
+    c1.emit("comprometer_seed", {"chave": cs1["chave_secreta"], "compromisso": seed.compromisso(n1b)})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.compromisso_seed == seed.compromisso(n1), "primeiro compromisso deve valer"
+
+    # Fase de revelação (pública: a sala toda recebe os nonces).
+    c1.emit("revelar_seed", {"chave": cs1["chave_secreta"], "nonce": n1})
+    c2.emit("revelar_seed", {"chave": cs2["chave_secreta"], "nonce": n2})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert not lobby.revelacoes_pendentes(), "todos revelaram"
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.nonce_seed == n1 and ana.revelado_seed
+    revelacoes = [e["args"][0] for e in c2.get_received() if e["name"] == "seed_revelacao"]
+    assert any(r.get("nonce") == n1 for r in revelacoes), "revelação deve ser pública"
+
+    # Nonce errado é rejeitado (revelação não pode mentir).
+    ana.revelado_seed = False
+    ana.nonce_seed = None
+    modulo_store.salvar_sala(lobby)
+    c1.emit("revelar_seed", {"chave": cs1["chave_secreta"], "nonce": seed.gerar_nonce()})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert not ana.revelado_seed, "nonce que não bate com o compromisso deve ser recusado"
+    c1.emit("revelar_seed", {"chave": cs1["chave_secreta"], "nonce": n1})
+
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    assert partida.seed_info and partida.seed_final
+    assert partida.seed_info["fonte"] == "servidor", "entropia secreta do servidor"
+    assert partida.seed_info["entropia_externa"] == partida.seed_info["nonce_servidor"]
+    assert all(not p["sem_reveal"] for p in partida.seed_info["participantes"]), \
+        "todos revelaram: nada pode cair no fallback"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("commit-reveal (nonce só na revelação)")
+
+
+def teste_upstash_indice_resumos():
+    arm = modulo_store.ArmazenamentoUpstash("http://fake", "tok")
+    estado = {"dados": {}, "indice": set()}
+
+    def fake_pipeline(comandos):
+        for cmd in comandos:
+            op = cmd[0]
+            if op == "SET":
+                estado["dados"][cmd[1]] = cmd[2]
+            elif op == "SADD":
+                estado["indice"].add(cmd[2])
+            elif op == "DEL":
+                estado["dados"].pop(cmd[1], None)
+            elif op == "SREM":
+                estado["indice"].discard(cmd[2])
+        return {"result": "OK"}
+
+    def fake_comando(*args):
+        op = args[0]
+        if op == "SMEMBERS":
+            return {"result": list(estado["indice"])}
+        if op == "MGET":
+            return {"result": [estado["dados"].get(k) for k in args[1:]]}
+        if op == "SADD":
+            estado["indice"].update(args[2:])
+            return {"result": len(args) - 2}
+        if op == "SREM":
+            for item in args[2:]:
+                estado["indice"].discard(item)
+            return {"result": len(args) - 2}
+        return {"result": None}
+
+    arm._pipeline = fake_pipeline
+    arm._comando = fake_comando
+    arm._varrer_chaves = lambda prefixo: []
+
+    arm.salvar_resumo("s1", {"sala": "s1", "nome": "Um"})
+    assert "s1" in estado["indice"], "salvar_resumo deve indexar a sala"
+    assert [r["sala"] for r in arm.listar_resumos()] == ["s1"]
+
+    # Resumo expirado sai do índice na listagem (sem SCAN).
+    del estado["dados"][arm._chave_resumo("s1")]
+    assert arm.listar_resumos() == []
+    assert "s1" not in estado["indice"], "resumo expirado deve sair do índice"
+
+    arm.salvar_resumo("s2", {"sala": "s2", "nome": "Dois"})
+    arm.remover_resumo("s2")
+    assert arm.listar_resumos() == []
+    assert "s2" not in estado["indice"], "remover_resumo deve desindexar"
+    _ok("índice de resumos da Upstash")
+
+
+def teste_resumo_dedup():
+    class Espiao:
+        def __init__(self):
+            self.chamadas = 0
+
+        def salvar_resumo(self, sala_id, resumo):
+            self.chamadas += 1
+
+        def remover_resumo(self, sala_id):
+            pass
+
+    original = modulo_store.armazenamento
+    espiao = Espiao()
+    modulo_store.armazenamento = espiao
+    try:
+        modulo_store._resumos_assinatura.clear()
+        resumo = {"sala": "d", "nome": "Igual", "jogadores": 2}
+        modulo_store.salvar_resumo("d", dict(resumo))
+        modulo_store.salvar_resumo("d", dict(resumo))
+        assert espiao.chamadas == 1, "resumo idêntico não pode ser reescrito"
+        mudado = dict(resumo, jogadores=3)
+        modulo_store.salvar_resumo("d", mudado)
+        assert espiao.chamadas == 2, "resumo diferente deve ser gravado"
+    finally:
+        modulo_store.armazenamento = original
+        modulo_store._resumos_assinatura.clear()
+    _ok("dedup de resumo (economia de comandos)")
+
+
 def verificar_integracao():
-    print("5) integração flask_socketio.test_client (Fases 6 e 7)")
+    print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
     modulo_store, modulo_app, funcoes_gerais = _preparar_integracao()
     from app import app, socketio  # noqa: F811 (rebind após preparar)
@@ -678,8 +980,23 @@ def verificar_integracao():
         ("A4/A5", teste_a4_a5_lock_e_sorteio),
         ("partida completa", teste_partida_completa),
     ]
+    testes_fase15 = [
+        ("B1-gate", teste_gate_pagina_confirmacoes),
+        ("B2-espectador", teste_espectador_nao_e_jogador),
+        ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
+    ]
+    testes_hardening = [
+        ("B6-resumo", teste_resumo_malformado_nao_quebra_busca),
+        ("B8-cooldown", teste_cooldown_expurga_antigos),
+        ("poda-partidas", teste_poda_partidas),
+        ("upstash-indice", teste_upstash_indice_resumos),
+        ("resumo-dedup", teste_resumo_dedup),
+    ]
+    testes_seed = [
+        ("commit-reveal", teste_commit_reveal),
+    ]
     try:
-        for nome, func in testes_fase6 + testes_fase7:
+        for nome, func in testes_fase6 + testes_fase7 + testes_fase15 + testes_hardening + testes_seed:
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)
