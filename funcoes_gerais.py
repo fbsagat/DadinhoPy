@@ -254,6 +254,8 @@ def enviar_snapshot_sala(lobby, jogador):
             nomes = [j.username for j in lobby.jogadores if j.username is not None]
             pontos = [j.pontos for j in lobby.jogadores if j.username is not None]
             emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id)
+            if partida.seed_info:
+                emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id)
             if not espectador and partida.vencedor_final == jogador:
                 emit('botao_vencedor_ativ', to=jogador.client_id)
 
@@ -271,6 +273,10 @@ def atualizar_lista_usuarios(lobby):
     o_master = lobby.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
+    # Verificação ativa: o servidor compromete a entropia (nonce/beacon) antes de
+    # os clientes enviarem os nonces deles.
+    if lobby.config.get('verificacao_ativa') and lobby.status == 'espera':
+        lobby.preparar_seed()
     pode_iniciar, motivo = lobby.pode_iniciar()
     emit("update_user_list", {
         "users": usernames,
@@ -280,6 +286,7 @@ def atualizar_lista_usuarios(lobby):
         "nome": lobby.nome,
         "status": lobby.status,
         "config": lobby.config,
+        "seed": lobby.info_publica_seed(),
         "pode_iniciar": pode_iniciar,
         "motivo": motivo,
     }, to=lobby.sala_room())

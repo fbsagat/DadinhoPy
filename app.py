@@ -340,7 +340,9 @@ def iniciar_partida(dados):
     if not pode:
         emit('iniciar_negado', {'motivo': motivo}, to=client_id)
         return
-    partida = lobby.construir_partida(dados_qtd=int(lobby.config.get('dados_qtd', 1)))
+    # Verificação ativa: resolve a entropia e fixa a seed ANTES de criar a partida.
+    seed_info = lobby.finalizar_seed()
+    partida = lobby.construir_partida(dados_qtd=int(lobby.config.get('dados_qtd', 1)), seed_info=seed_info)
     partida.construir_rodada()
     ia.processar(lobby)
     salvar_sala(lobby)
@@ -386,6 +388,44 @@ def ficar_pronto(dados):
         return
     jogador.pronto = not jogador.pronto
     atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('comprometer_seed')
+@evento_mutavel
+def comprometer_seed(dados):
+    """
+    Verificação de integridade (provably fair): o cliente envia o nonce gerado
+    localmente + o compromisso SHA-256 dele na sala de espera. O servidor valida
+    a coerência e publica o compromisso para todos (base da auditoria).
+    """
+    dados = dados or {}
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None:
+        return
+    if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
+        return
+    if jogador.chave_secreta != dados.get('chave', ''):
+        return
+    if lobby.registrar_compromisso(jogador, dados.get('nonce'), dados.get('compromisso')):
+        emit('seed_compromissos', lobby.info_publica_seed(), to=lobby.sala_room())
+        salvar_sala(lobby)
+
+
+@socketio.on('solicitar_auditoria')
+@evento_mutavel
+def solicitar_auditoria(dados):
+    """Reenvia o payload de auditoria da partida atual (ex.: reconexão na tela 4)."""
+    client_id = request.sid
+    lobby, jogador = achar_jogador(client_id)
+    if jogador is None or lobby is None:
+        return
+    if jogador.chave_secreta != (dados or {}).get('chave', ''):
+        return
+    partida = jogador.partida_atual
+    if partida is None or not partida.seed_info:
+        return
+    emit('auditoria_partida', partida.montar_auditoria(), to=client_id)
 
 
 @socketio.on('adicionar_ia')

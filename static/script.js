@@ -187,6 +187,13 @@ socket.on("update_user_list", (data) => {
     // Aplica a configuração da partida (read-only para não-master).
     aplicar_config(data.config);
 
+    // Verificação ativa na sala de espera: guarda o compromisso do servidor e
+    // envia o nonce/compromisso deste cliente (provably fair).
+    if (data.config && data.config.verificacao_ativa && data.seed && data.status === 'espera') {
+        seed_estado = data.seed;
+        garantir_compromisso_seed();
+    }
+
     if (data.users.length === 0) {
         userListItems.innerHTML = "<small>Aguardando jogadores...</small>";
     } else {
@@ -300,6 +307,10 @@ function aplicar_config(config) {
     if (config_substituir_ia) {
         config_substituir_ia.checked = config.substituir_desconectado_por_ia === true;
     }
+    const config_verificacao = document.getElementById('config_verificacao');
+    if (config_verificacao) {
+        config_verificacao.checked = config.verificacao_ativa === true;
+    }
     const ia_nivel = document.getElementById('ia_nivel');
     if (ia_nivel && config.ia_nivel_padrao) {
         ia_nivel.value = String(config.ia_nivel_padrao);
@@ -319,6 +330,7 @@ function enviar_config() {
         publica: document.getElementById('config_publica').checked,
         substituir_desconectado_por_ia: document.getElementById('config_substituir_ia').checked,
         ia_nivel_padrao: document.getElementById('ia_nivel').value,
+        verificacao_ativa: document.getElementById('config_verificacao').checked,
     };
     socket.emit('configurar_partida', { chave: chave_secreta, config: config });
 }
@@ -352,7 +364,7 @@ function alternar_pronto() {
 }
 
 // O master aplica as configurações ao alterar qualquer campo da sala de espera.
-['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'ia_nivel'].forEach((id) => {
+['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'config_verificacao', 'ia_nivel'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
         el.addEventListener('change', enviar_config);
@@ -368,6 +380,12 @@ socket.on("mudar_pagina", function (data) {
     }
     const logo = document.getElementById('titulo_img');
     const logodiv = document.getElementById('div_titulo_img');
+    if (data.pag_numero === 0) {
+        const painel_aud = document.getElementById('painel_auditoria');
+        if (painel_aud) {
+            painel_aud.style.display = 'none';
+        }
+    }
     {
         const paginas = [
             document.getElementById('tela_jogadores'),
@@ -753,6 +771,11 @@ socket.on('reset_partida', function () {
     const texto_v_d = document.getElementById("texto_vitoria_derrota");
     if (texto_v_d) {
         texto_v_d.innerText = '';
+    }
+    // Some com a auditoria da partida anterior.
+    const painel_aud = document.getElementById('painel_auditoria');
+    if (painel_aud) {
+        painel_aud.style.display = 'none';
     }
 });
 
@@ -1381,3 +1404,207 @@ function animate() {
 }
 
 animate();
+
+// ---------------------------------------------------------------------------
+// Verificação de integridade (provably fair) — espelha seed.py no cliente.
+// O nonce é gerado aqui (nunca no servidor) e o compromisso é publicado.
+// ---------------------------------------------------------------------------
+let seed_estado = null;
+let nonce_local = null;
+let compromisso_local = null;
+let seed_commit_enviado = null;
+
+const CHAVE_NONCE = 'dadinho_seed_nonce';
+const CHAVE_SEED_CTX = 'dadinho_seed_ctx';
+
+function bytesParaHex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexParaBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+    return bytes;
+}
+
+function compararUtf8(a, b) {
+    const ea = new TextEncoder().encode(a);
+    const eb = new TextEncoder().encode(b);
+    const n = Math.min(ea.length, eb.length);
+    for (let i = 0; i < n; i++) {
+        if (ea[i] !== eb[i]) {
+            return ea[i] - eb[i];
+        }
+    }
+    return ea.length - eb.length;
+}
+
+async function sha256Hex(texto) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+    return bytesParaHex(new Uint8Array(digest));
+}
+
+async function hmacHex(keyBytes, msg) {
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg));
+    return bytesParaHex(new Uint8Array(sig));
+}
+
+function gerarNonceHex() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return bytesParaHex(bytes);
+}
+
+function reset_seed_local() {
+    nonce_local = null;
+    compromisso_local = null;
+    sessionStorage.removeItem(CHAVE_NONCE);
+    sessionStorage.removeItem(CHAVE_SEED_CTX);
+}
+
+// Gera (uma vez por partida) o nonce local e publica o compromisso dele.
+async function garantir_compromisso_seed() {
+    if (!seed_estado || !crypto.subtle || !chave_secreta) {
+        return;
+    }
+    const ctx = `${sala_atual}|${seed_estado.compromisso_servidor}`;
+    if (seed_commit_enviado === ctx) {
+        return; // já comprometido nesta partida
+    }
+    if (sessionStorage.getItem(CHAVE_SEED_CTX) !== ctx) {
+        reset_seed_local();
+    }
+    if (!nonce_local) {
+        nonce_local = sessionStorage.getItem(CHAVE_NONCE);
+    }
+    if (!nonce_local) {
+        nonce_local = gerarNonceHex();
+        sessionStorage.setItem(CHAVE_NONCE, nonce_local);
+        sessionStorage.setItem(CHAVE_SEED_CTX, ctx);
+    }
+    compromisso_local = await sha256Hex('dadinho:v1:commit|' + nonce_local);
+    socket.emit('comprometer_seed', { chave: chave_secreta, nonce: nonce_local, compromisso: compromisso_local });
+    seed_commit_enviado = ctx;
+}
+
+socket.on('seed_compromissos', function (data) {
+    seed_estado = data;
+    garantir_compromisso_seed();
+});
+
+// Valor derivado (1-6) de um dado — mesma fórmula do servidor.
+async function valorDerivado(seedHex, sala, partida, rodada, clientId, indice) {
+    const digestHex = await hmacHex(hexParaBytes(seedHex), `dadinho:v1:roll|${sala}|${partida}|${rodada}|${clientId}|${indice}`);
+    return Number(BigInt('0x' + digestHex) % 6n) + 1;
+}
+
+// Confere a auditoria inteira sem confiar no servidor.
+async function verificar_auditoria(data) {
+    const itens = [];
+    if (!crypto.subtle) {
+        return [['Web Crypto indisponível (use HTTPS ou localhost).', false]];
+    }
+    if (data.compromisso_servidor && data.nonce_servidor) {
+        const hSrv = await sha256Hex('dadinho:v1:commit|' + data.nonce_servidor);
+        itens.push(['Compromisso do servidor confere', hSrv === data.compromisso_servidor]);
+    }
+    for (const p of (data.participantes || [])) {
+        if (p.compromisso && p.nonce && !p.sem_reveal) {
+            const h = await sha256Hex('dadinho:v1:commit|' + p.nonce);
+            itens.push([`Compromisso de ${p.nome || p.client_id} confere`, h === p.compromisso]);
+        }
+    }
+    const nonces = {};
+    for (const p of (data.participantes || [])) {
+        if (p.nonce) {
+            nonces[p.client_id] = p.nonce;
+        }
+    }
+    const ordem = Object.keys(nonces).sort(compararUtf8);
+    const partes = [data.fonte, data.entropia_externa, ...ordem.map(c => nonces[c])];
+    const seedCalc = await sha256Hex('dadinho:v1:seed|' + partes.join('|'));
+    itens.push(['Seed final bate com a fórmula', seedCalc === data.seed_final]);
+
+    if (data.fonte === 'beacon' && data.beacon && data.beacon.round) {
+        try {
+            const resp = await fetch(`https://api.drand.sh/${data.beacon.chain}/public/${data.beacon.round}`);
+            const json = await resp.json();
+            const mesmo = String(json.randomness || '').toLowerCase() === String(data.entropia_externa || '').toLowerCase();
+            itens.push(['Beacon drand confere (consulta independente)', mesmo]);
+        } catch (e) {
+            itens.push(['Beacon drand: não foi possível consultar', false]);
+        }
+    }
+
+    let total = 0;
+    let iguais = 0;
+    for (const rodada of (data.rodadas || [])) {
+        const dadosRodada = rodada.dados_por_jogador || {};
+        for (const cid of Object.keys(dadosRodada)) {
+            const valores = dadosRodada[cid] || [];
+            for (let i = 0; i < valores.length; i++) {
+                const v = await valorDerivado(data.seed_final, data.sala, data.partida_num, rodada.rodada_num, cid, i);
+                total += 1;
+                if (v === valores[i]) {
+                    iguais += 1;
+                }
+            }
+        }
+    }
+    itens.push([`Dados derivados conferem (${iguais}/${total})`, total > 0 && iguais === total]);
+
+    if (nonce_local) {
+        const meu = (data.participantes || []).find(p => p.nonce === nonce_local);
+        itens.push(['Meu nonce está incluído na seed', !!meu]);
+    }
+    return itens;
+}
+
+async function render_auditoria(data) {
+    const painel = document.getElementById('painel_auditoria');
+    const alvo = document.getElementById('auditoria_resultado');
+    if (!painel || !alvo) {
+        return;
+    }
+    painel.style.display = 'block';
+    alvo.innerHTML = '<div class="spinner-border spinner-border-sm text-info" role="status"></div> conferindo...';
+    const itens = await verificar_auditoria(data);
+    alvo.innerHTML = '';
+    const ul = document.createElement('ul');
+    ul.className = 'list-unstyled mb-2 text-start';
+    itens.forEach(([texto, ok]) => {
+        const li = document.createElement('li');
+        li.textContent = `${ok ? '✅' : '❌'} ${texto}`;
+        li.className = ok ? 'text-success' : 'text-danger';
+        ul.appendChild(li);
+    });
+    alvo.appendChild(ul);
+
+    const detalhes = document.createElement('details');
+    const sumario = document.createElement('summary');
+    sumario.textContent = 'Ver dados técnicos (seed, compromissos, beacon)';
+    detalhes.appendChild(sumario);
+    const pre = document.createElement('pre');
+    pre.className = 'small text-start';
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.wordBreak = 'break-all';
+    pre.textContent = JSON.stringify({
+        versao: data.versao,
+        fonte: data.fonte,
+        seed_final: data.seed_final,
+        compromisso_servidor: data.compromisso_servidor,
+        nonce_servidor: data.nonce_servidor,
+        entropia_externa: data.entropia_externa,
+        beacon: data.beacon,
+        participantes: data.participantes,
+    }, null, 2);
+    detalhes.appendChild(pre);
+    alvo.appendChild(detalhes);
+}
+
+socket.on('auditoria_partida', function (data) {
+    render_auditoria(data);
+});

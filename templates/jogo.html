@@ -138,7 +138,13 @@
                                 <label class="form-check-label" for="config_substituir_ia">Trocar desconectado por
                                     IA</label>
                             </div>
-                            <small class="text-muted d-block mt-2">Somente o master edita as configurações.</small>
+                            <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
+                                <input class="form-check-input" type="checkbox" id="config_verificacao">
+                                <label class="form-check-label" for="config_verificacao">Verificar dados (provably
+                                    fair)</label>
+                            </div>
+                            <small class="text-muted d-block mt-2">Somente o master edita as configurações. Com a
+                                verificação ligada, a auditoria aparece na tela de vitória.</small>
                         </div>
 
                         <div id="painel_ia"
@@ -390,6 +396,13 @@
             <button id="comemorar" class="btn btn-success mt-3" style="z-index: 10; display: none;">Comemorar!</button>
             <button id="bot_vencedor_fim" class="btn btn-primary mt-3" onclick="vencedor_final()"
                 style="width: 80px; display: block;">Ok</button>
+        </div>
+
+        <div id="painel_auditoria"
+            class="container my-4 p-3 bg-dark text-light border border-info rounded"
+            style="display: none; --bs-bg-opacity: .85; max-width: 760px; z-index: 10; position: relative;">
+            <h5 class="text-info mb-2">🔎 Conferir justiça da partida</h5>
+            <div id="auditoria_resultado" class="text-center"></div>
         </div>
 
     </div>

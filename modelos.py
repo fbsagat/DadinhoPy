@@ -2,6 +2,8 @@ from datetime import datetime
 import secrets
 from flask_socketio import emit
 
+import seed
+
 
 class Jogador:
     def __init__(self, client_id, master=False, lobby=None, partida_atual=None, rodada_atual=None, turno_atual=None):
@@ -33,6 +35,11 @@ class Jogador:
         # Bots não têm socket e nunca viram master.
         self.is_ia = False
         self.ia_nivel = None
+        # Verificação de integridade (provably fair): compromisso público e o
+        # nonce secreto do jogador (revelado na auditoria). Bots têm o nonce
+        # gerado pelo servidor; humanos geram no cliente.
+        self.compromisso_seed = None
+        self.nonce_seed = None
 
     def __repr__(self):
         return (f"(JOGADOR {self.username}, client_id={self.client_id}, "
@@ -54,6 +61,9 @@ class Jogador:
         jogador.is_ia = True
         jogador.ia_nivel = int(nivel)
         jogador.pronto = True
+        # Bots também contribuem com nonce (gerado pelo servidor) para a seed.
+        jogador.nonce_seed = seed.gerar_nonce()
+        jogador.compromisso_seed = seed.compromisso(jogador.nonce_seed)
         return jogador
 
     def para_dict(self, lobby):
@@ -86,6 +96,8 @@ class Jogador:
             'desconectado_em': self.desconectado_em.isoformat() if self.desconectado_em else None,
             'is_ia': self.is_ia,
             'ia_nivel': self.ia_nivel,
+            'compromisso_seed': self.compromisso_seed,
+            'nonce_seed': self.nonce_seed,
             'partida_atual_idx': partida_atual_idx,
             'rodada_atual_idx': rodada_atual_idx,
             'turno_atual_idx': turno_atual_idx,
@@ -120,6 +132,9 @@ class Lobby:
         self.status = "espera"  # "espera" | "jogando"
         self.criado_em = datetime.now()
         self.config = Lobby.config_padrao()
+        # Estado do commit-reveal enquanto a partida ainda não começou (ver seed.py).
+        # None quando a verificação está desligada ou após a seed ser fixada na Partida.
+        self.seed_info = None
 
     @staticmethod
     def config_padrao():
@@ -131,6 +146,8 @@ class Lobby:
             'publica': True,
             'substituir_desconectado_por_ia': False,
             'ia_nivel_padrao': 2,
+            # Verificação de integridade dos dados (provably fair): opt-in do master.
+            'verificacao_ativa': False,
         }
 
     def sala_room(self):
@@ -151,6 +168,7 @@ class Lobby:
                 'rodada_num': rodada.rodada_num,
                 'jogaram_dados': rodada.jogaram_dados,
                 'todos_os_dados': rodada.todos_os_dados,
+                'dados_por_jogador': rodada.dados_por_jogador,
                 'com_coringa': rodada.com_coringa,
                 'coringa_atual_qtd': rodada.coringa_atual_qtd,
                 'coringa_atual_jogador_id': rodada.coringa_atual_jogador.client_id
@@ -177,6 +195,8 @@ class Lobby:
             'jogadores_ids': [jogador.client_id for jogador in partida.jogadores],
             'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
             'vencedor_final_id': partida.vencedor_final.client_id if partida.vencedor_final else None,
+            'seed_info': partida.seed_info,
+            'seed_final': partida.seed_final,
             'rodadas': rodadas,
         }
 
@@ -192,6 +212,7 @@ class Lobby:
             'status': self.status,
             'criado_em': self.criado_em.isoformat() if self.criado_em else None,
             'config': self.config,
+            'seed_info': self.seed_info,
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
         }
@@ -212,6 +233,7 @@ class Lobby:
         lobby.criado_em = datetime.fromisoformat(criado_em) if criado_em else datetime.now()
         lobby.config = dict(cls.config_padrao())
         lobby.config.update(dados.get('config') or {})
+        lobby.seed_info = dados.get('seed_info')
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):
@@ -232,6 +254,8 @@ class Lobby:
             jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
             jogador.is_ia = bool(dados_jogador.get('is_ia', False))
             jogador.ia_nivel = dados_jogador.get('ia_nivel')
+            jogador.compromisso_seed = dados_jogador.get('compromisso_seed')
+            jogador.nonce_seed = dados_jogador.get('nonce_seed')
             jogador.lobby_atual = lobby
             jogadores[jogador.client_id] = jogador
         lobby.jogadores = list(jogadores.values())
@@ -242,7 +266,9 @@ class Lobby:
             partida = Partida(do_lobby=lobby, jogadores=jogadores_partida,
                               partida_numero=dados_partida.get('partida_num', 1),
                               dados_qtd=dados_partida.get('dados_qtd', 1),
-                              com_coringa=dados_partida.get('com_coringa', True))
+                              com_coringa=dados_partida.get('com_coringa', True),
+                              seed_info=dados_partida.get('seed_info'))
+            partida.seed_final = dados_partida.get('seed_final')
             partida.jogador_sorteado = jogadores.get(dados_partida.get('jogador_sorteado_id'))
             partida.vencedor_final = jogadores.get(dados_partida.get('vencedor_final_id'))
             for dados_rodada in dados_partida.get('rodadas', []):
@@ -251,6 +277,7 @@ class Lobby:
                                 vez_atual=jogadores.get(dados_rodada.get('vez_atual_id')))
                 rodada.jogaram_dados = bool(dados_rodada.get('jogaram_dados', False))
                 rodada.todos_os_dados = list(dados_rodada.get('todos_os_dados') or [])
+                rodada.dados_por_jogador = dados_rodada.get('dados_por_jogador') or {}
                 rodada.com_coringa = bool(dados_rodada.get('com_coringa', True))
                 rodada.coringa_atual_qtd = dados_rodada.get('coringa_atual_qtd', 0)
                 rodada.coringa_atual_jogador = jogadores.get(dados_rodada.get('coringa_atual_jogador_id'))
@@ -293,15 +320,20 @@ class Lobby:
 
         return lobby
 
-    def construir_partida(self, dados_qtd):
+    def construir_partida(self, dados_qtd, seed_info=None):
         """
         Constrói uma partida em um lobby.
         :param dados_qtd: A quantidade de dados para cada jogador nesta partida.
+        :param seed_info: Dados do commit-reveal (seed.py) quando a verificação
+        está ativa; None no fluxo legado.
         """
         emit('reset_partida', to=self.sala_room())  # Arruma algumas coisas da partida anterior no front-end
         partida_numero = len(self.partidas) + 1
         partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
-                          dados_qtd=dados_qtd, com_coringa=bool(self.config.get('com_coringa', True)))
+                          dados_qtd=dados_qtd, com_coringa=bool(self.config.get('com_coringa', True)),
+                          seed_info=seed_info)
+        # A seed já foi fixada na Partida; o estado pendente do lobby não é mais necessário.
+        self.seed_info = None
         self.partidas.append(partida)
         self.status = 'jogando'
         for jogador in self.jogadores:
@@ -353,6 +385,9 @@ class Lobby:
         if 'substituir_desconectado_por_ia' in dados and isinstance(dados['substituir_desconectado_por_ia'], bool):
             config['substituir_desconectado_por_ia'] = dados['substituir_desconectado_por_ia']
             aplicado = True
+        if 'verificacao_ativa' in dados and isinstance(dados['verificacao_ativa'], bool):
+            config['verificacao_ativa'] = dados['verificacao_ativa']
+            aplicado = True
         try:
             if 'ia_nivel_padrao' in dados:
                 valor = int(dados['ia_nivel_padrao'])
@@ -363,6 +398,124 @@ class Lobby:
             pass
         self.config = config
         return aplicado
+
+    # ------------------------------------------------------------------
+    # Verificação de integridade (provably fair) — ver seed.py
+    # ------------------------------------------------------------------
+
+    def preparar_seed(self):
+        """
+        Garante que o servidor já tem uma entropia comprometida ANTES de aceitar
+        nonces de jogadores: gera o nonce do servidor e, se possível, fixa um
+        round futuro do beacon drand (a entropia externa). Idempotente.
+        """
+        if self.seed_info is not None:
+            return self.seed_info
+        nonce_servidor = seed.gerar_nonce()
+        info = {
+            'versao': seed.VERSAO_ATUAL,
+            'fonte': 'servidor',
+            'entropia_externa': nonce_servidor,
+            'nonce_servidor': nonce_servidor,
+            'compromisso_servidor': seed.compromisso(nonce_servidor),
+            'beacon': None,
+            'compromissos': {},
+            'seed_final': None,
+        }
+        plano = seed.beacon_planejar()
+        if plano:
+            info['fonte'] = 'beacon'
+            info['beacon'] = plano
+        self.seed_info = info
+        return info
+
+    def sincronizar_compromissos(self):
+        """Copia para o seed_info os compromissos de todos os jogadores (inclusive bots)."""
+        if self.seed_info is None:
+            return
+        # Reconstrói a partir dos jogadores atuais: remove compromissos de quem saiu.
+        self.seed_info['compromissos'] = {
+            jogador.client_id: jogador.compromisso_seed
+            for jogador in self.jogadores
+            if jogador.compromisso_seed
+        }
+
+    def registrar_compromisso(self, jogador, nonce, compromisso_valor):
+        """
+        Valida e guarda o nonce/compromisso de um jogador. Devolve True se aceito.
+        """
+        if not seed.valido_nonce(nonce):
+            return False
+        if seed.compromisso(nonce) != compromisso_valor:
+            return False
+        jogador.nonce_seed = nonce
+        jogador.compromisso_seed = compromisso_valor
+        self.preparar_seed()
+        self.seed_info.setdefault('compromissos', {})[jogador.client_id] = compromisso_valor
+        return True
+
+    def info_publica_seed(self):
+        """Payload público do estado do commit-reveal (sem revelar nonces)."""
+        if self.seed_info is None:
+            return None
+        self.sincronizar_compromissos()
+        return {
+            'versao': self.seed_info.get('versao'),
+            'fonte': self.seed_info.get('fonte'),
+            'compromisso_servidor': self.seed_info.get('compromisso_servidor'),
+            'beacon': self.seed_info.get('beacon'),
+            'compromissos': dict(self.seed_info.get('compromissos') or {}),
+        }
+
+    def finalizar_seed(self):
+        """
+        Resolve a entropia externa (beacon, com fallback para o nonce do servidor),
+        coleta os nonces dos participantes e fixa a seed_final. Devolve o dict de
+        auditoria (também guardado no seed_info) ou None se a verificação está off.
+        """
+        if not self.config.get('verificacao_ativa'):
+            return None
+        info = self.preparar_seed()
+
+        entropia = None
+        if info.get('beacon'):
+            beacon = info['beacon']
+            entropia = seed.beacon_buscar(beacon.get('chain'), beacon.get('round'))
+            if entropia:
+                info['fonte'] = 'beacon'
+                info['beacon'] = dict(beacon, randomness=entropia)
+        if not entropia:
+            info['fonte'] = 'servidor'
+            info['beacon'] = None
+            entropia = info['nonce_servidor']
+        info['entropia_externa'] = entropia
+
+        nonces = {}
+        participantes = []
+        for jogador in self.jogadores:
+            compromisso_valor = jogador.compromisso_seed
+            nonce = jogador.nonce_seed
+            sem_reveal = False
+            if nonce and compromisso_valor and seed.compromisso(nonce) == compromisso_valor:
+                nonce_final = nonce
+            elif compromisso_valor:
+                nonce_final = seed.nonce_fallback(compromisso_valor)
+                sem_reveal = True
+            else:
+                nonce_final = None
+            if nonce_final is not None:
+                nonces[jogador.client_id] = nonce_final
+            participantes.append({
+                'client_id': jogador.client_id,
+                'nome': jogador.username,
+                'compromisso': compromisso_valor,
+                'nonce': nonce_final,
+                'sem_reveal': sem_reveal,
+            })
+
+        info['participantes'] = participantes
+        info['seed_final'] = seed.derivar_seed(info['fonte'], entropia, nonces)
+        return info
 
     def contar_prontos(self):
         """Quantidade de jogadores prontos (o master conta como pronto por padrão)."""
@@ -419,7 +572,15 @@ class Lobby:
         self.conferiram_vencedor = 0
         self.pagina = 0
         self.status = 'espera'
+        # Nonces são de uso único por partida: zera os antigos (já revelados na
+        # auditoria) e gera novos para os bots da próxima partida.
+        self.seed_info = None
         for jogador in self.jogadores:
+            jogador.compromisso_seed = None
+            jogador.nonce_seed = None
+            if jogador.is_ia:
+                jogador.nonce_seed = seed.gerar_nonce()
+                jogador.compromisso_seed = seed.compromisso(jogador.nonce_seed)
             jogador.partida_atual = None
             jogador.rodada_atual = None
             jogador.turno_atual = None
@@ -540,13 +701,21 @@ class Partida:
     Representa o momento em que todos os jogadores estão no jogo, até o momento em que sobra um ganhador.
     """
 
-    def __init__(self, do_lobby, jogadores, partida_numero, dados_qtd, com_coringa=True):
+    def __init__(self, do_lobby, jogadores, partida_numero, dados_qtd, com_coringa=True, seed_info=None):
         self.partida_num = partida_numero
         self.dados_qtd = dados_qtd
         self.com_coringa = com_coringa
         self.jogadores = jogadores
-        self.jogador_sorteado = secrets.choice(self.jogadores)
         self.do_lobby = do_lobby
+        self.seed_info = seed_info
+        self.seed_final = seed_info.get('seed_final') if seed_info else None
+        # Com verificação ativa, o jogador inicial também é derivado da seed
+        # (auditável); sem ela, mantém o sorteio legado.
+        if self.seed_final and jogadores:
+            indice = seed.indice_inicial(self.seed_final, do_lobby.sala_id, partida_numero, len(jogadores))
+            self.jogador_sorteado = jogadores[indice]
+        else:
+            self.jogador_sorteado = secrets.choice(self.jogadores)
         self.rodadas = []
         self.vencedor_final = None
 
@@ -691,6 +860,34 @@ class Partida:
         # Atualizar pontos na tela inicial.
         emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=self.sala_room())
 
+        # Verificação de integridade: revela seed, nonces e dados para auditoria.
+        if self.seed_info:
+            emit('auditoria_partida', self.montar_auditoria(), to=self.sala_room())
+
+    def montar_auditoria(self):
+        """
+        Payload da auditoria (fim da partida): seed revelada, compromissos,
+        nonces dos participantes e os dados por rodada, para o cliente recomputar
+        tudo com a fórmula pública (seed.py) sem confiar no servidor.
+        """
+        info = self.seed_info or {}
+        return {
+            'versao': info.get('versao', seed.VERSAO_ATUAL),
+            'sala': self.do_lobby.sala_id,
+            'partida_num': self.partida_num,
+            'fonte': info.get('fonte'),
+            'entropia_externa': info.get('entropia_externa'),
+            'nonce_servidor': info.get('nonce_servidor'),
+            'compromisso_servidor': info.get('compromisso_servidor'),
+            'beacon': info.get('beacon'),
+            'participantes': info.get('participantes', []),
+            'seed_final': self.seed_final,
+            'rodadas': [
+                {'rodada_num': rodada.rodada_num, 'dados_por_jogador': rodada.dados_por_jogador}
+                for rodada in self.rodadas
+            ],
+        }
+
 
 class Rodada:
     """
@@ -706,6 +903,7 @@ class Rodada:
         self.jogaram_dados = False
         self.turnos = []
         self.todos_os_dados = []
+        self.dados_por_jogador = {}
         self.jogadores = jogadores
         self.com_coringa = com_coringa
         self.coringa_atual_qtd = 0
@@ -771,8 +969,21 @@ class Rodada:
             emit('jogada_invalida', {'txtadd': txt}, to=jogador.client_id)
 
     def jogar_dados(self):
-        for jogador in self.da_partida.jogadores:
-            dados = jogador.jogar_dados()
+        partida = self.da_partida
+        seed_final = getattr(partida, 'seed_final', None)
+        self.dados_por_jogador = {}
+        for jogador in partida.jogadores:
+            if seed_final:
+                # Derivação determinística (auditável) em vez de sorteio.
+                dados = [
+                    seed.valor(seed_final, partida.do_lobby.sala_id, partida.partida_num,
+                               self.rodada_num, jogador.client_id, indice)
+                    for indice in range(jogador.dados_qtd)
+                ]
+                jogador.dados = dados
+            else:
+                dados = jogador.jogar_dados()
+            self.dados_por_jogador[jogador.client_id] = list(dados)
             for dado in dados:
                 self.todos_os_dados.append(dado)
         self.jogaram_dados = True
