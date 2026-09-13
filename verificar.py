@@ -1777,6 +1777,93 @@ def teste_retomar_negado_chave_stale():
     _ok("retomar_negado (chave stale)")
 
 
+def teste_refresh_conferencia_preserva_ok():
+    """
+    Fase D2: após um refresh NA CONFERÊNCIA (página 3), o placeholder não pode
+    piscar como ESPECTADOR antes do snapshot real — o `espectador` escondia o
+    botão "Ok" (`bot_confe_fim`) e o snapshot da retomada nunca o reexibia,
+    travando a rodada em "Aguardando você...". Com a retomada adiada, o
+    snapshot sai só na retomada da identidade (sem `espectador` em momento
+    algum).
+    """
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+    _rodada_ate_conferencia(clis)
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 3, f"deve estar na conferência, página={lobby.pagina}"
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    ana_chave = ana.chave_secreta
+    ana_sid = ana.client_id
+
+    clis["Ana"][0].disconnect()
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.desconectado_em is not None and ana.client_id == ana_sid
+
+    # Refresh: conecta com tem_chave=1; o snapshot do placeholder é ADIADO.
+    c = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    lobby = modulo_store.carregar_sala(SALA)
+    sid_novo = next(j.client_id for j in lobby.espectadores)
+    presentes = c.get_received()
+    assert _achar_evento(presentes, "connect_start") is not None, \
+        "placeholder deve receber connect_start"
+    assert _achar_evento(presentes, "espectador") is None, \
+        "snapshot do placeholder não pode piscar como espectador (gesto do bug)"
+
+    c.emit("retomar_identidade", {"chave": ana_chave})
+    eventos = c.get_received()
+    assert _achar_evento(eventos, "espectador") is None, \
+        "snapshot da retomada não pode conter espectador (esconderia o botão Ok)"
+    assert _achar_evento(eventos, "cards_conferencia") is not None, \
+        "snapshot da retomada deve reconstruir a conferência (página 3)"
+
+    lobby = modulo_store.carregar_sala(SALA)
+    anas = [j for j in lobby.jogadores if j.username == "Ana"]
+    assert len(anas) == 1 and anas[0].client_id == sid_novo, \
+        "retomada deve religar o sid novo à identidade de Ana"
+
+    c.disconnect()
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("refresh na conferência preserva o botão Ok (Fase D2)")
+
+
+def teste_heartbeat_resincroniza_vez_partida():
+    """
+    Fase D2: um jogador na página de turnos (2) que perdeu o dispatcher de vez
+    (gap entre instâncias logo após um refresh) informa `vez=''` no heartbeat;
+    o servidor detecta a divergência, lê o estado fresco e reemite o
+    `meu_turno`/`espera_turno` — sem isso ele ficaria sem o menu de jogada.
+    """
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    vez = rodada.vez_atual
+
+    outro = next(nome for nome in clis if nome != vez.username)
+    c_outro, chave_outro = clis[outro]
+    c_outro.get_received()
+    c_outro.emit("heartbeat", {"chave": chave_outro, "pagina": 2, "vez": ""})
+    eventos = c_outro.get_received()
+    espera = _achar_evento(eventos, "espera_turno")
+    assert espera is not None and espera.get("username") == vez.username, \
+        "heartbeat deve reemitir espera_turno com o da vez atual"
+    assert _achar_evento(eventos, "meu_turno") is None, \
+        "jogador fora da vez não pode receber meu_turno"
+
+    c_vez, chave_vez = clis[vez.username]
+    c_vez.get_received()
+    c_vez.emit("heartbeat", {"chave": chave_vez, "pagina": 2, "vez": ""})
+    eventos = c_vez.get_received()
+    mt = _achar_evento(eventos, "meu_turno")
+    assert mt is not None and mt.get("username") == vez.username, \
+        "heartbeat deve reemitir meu_turno para o próprio da vez"
+
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("heartbeat re-sincroniza a vez da partida (Fase D2)")
+
+
 def teste_ultimo_humano_sala_de_ias_ganha_grace():
     """
     Fase 23: o último humano de uma partida só com IAs ganha a janela de
@@ -1888,6 +1975,8 @@ def verificar_integracao():
     testes_fase_d = [
         ("retomar-identidade", teste_retomar_identidade_por_evento),
         ("retomar-negado", teste_retomar_negado_chave_stale),
+        ("refresh-conferencia-ok", teste_refresh_conferencia_preserva_ok),
+        ("heartbeat-resync-vez", teste_heartbeat_resincroniza_vez_partida),
     ]
     testes_fase23 = [
         ("ultimo-humano-ia", teste_ultimo_humano_sala_de_ias_ganha_grace),

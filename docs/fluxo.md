@@ -57,7 +57,7 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 | `listar_partidas` (`filtros`, `sala_atual`) | `listar_partidas` | evento_leitura |
 | `criar_sala` | `criar_sala` | — |
 | `verificar_desconectados` | `verificar_desconectados` | extrair_chave=None |
-| `heartbeat` (`chave`, `pagina`) | `heartbeat` | cooldown=None, sem autenticar |
+| `heartbeat` (`chave`, `pagina`, `vez`) | `heartbeat` | cooldown=None, sem autenticar |
 | `jogar_dados` (`chave`) | `jogar_dados` | + chave |
 | `joguei_dados` (`chave_secreta`) | `joguei_dados` | chave (campo `chave_secreta`), idempotente por rodada |
 | `autojogar` (`chave`) | `autojogar` | + chave |
@@ -75,7 +75,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 |---|---|---|---|
 | `connect_start` | app.py:445 | cliente | 1661 |
 | `sala_cheia` | app.py:426/432 | cliente | 432 |
-| `retomar_negado` | app.py:487 | cliente | 1717 |
+| `retomar_negado` | app.py:504 | cliente | 1717 |
 | `update_username` | app.py:592 | cliente | 1740 |
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
@@ -90,8 +90,8 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `construtor_dados` | funcoes_gerais:252 | cliente | 1009 |
 | `construtor_html` | funcoes_gerais:269 | cliente | 1117 |
 | `atualizar_turno` | modelos:1554 | sala | 1183 |
-| `meu_turno` | modelos:1502 | cliente | 1270 |
-| `espera_turno` | modelos:1505 | cliente | 1306 |
+| `meu_turno` | modelos:1502 / funcoes_gerais:236 (dispatcher D2) | cliente | 1270 |
+| `espera_turno` | modelos:1505 / funcoes_gerais:242 (dispatcher D2) | cliente | 1306 |
 | `reset_rodada` | funcoes_gerais:276 | cliente | 1316 |
 | `reset_partida` | modelos:508 | sala | 1340 |
 | `formatador_coletivo` | funcoes_gerais:292 | cliente | 1371 |

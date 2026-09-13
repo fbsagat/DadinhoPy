@@ -1502,7 +1502,10 @@ class Rodada:
         emit('meu_turno', payload, to=jogador_atual.client_id)
         for jogador in self.da_partida.jogadores:
             if jogador != jogador_atual:
-                emit('espera_turno', {'username': jogador.username}, to=jogador.client_id)
+                # O username é o da VEZ (jogador_atual), não o do receptor: o
+                # cliente (Fase D2) e o snapshot (`emitir_dispatcher_turno`)
+                # dependem desse campo para saber quem é o da vez.
+                emit('espera_turno', {'username': jogador_atual.username}, to=jogador.client_id)
 
     def selecionar_proximo_jogador_na_lista(self, jogador_atual):
         lista_jogadores = self.da_partida.jogadores

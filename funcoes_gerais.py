@@ -218,6 +218,30 @@ def emitir_status_vitoria(lobby):
     emit('vitoria_status', status_vitoria(lobby), to=lobby.sala_room())
 
 
+def emitir_dispatcher_turno(lobby, jogador):
+    """
+    Reemite só o indicador de vez da página de turnos (2) — `meu_turno` (menu
+    de jogada) ou `espera_turno` — para um jogador cuja tela já está montada
+    mas cujo dispatcher ficou desatualizado (snapshot foi para outra instância
+    ou o `meu_turno`/`espera_turno` de uma troca de vez se perdeu entre
+    instâncias no serverless). Servidor nunca emite para espectador.
+    """
+    partida = lobby.partidas[-1] if lobby.partidas else None
+    if partida is None or not partida.rodadas:
+        return
+    rodada = partida.rodadas[-1]
+    vez = rodada.vez_atual
+    if vez is None or jogador not in partida.jogadores:
+        return
+    if vez == jogador:
+        payload = {'username': jogador.username,
+                   'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)}
+        payload.update(rodada.contexto_aposta())
+        emit('meu_turno', payload, to=jogador.client_id)
+    else:
+        emit('espera_turno', {'username': vez.username}, to=jogador.client_id)
+
+
 def enviar_snapshot_sala(lobby, jogador):
     """
     Reconstrói o front-end de um jogador que acabou de conectar (tab novo, refresh
@@ -300,14 +324,8 @@ def enviar_snapshot_sala(lobby, jogador):
                       'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
                       'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
                      to=jogador.client_id)
-        if vez_atual is not None and not espectador:
-            if vez_atual == jogador:
-                payload = {'username': jogador.username,
-                           'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)}
-                payload.update(rodada.contexto_aposta())
-                emit('meu_turno', payload, to=jogador.client_id)
-            else:
-                emit('espera_turno', {'username': vez_atual.username}, to=jogador.client_id)
+        if not espectador:
+            emitir_dispatcher_turno(lobby, jogador)
         return
 
     if pagina == 3:

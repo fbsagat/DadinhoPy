@@ -26,7 +26,9 @@ const diceImages = [
 // retomada pela primeira mensagem (`retomar_identidade`). `tem_chave` é só um
 // sinal booleano não-secreto para o servidor não barrar quem pode estar
 // retomando (sala cheia/GC).
-const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
+// Fase D2: vira `let` para `retomar_negado` adotar a chave do placeholder —
+// reincidência (reconnect com sid novo) tenta retomar com a chave certa.
+let chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
 // WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
 // request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
 // entra em loop de reconexão). O polling fica só como fallback de rede.
@@ -51,7 +53,7 @@ function agendar_heartbeat() {
     const intervalo = indiceAtual === 0 ? INTERVALO_HEARTBEAT_ESPERA : INTERVALO_HEARTBEAT_PARTIDA;
     setTimeout(function () {
         if (socket.connected && chave_secreta) {
-            socket.emit('heartbeat', { chave: chave_secreta, pagina: indiceAtual });
+            socket.emit('heartbeat', { chave: chave_secreta, pagina: indiceAtual, vez: vez_atual_nome });
         }
         agendar_heartbeat();
     }, intervalo);
@@ -843,6 +845,12 @@ socket.on("mudar_pagina", function (data) {
     } else {
         parar_timer_jogada();
     }
+    // Fase D2: fora da página de turnos não há "da vez" — zera o indicador.
+    // Se o jogador voltar à página 2 sem receber dispatcher (gap de refresh),
+    // `vez=''` faz o heartbeat pedir o `meu_turno`/`espera_turno` de volta.
+    if (data.pag_numero !== 2) {
+        vez_atual_nome = '';
+    }
     tocar_som('virar_papel');
     const tela_busca = document.getElementById('tela_busca');
     if (tela_busca) {
@@ -1221,6 +1229,12 @@ let timer_autojogar = null;
 let tempo_autojogar_seg = 0;
 let sou_da_vez = false;      // recebeu `meu_turno` (a vez atual é a minha)
 let tempo_turno_max = 0;     // limite do turno (vem no `meu_turno`)
+// Fase D2: apelido do jogador que o cliente acredita estar NA VEZ (vem de
+// `meu_turno`/`espera_turno`/`formatador_coletivo`). Vai no heartbeat para o
+// servidor detectar um indicador de vez perdido entre instâncias (refresh) e
+// reenviar só o `meu_turno`/`espera_turno` — senão a tela fica sem o menu de
+// jogada mesmo com a página correta.
+let vez_atual_nome = '';
 let tempo_conf_vit = 0;      // limite da conferência/vitória (vem no `cards_conferencia`/`vencedor_da_partida`, Fase 22)
 
 function atualizar_contador_jogada() {
@@ -1277,6 +1291,9 @@ socket.on('meu_turno', function (data) {
     // contador da rolagem (`construtor_dados`/`mudar_pagina`).
     sou_da_vez = true;
     tempo_turno_max = Number(data.tempo_max) || 0;
+    // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
+    // isso para pedir um `meu_turno` reenviado se o indicador se perder).
+    vez_atual_nome = String(data.username || '');
     if (indiceAtual === 2) {
         iniciar_timer_jogada(tempo_turno_max);
     }
@@ -1308,6 +1325,9 @@ socket.on('espera_turno', function (data) {
     const painel_aguarde = document.getElementById('painel_aguarde');
     sou_da_vez = false; // Fase 21: não é mais a minha vez, zera o contador.
     parar_timer_jogada();
+    // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
+    // isso para pedir um `espera_turno` reenviado se o indicador se perder).
+    vez_atual_nome = String(data.username || '');
     painel_jogada.style.display = "none"; // Oculta o painel de jogada
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
 })
@@ -1372,6 +1392,9 @@ socket.on('formatador_coletivo', function (data) {
     const jogadores = data.jogadores_nomes;
     const jog_da_vez = data.jogador_inicial_nome;
     const eu = nome_jogador;
+    // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
+    // isso para pedir o dispatcher reenviado se o indicador se perder).
+    vez_atual_nome = String(jog_da_vez || '');
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_${jogador}`);
@@ -1714,8 +1737,11 @@ socket.on("connect_start", function (data) {
 // A chave guardada não pertence a esta sala (ex.: sessão de outra sala, ou a
 // identidade expirou): adota o placeholder como identidade nova e persiste a
 // chave dele no sessionStorage — senão a chave stale ficaria para sempre.
+// Fase D2: `chave_resumo` passa a apontar para a chave do placeholder, para um
+// reconnect com sid novo (morte de instância) retomar a identidade correta.
 socket.on('retomar_negado', function () {
     if (chave_secreta) {
+        chave_resumo = chave_secreta;
         sessionStorage.setItem('dadinho_chave', chave_secreta);
     }
 });
@@ -1727,6 +1753,11 @@ socket.on('connect', function () {
         status.textContent = t('js.conectado');
         status.className = 'd-block mb-2 text-success';
     }
+    // Fase D2: reconnect com sid novo (morte de instância) ainda tem a chave
+    // guardada — o placeholder foi criado com snapshot ADIADO (`tem_chave=1`);
+    // rearmar `retomar_enviado` faz o `connect_start` seguinte reemitir a
+    // `retomar_identidade` e destravar o snapshot pra este cliente.
+    retomar_enviado = false;
 });
 
 socket.on('disconnect', function () {

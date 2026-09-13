@@ -5,7 +5,8 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             salvar_sala, validar_input, enviar_snapshot_sala, listar_resumos_partidas,
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
                             gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO,
-                            emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem)
+                            emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem,
+                            emitir_dispatcher_turno)
 from modelos import Jogador
 from store import trancar_sala, esquecer_sala
 from datetime import datetime
@@ -406,6 +407,15 @@ def handle_connect():
         join_room(lobby.sala_room(), sid=client_id)
 
         jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+        # Fase D2 (refresh): quem conecta com `tem_chave=1` (chave guardada no
+        # sessionStorage) está prestes a retomar a identidade pela primeira
+        # mensagem (`retomar_identidade`). NO SNAPSHOT imediato do placeholder:
+        # ele piscaria como ESPECTADOR (a partida está em andamento) e, na tela
+        # de conferência (3), o evento `espectador` esconderia o botão "Ok" sem
+        # que o snapshot real o reexibisse — a rodada travava em "Aguardando
+        # você...". O snapshot sai na retomada (ou, se a chave for stale, no
+        # `retomar_negado`).
+        deferir_snapshot = jogador is None and request.args.get('tem_chave', '') == '1'
         if jogador is None:
             # Fase D: a `chave_secreta` não trafega mais na query string do
             # handshake (vazava em logs de acesso/histórico). Aqui cria-se um
@@ -446,7 +456,8 @@ def handle_connect():
              {"is_master": jogador.master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id,
               'username': jogador.username})
         atualizar_lista_usuarios(lobby)
-        enviar_snapshot_sala(lobby, jogador)
+        if not deferir_snapshot:
+            enviar_snapshot_sala(lobby, jogador)
         # Fase 11: se a partida parou na vez de uma IA (ex.: troca de instância),
         # o connect destrava o fluxo.
         if ia.processar(lobby):
@@ -484,6 +495,12 @@ def retomar_identidade(dados=None):
         # jogador já saiu/expirou a janela de graça). O placeholder continua
         # valendo como identidade nova — avisa o front para persistir a chave
         # dele (senão a chave stale ficaria para sempre no sessionStorage).
+        # Fase D2: quem veio com `tem_chave=1` não recebeu snapshot no connect
+        # (adiado justamente para a retomada), então o placeholder precisa dele
+        # agora que virou a identidade definitiva.
+        placeholder = lobby.buscar_jogador_pelo_client_id(client_id)
+        if placeholder is not None:
+            enviar_snapshot_sala(lobby, placeholder)
         emit('retomar_negado', to=client_id)
         return
     if alvo.client_id == client_id:
@@ -844,6 +861,13 @@ def heartbeat(dados=None):
     quando o cache expirava — na Vercel isso era o bug recorrente de o host não
     ver quem entra/fica pronto e o jogador não avançar de tela.
 
+    Fase D2: o re-sync da partida ganhou o indicador de vez. O cliente informa
+    a página e quem ele acredita estar na vez (`vez`); se o da vez divergir do
+    autoritativo (um `meu_turno`/`espera_turno` de troca de vez se perdeu entre
+    instâncias — comum logo após um refresh, já que o socket novo pode pousar
+    numa instância diferente da dos demais), o servidor reemite só o dispatcher
+    de vez (`emitir_dispatcher_turno`) em vez do snapshot inteiro.
+
     Fase C: ao contrário dos demais handlers, este NÃO passa por `autenticar` —
     lê pelo índice em processo (`sala_do_cliente`) e usa o cache tolerante a
     defasagem (`store.carregar_sala_leve`) para o heartbeat da PARTIDA, evitando
@@ -864,6 +888,23 @@ def heartbeat(dados=None):
     jogador = lobby.buscar_jogador_pelo_client_id(client_id)
     pagina_cliente = int(dados.get('pagina', 0) or 0)
     pagina_sala = lobby.pagina or 0
+    # Fase D2 (refresh/cross-instance): o cliente também informa quem ele
+    # acredita ser o da vez na página de turnos (2). Se divergir do estado
+    # autoritativo, o `meu_turno`/`espera_turno` de uma troca de vez ficou na
+    # instância de origem (gap entre instâncias) e o jogador ficaria preso sem
+    # o menu de jogada — o heartbeat reemite só o dispatcher de vez.
+    vez_cliente = str(dados.get('vez', '') or '')
+    vez_sala = ''
+    espectador_aux = True
+    if pagina_sala == 2:
+        partida_aux = lobby.partidas[-1] if lobby.partidas else None
+        if partida_aux is not None and partida_aux.rodadas:
+            vez_aux = partida_aux.rodadas[-1].vez_atual
+            if vez_aux is not None:
+                vez_sala = vez_aux.username or ''
+            espectador_aux = jogador not in partida_aux.jogadores
+    # Espectador não tem menu de jogada: nunca dispara o re-sync de vez.
+    vez_divergente = pagina_sala == 2 and not espectador_aux and vez_cliente != vez_sala
     # Re-sync entre instâncias (Fases 18/19/E): a lista da espera e o snapshot
     # da página corrente vêm do store compartilhado para quem bateu, cobrindo o
     # gap dos broadcasts que ficam presos na instância de origem.
@@ -876,7 +917,7 @@ def heartbeat(dados=None):
     # ficava preso na espera quando o master iniciava (o `mudar_pagina` fica na
     # instância do host). Recarregar do store a cada batida da espera (a cada
     # 20s) é o custo certo para o re-sync; o cache ainda evita o GET da partida.
-    if pagina_cliente != pagina_sala or lobby.status == 'espera':
+    if pagina_cliente != pagina_sala or lobby.status == 'espera' or vez_divergente:
         lobby = store.carregar_sala(sala_id)
         veio_do_cache = False
         if lobby is None:
@@ -889,6 +930,10 @@ def heartbeat(dados=None):
             emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
         if pagina_cliente != pagina_sala:
             enviar_snapshot_sala(lobby, jogador)
+        elif vez_divergente:
+            # Tela já montada e na página certa: falta só o indicador de vez
+            # (menu de jogada) que se perdeu entre instâncias.
+            emitir_dispatcher_turno(lobby, jogador)
     if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
         lobby.marcar_visto()
     if not veio_do_cache and ia.processar(lobby):
