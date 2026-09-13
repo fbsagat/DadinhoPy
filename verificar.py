@@ -643,6 +643,81 @@ def teste_v2_cooldown():
     _ok("V2 (cooldown)")
 
 
+def teste_conferencia_ok_sem_cooldown():
+    """
+    O "Ok" da conferência não pode ser derrubado pelo cooldown de escrita (0,5s).
+
+    Quando o humano desconfia (a tela de conferência abre na hora, sem atraso de
+    narração) e confirma logo em seguida, o drop silencioso do `conferencia_final`
+    pelo cooldown deixava a partida presa na conferência — e o botão já tinha sido
+    desabilitado no cliente, sem como recuperar. A confirmação é idempotente
+    (`confirmou_rodada`) e espaçada pelo fluxo do jogo, então não passa pelo
+    cooldown anti-spam.
+    """
+    _limpar()
+    modulo_app.tem_cooldown = funcoes_gerais.tem_cooldown
+    _sleep_real = time.sleep
+    try:
+        c1, cs1, _ = _conectar()
+        chave = cs1["chave_secreta"]
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        _sleep_real(0.6)
+        c1.emit("adicionar_ia", {"chave": chave, "nivel": 2, "quantidade": 4})
+        _sleep_real(0.6)
+        c1.emit("iniciar_partida", {"chave": chave, "dados_qtd": 3})
+        _sleep_real(0.6)
+
+        def _estado():
+            lobby = modulo_store.carregar_sala(SALA)
+            partida = lobby.partidas[-1]
+            rodada = partida.rodadas[-1]
+            humano = next(j for j in lobby.jogadores if not j.is_ia)
+            return lobby, partida, rodada, humano
+
+        desconfiou = False
+        for _ in range(400):
+            lobby, partida, rodada, humano = _estado()
+            if lobby.status == "espera":
+                break
+            if lobby.pagina == 1:
+                c1.emit("jogar_dados", {"chave": chave})
+                _sleep_real(0.6)
+                c1.emit("joguei_dados", {"chave_secreta": chave})
+                _sleep_real(0.6)
+            elif lobby.pagina == 2:
+                if rodada.vez_atual is humano and rodada.turnos:
+                    # O humano desconfia: o cooldown dele fica "fresco" para o OK.
+                    c1.emit("desconfiar", {"dados": {"chave": chave}})
+                    desconfiou = True
+                    break
+                elif rodada.vez_atual is humano:
+                    c1.emit("apostar", {"dados": {"chave": chave, "dado": 1, "quantidade": 1}})
+                    _sleep_real(0.6)
+                else:
+                    # Vez de IA parada: o heartbeat destrava a fila das IAs.
+                    c1.emit("heartbeat", {"chave": chave})
+                    _sleep_real(0.6)
+            elif lobby.pagina == 3:
+                c1.emit("conferencia_final", {"chave": chave})
+                _sleep_real(0.6)
+            elif lobby.pagina == 4:
+                c1.emit("vencedor_final", {"chave": chave})
+                _sleep_real(0.6)
+
+        assert desconfiou, "o humano não chegou a desconfiar para testar o OK imediato"
+
+        # Confirma sem nenhuma pausa: o OK logo após o desconfiar não pode ser dropado.
+        c1.emit("conferencia_final", {"chave": chave})
+        lobby, partida, rodada, humano = _estado()
+        assert lobby.pagina != 3, "OK imediato após desconfiar ficou preso na conferência"
+        assert lobby.pagina in (1, 4), f"deve avançar para a próxima rodada, página={lobby.pagina}"
+        c1.disconnect()
+    finally:
+        modulo_app.tem_cooldown = lambda *a, **k: False
+    _limpar()
+    _ok("OK da conferência não é dropado pelo cooldown")
+
+
 def teste_a4_a5_lock_e_sorteio():
     _limpar()
     clis, lobby = _conectar_trio(1)
@@ -1305,6 +1380,7 @@ def verificar_integracao():
         ("grace-espectador", teste_espectador_segura_grace),
         ("sala-sem-jogadores", teste_sala_sem_jogadores_promove_espectador),
         ("config-nome", teste_config_nome_roundtrip),
+        ("conf-ok-cooldown", teste_conferencia_ok_sem_cooldown),
     ]
     testes_seed = [
         ("commit-reveal", teste_commit_reveal),

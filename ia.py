@@ -388,14 +388,13 @@ def _processar_conferencia(lobby):
     if partida is None or not partida.rodadas:
         return False
     rodada = partida.rodadas[-1]
-    houve = False
     for jogador in list(rodada.jogadores):
         if jogador.is_ia and not jogador.confirmou_rodada:
             jogador.confirmou_rodada = True
             rodada.conferiram += 1
-            houve = True
-    if not houve:
-        return False
+    # Fecha mesmo sem nova confirmação agora: o contador já pode estar completo
+    # (ex.: um humano caiu na conferência depois de as IAs confirmarem) e, sem
+    # isto, a rodada ficaria presa para sempre na tela de conferência.
     if rodada.conferiram >= len(rodada.jogadores):
         partida.construir_rodada()
         return True
@@ -404,14 +403,12 @@ def _processar_conferencia(lobby):
 
 def _processar_vitoria(lobby):
     """Confirma a vitória das IAs e volta ao lobby quando todos confirmam."""
-    houve = False
     for jogador in list(lobby.jogadores):
         if jogador.is_ia and not jogador.confirmou_vencedor:
             jogador.confirmou_vencedor = True
             lobby.conferiram_vencedor += 1
-            houve = True
-    if not houve:
-        return False
+    # Idem `_processar_conferencia`: fecha mesmo sem nova confirmação, senão a
+    # tela de vitória fica presa quando o contador já está completo.
     if lobby.conferiram_vencedor >= len(lobby.jogadores):
         lobby.resetar_para_lobby()
         funcoes_gerais.atualizar_lista_usuarios(lobby)

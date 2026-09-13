@@ -2243,15 +2243,15 @@ function jogar_dados() {
 }
 
 function conferencia_final() {
-    const botao = document.getElementById('bot_confe_fim');
+    // Sem `disabled`: o servidor deduplica pela flag `confirmou_rodada`, e travar
+    // o botão aqui deixaria o jogador preso se o evento fosse perdido (cooldown,
+    // rede) — ele precisa poder tentar de novo.
     socket.emit('conferencia_final', { chave: chave_secreta });
-    botao.disabled = true; // Desativa o input
 }
 
 function vencedor_final() {
-    const botao = document.getElementById('bot_vencedor_fim');
+    // Idem: a deduplicação é no servidor (`confirmou_vencedor`).
     socket.emit('vencedor_final', { chave: chave_secreta });
-    botao.disabled = true; // Desativa o input
 }
 
 document.getElementById('comemorar').addEventListener('click', () => {

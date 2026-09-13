@@ -228,27 +228,33 @@ def _gc_sala(lobby):
     return False
 
 
-def evento_mutavel(func):
+def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
     """
     Wrapper padrão para handlers que mutam estado de sala (Fase 7):
-    - V2: rate limit leve por sid;
+    - V2: rate limit leve por sid (desligável com `cooldown=None` para eventos
+      de confirmação — conferência/vitória são idempotentes e espaçados pelo
+      fluxo do jogo, e um drop silencioso pelo cooldown travaria a partida);
     - A4: lock por sala no processo, cobrindo todo o read-modify-write;
     - V3: payload malformado aborta silenciosamente (nunca exceção no evento).
     """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        client_id = request.sid
-        if tem_cooldown(client_id, COOLDOWN_ESCRITA):
-            return
-        sala_id = sala_do_cliente(client_id)
-        try:
-            if sala_id is None:
-                return func(*args, **kwargs)
-            with trancar_sala(sala_id):
-                return func(*args, **kwargs)
-        except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError):
-            return
-    return wrapper
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            client_id = request.sid
+            if cooldown is not None and tem_cooldown(client_id, cooldown):
+                return
+            sala_id = sala_do_cliente(client_id)
+            try:
+                if sala_id is None:
+                    return func(*args, **kwargs)
+                with trancar_sala(sala_id):
+                    return func(*args, **kwargs)
+            except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError):
+                return
+        return wrapper
+    if func is not None:
+        return decorator(func)
+    return decorator
 
 
 def evento_leitura(func):
@@ -781,7 +787,7 @@ def desconfiar(dados, lobby, jogador):
 
 
 @socketio.on('conferencia_final')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar()
 def conferencia_final(dados, lobby, jogador):
     """
@@ -799,14 +805,17 @@ def conferencia_final(dados, lobby, jogador):
     rodada = jogador.rodada_atual
     jogador.confirmou_rodada = True
     rodada.conferiram += 1
-    if rodada.conferiram == len(rodada.jogadores):
+    # `>=` (não `==`): se um jogador foi removido da rodada no meio da conferência,
+    # o contador pode já estar igual/maior que o total atual — travar o jogo aqui
+    # deixaria a tela de conferência presa para sempre.
+    if rodada.conferiram >= len(rodada.jogadores):
         jogador.partida_atual.construir_rodada()
     ia.processar(lobby)
     salvar_sala(lobby)
 
 
 @socketio.on('vencedor_final')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar()
 def vencedor_final(dados, lobby, jogador):
     """
@@ -821,7 +830,9 @@ def vencedor_final(dados, lobby, jogador):
         return
     jogador.confirmou_vencedor = True
     lobby.conferiram_vencedor += 1
-    if lobby.conferiram_vencedor == len(lobby.jogadores):
+    # `>=` (não `==`): mesma ressalva da conferência — jogador removido no meio
+    # não pode deixar o contador de vitória maior que o lobby e travar o reset.
+    if lobby.conferiram_vencedor >= len(lobby.jogadores):
         lobby.resetar_para_lobby()
         atualizar_lista_usuarios(lobby)
         mudar_pagina(0, sala=lobby.sala_id)
