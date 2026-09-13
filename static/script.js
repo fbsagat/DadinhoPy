@@ -1817,8 +1817,11 @@ socket.on("jogar_dados_resultado", function (data) {
         });
         tocar_som_variante('dado_impacto', [1, 2]);
 
-        // Envia confirmação para o servidor
-        socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
+        // Mostra o resultado por ~2 seg antes de enviar a confirmação
+        // e o servidor mudar de tela.
+        setTimeout(() => {
+            socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
+        }, 2000);
     }, rollTime);
 });
 
