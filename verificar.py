@@ -132,6 +132,9 @@ _CODIGO_BOOT = (
     "from app import app;"
     "r=app.test_client().get('/');"
     "assert r.status_code==200, r.status_code;"
+    "s=app.test_client().get('/static/custom_styles.css');"
+    "assert s.status_code==200, s.status_code;"
+    "assert 'Cache-Control' in s.headers, 'estatico sem Cache-Control (I6)';"
     "print('BOOT_OK')"
 )
 
@@ -150,6 +153,31 @@ def verificar_boot():
         "boot VERCEL=1",
         resultado.returncode == 0 and "BOOT_OK" in resultado.stdout,
         (resultado.stderr or resultado.stdout).strip()[-500:],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3b) store em produção: sem configuração, o boot FALHA de forma explícita (I2)
+# ---------------------------------------------------------------------------
+def verificar_store_producao():
+    print("3b) boot VERCEL=1 sem store configurado falha explicitamente (I2)")
+    codigo = (
+        "import os;"
+        "os.environ['VERCEL']='1';"
+        "os.environ.pop('DADINHO_STORE', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_URL', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_TOKEN', None);"
+        "import store;"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo], cwd=RAIZ,
+        capture_output=True, text=True, timeout=60,
+    )
+    saida = (resultado.stderr or "") + (resultado.stdout or "")
+    _checar(
+        "boot sem store falha (não cai em memória)",
+        resultado.returncode != 0 and "Store não configurado" in saida,
+        saida.strip()[-400:],
     )
 
 
@@ -1637,6 +1665,87 @@ def teste_resumo_dedup():
     _ok("dedup de resumo (economia de comandos)")
 
 
+# --- Fase 28: robustez do store e dos locks ---------------------------------
+def teste_h1_blob_corrompido():
+    # Fase 28 (H1): blob inválido no Upstash não pode derrubar o handler com 500.
+    arm = modulo_store.ArmazenamentoUpstash("http://fake", "tok")
+    arm._pedido = lambda metodo, rota, corpo=None: {"result": "{bloco:corrompido!!"}
+    assert arm.carregar_sala("corrompida") is None, "JSON inválido deve devolver None"
+    # JSON válido mas que não desserializa numa árvore Lobby (mesmo efeito).
+    arm._pedido = lambda metodo, rota, corpo=None: {"result": '{"partidas": 42}'}
+    assert arm.carregar_sala("corrompida") is None, "árvore inválida deve devolver None"
+    _ok("H1 (blob corrompido devolve None sem exceção)")
+
+
+def teste_h1b_partida_vazia():
+    # Fase 28 (H1b): Partida construída sem jogadores (blob corrompido que
+    # referencia jogadores ausentes) não pode estourar IndexError/ZeroDivisionError.
+    import modelos
+    emit_original = modelos.emit
+    modelos.emit = lambda *a, **k: None  # fora de request não há room/namespace
+    try:
+        lobby = modelos.Lobby(sala_id="vaz", lobby_numero=1)
+        partida = modelos.Partida(do_lobby=lobby, jogadores=[], partida_numero=1, dados_qtd=2)
+        assert partida.jogador_sorteado is None, \
+            "partida sem jogadores não pode sortear (caminho secrets.choice)"
+        # Com seed ativa (sem jogadores) também não pode zerar o módulo.
+        com_seed = modelos.Partida(do_lobby=lobby, jogadores=[], partida_numero=2, dados_qtd=2,
+                                   seed_info={"seed_final": "a" * 64})
+        assert com_seed.jogador_sorteado is None, \
+            "seed com partida vazia não pode estourar ZeroDivisionError"
+        # Desserialização de um blob que referencia jogador ausente na mesa.
+        dados = {
+            "sala_id": "vaz", "versao": modelos.VERSAO_ATUAL, "jogadores": [],
+            "espectadores": [], "partidas": [
+                {"partida_num": 3, "dados_qtd": 2, "jogadores_ids": ["fantasma"]},
+            ],
+        }
+        recarregado = modelos.Lobby.de_dict(dados)
+        assert recarregado.partidas and recarregado.partidas[0].jogador_sorteado is None
+    finally:
+        modelos.emit = emit_original
+    _ok("H1b (Partida sem jogadores sem IndexError)")
+
+
+def teste_h4_lock_nao_reconfigura_na_secao_critica():
+    # Fase 28 (H4): `esquecer_sala` chamado DENTRO da seção crítica não pode
+    # liberar o registro da trava — o request seguinte continuaria mutando o
+    # mesmo Lobby com um RLock novo. A remoção é adiada para o último holder.
+    import threading as _threading
+    sala = "h4"
+    with modulo_store._travas_guard:
+        modulo_store._travas_salas.pop(sala, None)
+    ordem = []
+
+    def _secao_a():
+        with modulo_store.trancar_sala(sala):
+            ordem.append("A-dentro")
+            # GC dentro da seção crítica (sala esvaziou): esquecer_sala roda
+            # enquanto A ainda está no `with trancar_sala`.
+            modulo_store.esquecer_sala(sala)
+            time.sleep(0.3)
+            ordem.append("A-sai")
+
+    def _secao_b():
+        time.sleep(0.05)
+        with modulo_store.trancar_sala(sala):
+            ordem.append("B-dentro")
+        ordem.append("B-sai")
+
+    ta = _threading.Thread(target=_secao_a)
+    tb = _threading.Thread(target=_secao_b)
+    ta.start()
+    tb.start()
+    ta.join()
+    tb.join()
+    assert ordem == ["A-dentro", "A-sai", "B-dentro", "B-sai"], \
+        f"B não pode adquirir lock distinto antes de A sair: {ordem}"
+    with modulo_store._travas_guard:
+        assert sala not in modulo_store._travas_salas, \
+            "trava deve ser esquecida após o último holder soltar"
+    _ok("H4 (lock não é reconfigurado dentro da seção crítica)")
+
+
 # --- Expulsão de jogador (Fase 19) -----------------------------------------
 def teste_expulsar_bot():
     _limpar()
@@ -2076,6 +2185,9 @@ def verificar_integracao():
         ("upstash-indice", teste_upstash_indice_resumos),
         ("trava-distribuida", teste_trava_distribuida),
         ("resumo-dedup", teste_resumo_dedup),
+        ("H1-blob-corrompido", teste_h1_blob_corrompido),
+        ("H1b-partida-vazia", teste_h1b_partida_vazia),
+        ("H4-lock-secao-critica", teste_h4_lock_nao_reconfigura_na_secao_critica),
     ]
     testes_correcoes = [
         ("perdedor-cai", teste_conferencia_perdedor_desconectado),
@@ -2128,6 +2240,7 @@ def main():
     verificar_py_compile()
     verificar_node()
     verificar_boot()
+    verificar_store_producao()
     verificar_roundtrip()
     verificar_integracao()
     print()

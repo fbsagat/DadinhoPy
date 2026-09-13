@@ -20,6 +20,11 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 24** — Lock distribuído por sala (Upstash REST) para consistência entre instâncias. ✅ concluída
 - **Fase 25** — Message queue (`socketio.RedisManager`) para emits em tempo real entre instâncias. ✅ concluída
 - **Fase 26** — Otimizações pós-métricas (`ignore_queue`, detector CAS). 📄 `docs/plano-cross-instance.md` (opcional)
+- **Fase 27** — Infra: ambiente, segredos e deploy (`.env.example`, fallback do store, `maxDuration`, cache de estáticos). ✅ concluída
+- **Fase 28** — Infra: robustez do store e locks (blob corrompido, `Partida` vazia, `esquecer_sala`). ✅ concluída
+- **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ⬜ pendente
+- **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ⬜ pendente
+- **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ⬜ pendente
 
 ---
 
@@ -307,3 +312,66 @@ Verificação (local, `.venv`): `python verificar.py` 100% verde (inclui `trava-
 - **`verificar.py`** — novo `teste_mq_wiring` (subprocess com `DADINHO_MESSAGE_QUEUE=rediss://` fake: manager é `GerenciadorRedisSeguro`, canal `dadinho`, boot não trava com URL inalcançável); rodado junto à integração.
 
 Verificação (local, `.venv`): `python verificar.py` 100% verde (inclui `mq-wiring`); sem a env, regressão zero (`GerenciadorThreadSeguro` e todos os testes intocados). Com a env: `ia.processar` segue sem timer e `simular_ia.py` intocado. Produção: validar com 2 navegadores em instâncias diferentes vendo rolagem/aposta/conferência ao vivo, e monitorar comandos/conexões no painel Upstash (critérios de `docs/plano-cross-instance.md`).
+
+---
+
+# Plano da auditoria de infra e bugs (Fases 27–31)
+
+Origem: auditoria de infra (ambiente, deploy, store) + varredura de código (bugs frontend/backend). Referências de arquivo/linha apontam o local exato no estado atual do código.
+
+## Fase 27 — Infra: ambiente, segredos e deploy ✅ concluída
+
+Objetivo: ambiente documentado, sem fallbacks silenciosos que zeram o estado em produção, e limites de execução compatíveis com a Vercel.
+
+- [x] **I1 — Criar `.env.example`** com as 10 env vars lidas pelo código: `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` (obrigatórias em prod), `DADINHO_MESSAGE_QUEUE`, `DADINHO_SECRET_KEY`, `DADINHO_STORE`, `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET`, `DADINHO_DRAND_URL`/`DADINHO_DRAND_CHAIN`, `DADINHO_TEMA_SEED` (`store.py:418-424`, `app.py:107-119`, `seed.py:53-54`, `tema.py:45`). Obs.: a env do beacon é `DADINHO_DRAND_CHAIN` (o `_PADRAO` é a constante interna). `.gitignore` ganhou `!.env.example` (o padrão `.env*` engolia o exemplo).
+- [x] **I2 — Bloquear o fallback silencioso do store em produção** (`store.py:417-424`): com `DADINHO_STORE != memoria` e sem `UPSTASH_REDIS_REST_URL`/`TOKEN`, o app caía em `ArmazenamentoMemoria()` sem log — em serverless cada cold start vira um store vazio e todo o estado some sem sinal. Agora `_selecionar_armazenamento` levanta `RuntimeError` explícito no boot quando `VERCEL=1` e o store não está configurado; o fallback de memória fica só em dev (regressão zero).
+- [x] **I3 — Remover o fallback `"supersecretkey"`** (`app.py:24`): `DADINHO_SECRET_KEY` agora vem da env, ou é aleatória por processo quando ausente (`secrets.token_hex(32)`) — sem valor fixo comodado (a sessão não é usada, então não há requisito de estabilidade entre requests).
+- [x] **I4 — `maxDuration` e runtime Python pinado no `vercel.json`**: `maxDuration: 60` (limite do Hobby; `ia.processar` roda dentro do request) e `"runtime": "python3.12"` no build (≥3.10, exigência do `redis==8.1.0`).
+- [x] **I5 — `.vercelignore`: excluir `material/`** — a pasta é gitignored mas entrava no deploy (imagens de referência e SFX sem licença própria não devem subir).
+- [x] **I6 — Cache-Control para estáticos**: `after_request` no `app.py` injeta `Cache-Control: public, max-age=86400` nas respostas de `/static/*` (sem fingerprint nos URLs, 1 dia evita servir JS/CSS velhos após deploy).
+- [x] **I7 — Remover `.env.local` stale** — `VERCEL_OIDC_TOKEN` expirado (escrito pelo CLI da Vercel; não comitado, limpeza).
+
+Verificação (local, `.venv`): `python verificar.py` — novo checador `boot sem store falha (I2)` (subprocess com `VERCEL=1` e sem env do store: deve falhar com "Store não configurado") e o boot `VERCEL=1` passou a validar o `Cache-Control` do estático (I6); `DADINHO_STORE=memoria` mantém regressão zero. Deploy: configurar as env vars no painel da Vercel e validar com 2 navegadores, seguindo `docs/verificacao.md`.
+
+## Fase 28 — Infra: robustez do store e dos locks ✅ concluída
+
+Objetivo: estado corrompido não vira 500 e o lock por sala não tem janela de concorrência.
+
+- [x] **H1 — `carregar_sala` blindado contra bloco corrompido** (`store.py:298-305`): `json.loads` levanta `ValueError`/`TypeError` e derruba o handler com 500; agora captura `(ValueError, TypeError, KeyError)` e devolve `None` (a sala é tratada como inexistente e recriada na próxima escrita — fluxo do GC), espelhando o tratamento que `listar_lobbys` já tinha.
+- [x] **H1b — `Partida.__init__` com zero jogadores** (`modelos.py:962-976`): `secrets.choice(self.jogadores)` estourava `IndexError` (e o caminho da seed, `ZeroDivisionError`); com a lista vazia o sorteado agora fica `None` — sem 500 na desserialização de um blob que referencia jogadores ausentes (`de_dict` re-aponta `jogador_sorteado` quando o jogador existe).
+- [x] **H4 — `esquecer_sala` chamado dentro da seção crítica** (`store.py:64-70`): remover a trava do registro enquanto um request ainda está dentro do `with trancar_sala()` permitia que o próximo adquirisse um RLock **novo** e mutasse o mesmo Lobby em paralelo. `trancar_sala` agora devolve um wrapper com **ref-count** (`_TravaSala`): todos apontam para a mesma entrada (mesmo RLock) e `esquecer_sala` durante uma seção crítica só marca `esquecida` — o registro é limpo quando o último holder solta a trava (`__exit__`). `handle_disconnect` (que já chamava `esquecer_sala` fora do lock) e o GC (`_gc_sala`, dentro do lock) ficam seguros; comportamento para quem usa o `with trancar_sala(...)` é idêntico.
+
+Verificação (local, `.venv`): `python verificar.py` — novos testes `H1-blob-corrompido` (blob inválido e árvore inválida devolvem `None`), `H1b-partida-vazia` (construtor com lista vazia sem `IndexError`, seed sem `ZeroDivisionError`, `de_dict` com jogador fantasma) e `H4-lock-secao-critica` (thread A dentro do `with` enquanto a sala esvazia → thread B **não** adquire lock distinto antes de A sair, e a trava some após o último holder); regressão zero nas Fases 6/7/15-25. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
+
+## Fase 29 — Correções de regra de jogo
+
+Objetivo: fechar a aposta irrespondível e o bypass do limite de jogadores pelo placeholder.
+
+- [ ] **H2 — Aposta irrespondível** (`modelos.py:1246-1269`): `construir_turno` valida `dado` 1–6 e `quantidade >= 1`, mas não limita `quantidade` ao total teórico de dados na mesa — apostar acima da soma de dados torna o desafiado incapaz de subir a aposta (vitória garantida). Clamp flat-out no máximo (soma dos dados vivos, coringa à parte).
+- [ ] **H3 — Cap de jogadores burlado por `tem_chave=1`** (`app.py:478-494`): as checagens `MAX_ESPECTADORES`/`max_jogadores` só rodam com `not tem_chave`; um connect com `tem_chave=1` cria placeholder sem respeitar o limite da sala (e sem GC). Aplicar o cap ao placeholder também — a retomada da chave só reaproveita se a sala ainda comportar; senão `sala_cheia`.
+
+Verificação (local, `.venv`): integração `flask_socketio.test_client` — aposta acima do total é rejeitada/clampeada; N connects com `tem_chave=1` numa sala lotada não estouram `max_jogadores`/`MAX_ESPECTADORES`.
+
+## Fase 30 — Frontend: fila de alertas e seleção de dado
+
+Objetivo: eliminar os bugs de interação que "travam" o jogador na tela.
+
+- [ ] **F1 — Race no resolver de alerta** (`static/script.js:1969-2004`): `_alerta_resolver` único é sobrescrito se um 2º alerta abre sobre o 1º → a promise do 1º nunca resolve e cadeias `.then()` morrem (ex.: `sala_cheia → criar_sala`, `expulso_da_sala → navegação`). Filar alertas (ou devolver a promise atual quando um já está aberto).
+- [ ] **F2 — Seleção de dado stale entre turnos** (`script.js:2844`, `1319`, `1653`): `selectedImageValue` não é resetado em `meu_turno`/`espera_turno`/`reset_rodada` — a aposta envia a face do turno anterior quando o jogador não clica de novo, e `ajustar_quantidade_minima` recorre à face velha. Resetar a seleção e desmarcar `.selected` a cada turno/rodada.
+- [ ] **F3 — Limite do `#increase`** (`script.js:2831-2834`): deixa exceder o total de dados da mesa; o servidor rebate com `jogada_invalida`. Capar no total de `dados_mesa`.
+- [ ] **F4 — Enter em alerta de confirmação** (`script.js:2091-2124`): `Enter` resolve `true` mesmo no alerta de Cancelar. Atender só ao alerta "Ok"; `Escape` → `false` no de cancelar.
+
+Verificação: `node --check static/script.js` + `python verificar.py` (integração existente) + manual em 2 abas: alerta sobre alerta (a cadeia do 1º continua), 2 turnos seguidos sem clicar em dado exigem nova seleção, `#increase` para no total da mesa.
+
+## Fase 31 — Frontend: performance, CSS e segurança
+
+Objetivo: loop de confete sem custo ocioso, conflitos de CSS resolvidos e disciplina anti-XSS fechada.
+
+- [ ] **P1 — Gate no `requestAnimationFrame`** (`script.js:3082-3088`): `animate()` roda para sempre e `drawParticles` faz `clearRect` do viewport inteiro a cada frame mesmo sem partículas/confetes; rodar o loop só quando `celebrando || particles.length || confetes.length`.
+- [ ] **P2 — `.selected` vs `:hover`** (`custom_styles.css:101-114` vs `126-133`): mesma especificidade de `:hover` sobrescreve `transform`/`transition` e a face selecionada "des-seleciona" no hover; unificar a regra (ex.: `scale(1.3)` também no hover da selecionada).
+- [ ] **P3 — Overlap `.narrador` × `.painel-dicas` no mobile** (`custom_styles.css:347-391`, `690-699`, `922-930`): painéis ancorados em baixo se sobrepõem em viewports ~600px; reconciliar as âncoras.
+- [ ] **P4 — CSS morto**: `.topo-fixo`, `.custom-list`, `.fixed-top-image` não casam com `jogo.html`; `no-gutters` é resíduo do Bootstrap 4.
+- [ ] **P5 — CSP e blindar `_interpolar`** (`i18n.js:1898-1908`): a interpolação não escapa (hoje seguro por disciplina de `textContent`/`escapar_html`); escapar lá mesmo e avaliar `Content-Security-Policy` (meta ou header).
+- [ ] **P6 — `<canvas>` com `z-index:-1`** (`custom_styles.css:194-201`): depende do quirk de propagação do body; subir para `z-index:0` mantendo os painéis na frente.
+
+Verificação: `node --check static/script.js`, `python verificar.py` (cobertura i18n — P5 não pode trocar chaves) e teste manual de perf no mobile/devtools (loop de animação parado em telas sem festa).

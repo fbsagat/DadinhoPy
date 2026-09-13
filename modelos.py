@@ -972,8 +972,13 @@ class Partida:
         if self.seed_final and jogadores:
             indice = seed.indice_inicial(self.seed_final, do_lobby.sala_id, partida_numero, len(jogadores))
             self.jogador_sorteado = jogadores[indice]
-        else:
+        elif jogadores:
             self.jogador_sorteado = secrets.choice(self.jogadores)
+        else:
+            # Fase 28 (H1b): partida construída sem jogadores (estado corrompido
+            # vindo do store) não pode estourar IndexError/ZeroDivisionError no
+            # sorteio — fica sem jogador sorteado até alguém entrar na mesa.
+            self.jogador_sorteado = None
         self.rodadas = []
         self.vencedor_final = None
         # Quando a tela de vitória (4) foi aberta (Fase 22): referência de tempo

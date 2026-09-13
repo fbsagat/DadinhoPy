@@ -44,6 +44,39 @@ _travas_salas = {}
 _travas_guard = threading.Lock()
 
 
+class _TravaSala:
+    """
+    Trava de sala com ref-count (Fase 28, H4).
+
+    Cada `trancar_sala` devolve um objeto novo, mas todos apontam para a MESMA
+    entrada em `_travas_salas` (mesmo RLock). `esquecer_sala` durante uma seção
+    crítica só marca a entrada para remoção; o registro só é limpo quando o
+    último holder solta a trava. Assim um request que chega enquanto a sala
+    esvazia continua vendo o MESMO lock — não reconfigura a trava e não muta o
+    mesmo Lobby em paralelo com quem ainda está dentro do `with`.
+    """
+
+    def __init__(self, sala_id):
+        with _travas_guard:
+            entrada = _travas_salas.setdefault(
+                sala_id, {"trava": threading.RLock(), "em_uso": 0})
+            entrada["em_uso"] += 1
+            self._sala_id = sala_id
+            self._entrada = entrada
+
+    def __enter__(self):
+        self._entrada["trava"].acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._entrada["trava"].release()
+        with _travas_guard:
+            self._entrada["em_uso"] -= 1
+            if self._entrada["em_uso"] <= 0 and self._entrada.get("esquecida"):
+                _travas_salas.pop(self._sala_id, None)
+        return False
+
+
 def trancar_sala(sala_id):
     """
     Context manager que serializa eventos mutáveis da mesma sala dentro do processo
@@ -56,17 +89,25 @@ def trancar_sala(sala_id):
     Entre instâncias serverless o risco continua — documentado em AGENTS.md; a evolução
     é check-and-set (version token) no Redis ou message queue.
     """
-    with _travas_guard:
-        trava = _travas_salas.setdefault(sala_id, threading.RLock())
-    return trava
+    return _TravaSala(sala_id)
 
 
 def esquecer_sala(sala_id):
     """
     Remove a trava de uma sala do registro do processo (chamado quando a sala esvazia
     e é removida do store), evitando acúmulo de locks de salas mortas.
+
+    Fase 28 (H4): se a sala ainda está dentro de uma seção crítica (em_uso > 0),
+    a remoção é adiada para o último holder soltar a trava — senão o próximo
+    request adquiriria um RLock NOVO e mutaria o mesmo Lobby em paralelo.
     """
     with _travas_guard:
+        entrada = _travas_salas.get(sala_id)
+        if entrada is None:
+            return
+        if entrada["em_uso"] > 0:
+            entrada["esquecida"] = True
+            return
         _travas_salas.pop(sala_id, None)
 
 
@@ -302,7 +343,13 @@ class ArmazenamentoUpstash:
         bloco = (resposta or {}).get("result")
         if not bloco:
             return None
-        return Lobby.de_dict(json.loads(bloco))
+        try:
+            return Lobby.de_dict(json.loads(bloco))
+        except (ValueError, TypeError, KeyError):
+            # Fase 28 (H1): bloco corrompido no Upstash não pode derrubar o
+            # handler com 500 — a sala é tratada como inexistente e recriada na
+            # próxima escrita (fluxo do GC).
+            return None
 
     def salvar_sala(self, lobby):
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
@@ -421,6 +468,15 @@ def _selecionar_armazenamento():
     token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
     if url and token:
         return ArmazenamentoUpstash(url, token)
+    # Fase 27 (I2): sem o store configurado, o app caía em ArmazenamentoMemoria()
+    # sem nenhum sinal — em serverless cada cold start vira um store vazio e todo
+    # o estado some sem aviso. Em produção o fallback é proibido: falha no boot.
+    if os.environ.get("VERCEL") == "1":
+        raise RuntimeError(
+            "Store não configurado em produção: defina UPSTASH_REDIS_REST_URL e "
+            "UPSTASH_REDIS_REST_TOKEN (ou DADINHO_STORE=memoria apenas em dev). "
+            "Sem isso a Vercel rodaria em memória e todo o estado sumiria no cold start."
+        )
     return ArmazenamentoMemoria()
 
 

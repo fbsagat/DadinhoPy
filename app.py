@@ -14,6 +14,7 @@ from socketio.manager import Manager as GerenciadorSocketIOBase
 import functools
 import http.client
 import os
+import secrets
 import socketio as pacote_socketio
 import store
 import ia
@@ -21,7 +22,24 @@ import tema
 import threading
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("DADINHO_SECRET_KEY", "supersecretkey")
+# Fase 27 (I3): sem `DADINHO_SECRET_KEY` definida, uma chave aleatória por
+# processo (a sessão não é usada, então não há requisito de estabilidade entre
+# requests). Sempre substituir pelo valor fixo comodado que vazava de um deploy
+# para o outro.
+app.secret_key = os.environ.get("DADINHO_SECRET_KEY") or secrets.token_hex(32)
+
+
+@app.after_request
+def _cache_estaticos(resposta):
+    """
+    Fase 27 (I6): os estáticos de /static/ passam pelo catch-all do Flask sem
+    header de cache (a Vercel não os serve como arquivo estático com o builder
+    @vercel/python). Cache moderado de 1 dia — sem fingerprint nos URLs, um
+    max-age longo serviria JS/CSS velhos após um deploy.
+    """
+    if request.path.startswith('/static/'):
+        resposta.headers['Cache-Control'] = 'public, max-age=86400'
+    return resposta
 
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
 COOLDOWN_ESCRITA = 0.5
