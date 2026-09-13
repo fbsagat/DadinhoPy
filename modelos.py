@@ -771,6 +771,7 @@ class Lobby:
             'dados_qtd': int(self.config.get('dados_qtd', 1)),
             'com_coringa': bool(self.config.get('com_coringa', True)),
             'publica': bool(self.config.get('publica', True)),
+            'verificacao_ativa': bool(self.config.get('verificacao_ativa', False)),
             'master': master.username if master else None,
             'criada_em': self.criado_em.isoformat() if self.criado_em else None,
             'visto_em': self.visto_em.isoformat() if self.visto_em else None,

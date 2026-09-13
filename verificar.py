@@ -1632,6 +1632,86 @@ def teste_autojogar():
     _ok("jogada automática por tempo máximo (Fase 21)")
 
 
+def teste_retomar_identidade_por_evento():
+    """
+    Fase D: a `chave_secreta` não trafega mais na query string do handshake.
+    No connect o servidor cria um "placeholder"; a identidade é retomada pela
+    primeira mensagem (`retomar_identidade`), trocando o placeholder pela
+    identidade real (jogador em janela de reconexão) sem duplicar nem perder o
+    estado.
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    ana_chave = ana.chave_secreta
+    ana_sid = ana.client_id
+
+    # Ana cai no meio da partida: entra na janela de reconexão (Bia ativa).
+    c1.disconnect()
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.desconectado_em is not None and ana.client_id == ana_sid
+
+    # Reconnect sem chave na query (só o sinal booleano tem_chave): o servidor
+    # cria um placeholder (espectador transitório, a partida está em andamento).
+    c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.espectadores) == 1, "placeholder deve ser espectador transitório"
+    sid_novo = lobby.espectadores[0].client_id
+
+    # Primeira mensagem: retoma a identidade pela chave guardada no cliente.
+    c1b.emit("retomar_identidade", {"chave": ana_chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    anas = [j for j in lobby.jogadores if j.username == "Ana"]
+    assert len(anas) == 1, "não pode duplicar o jogador retomado"
+    assert anas[0].client_id == sid_novo, "sid novo deve ser religado à identidade"
+    assert anas[0].desconectado_em is None, "retomada deve encerrar a janela de graça"
+    assert not lobby.espectadores, "placeholder deve sair dos espectadores"
+    assert anas[0].chave_secreta == ana_chave, "a chave da identidade deve ser mantida"
+
+    eventos = c1b.get_received()
+    retomado = [e for e in eventos if e["name"] == "connect_start"]
+    assert retomado and retomado[-1]["args"][0].get("username") == "Ana", \
+        "servidor deve reemitir connect_start com a identidade retomada"
+    assert _achar_evento(eventos, "construtor_dados") is not None, \
+        "snapshot da identidade retomada deve ser enviado (página 1)"
+
+    c1b.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("retomar identidade por evento (Fase D)")
+
+
+def teste_retomar_negado_chave_stale():
+    """
+    Fase D: um cliente com chave de OUTRA sala (stale no sessionStorage) conecta
+    com tem_chave=1; a retomada falha e o servidor avisa `retomar_negado` para o
+    front adotar a chave do placeholder (senão a chave antiga ficaria para sempre).
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2 = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    chave_stale = "a" * 32
+    c2.emit("retomar_identidade", {"chave": chave_stale})
+    eventos = c2.get_received()
+    assert _achar_evento(eventos, "retomar_negado") is not None, \
+        "chave que não pertence à sala deve responder retomar_negado"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 2, "placeholder segue como jogador novo"
+    c2.disconnect()
+    c1.disconnect()
+    _limpar()
+    _ok("retomar_negado (chave stale)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -1693,10 +1773,14 @@ def verificar_integracao():
     testes_autojogar = [
         ("autojogar", teste_autojogar),
     ]
+    testes_fase_d = [
+        ("retomar-identidade", teste_retomar_identidade_por_evento),
+        ("retomar-negado", teste_retomar_negado_chave_stale),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
-                           + testes_expulsao + testes_autojogar):
+                           + testes_expulsao + testes_autojogar + testes_fase_d):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

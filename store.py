@@ -27,6 +27,7 @@ se a função serverless morrer sem disparar o GC do disconnect — antes a sala
 import json
 import os
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -62,6 +63,51 @@ def esquecer_sala(sala_id):
     """
     with _travas_guard:
         _travas_salas.pop(sala_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Cache de leitura tolerante a defasagem (Fase C).
+#
+# O heartbeat da sala de espera re-lê o Lobby a cada batida para re-sincronizar
+# o estado entre instâncias; a cada 5s isso custa um GET + deserialização na
+# Upstash por cliente (estoura o free tier de 500k comandos/mês com poucos
+# jogadores ociosos). Este cache em processo (por instância, como as rooms do
+# Socket.IO) serve a leitura re-sincronizada com um TTL generoso e é atualizado
+# a cada `salvar_sala` e descartado a cada `remover_sala`.
+#
+# Só o caminho do heartbeat usa este cache (defasagem de até TTL é aceitável
+# para re-sync); os handlers continuam lendo SEMPRE frescos do store (TTL 0),
+# preservando o comportamento atual de consistência entre instâncias.
+# ---------------------------------------------------------------------------
+CACHE_SALA_TTL_RESYNC = 25.0
+CACHE_SALA_TTL_PADRAO = 0.0  # 0 = cache desligado (leitura sempre fresca)
+
+_cache_salas = {}
+_cache_salas_guard = threading.Lock()
+
+
+def invalidar_cache_sala(sala_id):
+    """Descarta a entrada do cache (ex.: handler abortou no meio de uma mutação)."""
+    with _cache_salas_guard:
+        _cache_salas.pop(sala_id, None)
+
+
+def carregar_sala_leve(sala_id):
+    """
+    Leitura re-sincronizada do heartbeat: usa o cache tolerante a defasagem.
+    Devolve (lobby, veio_do_cache). Com `veio_do_cache=True` o estado pode ter
+    até CACHE_SALA_TTL_RESYNC segundos — suficiente para re-sync, mas o chamador
+    não deve mutar a sala (ia.processar) com base nele.
+    """
+    with _cache_salas_guard:
+        entrada = _cache_salas.get(sala_id)
+        if entrada is not None and (time.monotonic() - entrada[1]) < CACHE_SALA_TTL_RESYNC:
+            return entrada[0], True
+    lobby = armazenamento.carregar_sala(sala_id)
+    if lobby is not None:
+        with _cache_salas_guard:
+            _cache_salas[sala_id] = (lobby, time.monotonic())
+    return lobby, False
 
 
 class ArmazenamentoMemoria:
@@ -325,9 +371,14 @@ def carregar_sala(sala_id):
 def salvar_sala(lobby):
     if lobby is not None:
         armazenamento.salvar_sala(lobby)
+        # Mantém o cache de re-sync do heartbeat com o objeto recém-persistido.
+        with _cache_salas_guard:
+            _cache_salas[lobby.sala_id] = (lobby, time.monotonic())
 
 
 def remover_sala(sala_id):
+    with _cache_salas_guard:
+        _cache_salas.pop(sala_id, None)
     armazenamento.remover_sala(sala_id)
 
 

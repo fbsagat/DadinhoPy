@@ -11,6 +11,7 @@ from store import trancar_sala, esquecer_sala
 from datetime import datetime
 from socketio.manager import Manager as GerenciadorSocketIOBase
 import functools
+import http.client
 import os
 import store
 import ia
@@ -264,7 +265,15 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                     return func(*args, **kwargs)
                 with trancar_sala(sala_id):
                     return func(*args, **kwargs)
-            except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError):
+            except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError,
+                    # Fase B: falhas de rede/IO do store distribuído (Upstash) também
+                    # abortam silenciosamente — sem elas, um blip de rede estoura o
+                    # handler, loga traceback e perde o estado do read-modify-write.
+                    OSError, http.client.HTTPException):
+                # Aborto no meio de uma mutação: o objeto vivo do cache de re-sync
+                # pode ter sido poluído — descarta para a próxima leitura recarregar.
+                if sala_id is not None:
+                    store.invalidar_cache_sala(sala_id)
                 return
         return wrapper
     if func is not None:
@@ -379,47 +388,38 @@ def handle_connect():
 
         jogador = lobby.buscar_jogador_pelo_client_id(client_id)
         if jogador is None:
-            chave_resumo = request.args.get('chave_secreta', '')
-            jogador = lobby.buscar_jogador_pela_chave(chave_resumo)
-            if jogador is not None:
-                # Retomando a mesma identidade: religa o sid novo ao mesmo Jogador
-                # e encerra a janela de reconexão (Fase 9).
-                # Fase 11: se o humano tinha sido substituído por um bot
-                # (`substituir_desconectado_por_ia`), retomar a identidade devolve
-                # o controle a ele; bots nativos (client_id `ia:...`) não são
-                # afetados (nunca reconectam por chave).
-                era_bot_nativo = str(jogador.client_id).startswith('ia:')
-                jogador.client_id = client_id
-                jogador.desconectado_em = None
-                if jogador.is_ia and not era_bot_nativo:
-                    jogador.is_ia = False
-                    jogador.ia_nivel = None
-            else:
-                # Ninguém reconectando nesta conexão: GC unificado antes de
-                # entrar. Fecha a sala órfã (só bots / sem humano conectado) e
-                # recria ela do zero, em vez de reaproveitar um fantasma; sala
-                # recém-criada (vazia) fica como está.
+            # Fase D: a `chave_secreta` não trafega mais na query string do
+            # handshake (vazava em logs de acesso/histórico). Aqui cria-se um
+            # Jogador "placeholder"; a identidade real é retomada logo depois
+            # pelo primeiro evento (`retomar_identidade`), quando o cliente
+            # envia a chave guardada no sessionStorage. `tem_chave` é apenas um
+            # sinal booleano (não-secreto) para o servidor não barrar quem pode
+            # estar retomando identidade (sala cheia/GC) — o placeholder é
+            # transitório.
+            tem_chave = request.args.get('tem_chave', '') == '1'
+            if not tem_chave:
                 if (lobby.jogadores or lobby.espectadores) and _gc_sala(lobby):
                     lobby = obter_sala(sala_id)
-                if lobby.status == 'jogando':
-                    # Fase 15: entrou no meio da partida (pela busca) — vira
-                    # espectador, sem ocupar vaga nem contar como jogador.
-                    if len(lobby.espectadores) >= MAX_ESPECTADORES:
-                        emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                        leave_room(lobby.sala_room(), sid=client_id)
-                        return
-                    jogador = Jogador(client_id=client_id, master=False)
-                    jogador.lobby_atual = lobby
-                    lobby.espectadores.append(jogador)
-                else:
-                    # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
-                    if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
-                        emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                        leave_room(lobby.sala_room(), sid=client_id)
-                        return
-                    master = False if lobby.verificar_jogador_master() else True
-                    jogador = Jogador(client_id=client_id, master=master)
-                    lobby.adicionar_jogador(jogador)
+            if not tem_chave and lobby.status == 'jogando':
+                # Fase 15: entrou no meio da partida (pela busca) — vira
+                # espectador, sem ocupar vaga nem contar como jogador.
+                if len(lobby.espectadores) >= MAX_ESPECTADORES:
+                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                    leave_room(lobby.sala_room(), sid=client_id)
+                    return
+            elif not tem_chave and lobby.status != 'jogando':
+                # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
+                if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
+                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                    leave_room(lobby.sala_room(), sid=client_id)
+                    return
+            master = False if lobby.verificar_jogador_master() else True
+            jogador = Jogador(client_id=client_id, master=master)
+            jogador.lobby_atual = lobby
+            if lobby.status == 'jogando':
+                lobby.espectadores.append(jogador)
+            else:
+                lobby.adicionar_jogador(jogador)
 
         registrar_cliente(client_id, sala_id)
 
@@ -432,6 +432,67 @@ def handle_connect():
         # o connect destrava o fluxo.
         if ia.processar(lobby):
             salvar_sala(lobby)
+
+
+@socketio.on('retomar_identidade')
+@evento_mutavel(cooldown=None)
+def retomar_identidade(dados=None):
+    """
+    Fase D: retoma a identidade pela `chave_secreta` — primeira mensagem do
+    cliente logo após o connect (a chave não trafega mais na query string do
+    handshake). Troca o Jogador placeholder criado no connect pela identidade
+    real persistida (refresh/reconexão): religa o sid atual, encerra a janela
+    de reconexão e reemite o snapshot (mesma lógica do antigo caminho de
+    `buscar_jogador_pela_chave` no connect).
+
+    `cooldown=None`: é idempotente (o primeiro vale) e chega logo após o
+    connect — um drop silencioso deixaria o jogador preso no placeholder.
+    """
+    dados = dados if isinstance(dados, dict) else {}
+    client_id = request.sid
+    chave = dados.get('chave', '')
+    if not chave:
+        return
+    sala_id = sala_do_cliente(client_id)
+    if sala_id is None:
+        return
+    lobby = store.carregar_sala(sala_id)
+    if lobby is None:
+        return
+    alvo = lobby.buscar_jogador_pela_chave(chave)
+    if alvo is None:
+        # A chave não pertence a esta sala (ex.: sessão de outra sala, ou o
+        # jogador já saiu/expirou a janela de graça). O placeholder continua
+        # valendo como identidade nova — avisa o front para persistir a chave
+        # dele (senão a chave stale ficaria para sempre no sessionStorage).
+        emit('retomar_negado', to=client_id)
+        return
+    if alvo.client_id == client_id:
+        return
+    placeholder = lobby.buscar_jogador_pelo_client_id(client_id)
+    if placeholder is not None and placeholder is not alvo:
+        if placeholder in lobby.espectadores:
+            lobby.espectadores.remove(placeholder)
+        elif placeholder in lobby.jogadores:
+            lobby.jogadores.remove(placeholder)
+    # Fase 11: se o humano tinha sido substituído por um bot
+    # (`substituir_desconectado_por_ia`), retomar a identidade devolve o
+    # controle a ele; bots nativos (client_id `ia:...`) não são afetados
+    # (nunca reconectam por chave).
+    era_bot_nativo = str(alvo.client_id).startswith('ia:')
+    alvo.client_id = client_id
+    alvo.desconectado_em = None
+    if alvo.is_ia and not era_bot_nativo:
+        alvo.is_ia = False
+        alvo.ia_nivel = None
+    lobby.definir_master()
+    emit("connect_start",
+         {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
+          'sala': lobby.sala_id, 'username': alvo.username}, to=client_id)
+    atualizar_lista_usuarios(lobby)
+    enviar_snapshot_sala(lobby, alvo)
+    if ia.processar(lobby):
+        salvar_sala(lobby)
 
 
 @socketio.on('disconnect')
@@ -467,7 +528,7 @@ def handle_disconnect():
         elif jogador.partida_atual is not None:
             # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
             # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
-            # voltar via chave_secreta (handle_connect limpa o marcador).
+            # voltar via chave_secreta (retomar_identidade limpa o marcador, Fase D).
             # Fase 15: só faz sentido esperar se restar outro HUMANO ativo — um
             # bot não justifica segurar a sala (senão ela ficaria órfã). Um
             # espectador humano conectado também mantém a sala viva, então conta
@@ -744,28 +805,38 @@ def verificar_desconectados(dados, lobby, jogador):
 
 @socketio.on('heartbeat')
 @evento_mutavel
-@autenticar(extrair_chave=None)
-def heartbeat(dados, lobby, jogador):
+def heartbeat(dados=None):
     """
     Renova o sinal de vida do resumo da sala na busca (Fase 17). Sem isso, uma
     instância serverless que morre sem disparar disconnect deixa o resumo
     congelado e a sala fantasma aparecia como ativa por até o TTL do store.
-    Também destrava a fila das IAs quando não resta evento humano (ex.: só
-    sobraram bots), chamando `ia.processar` como os demais handlers mutáveis.
 
     Fase 18/19 (Vercel): na sala de espera o heartbeat vira o canal de re-sync
     entre instâncias. As rooms/emits do Socket.IO vivem em memória por instância,
     então quem entrou/ficou pronto numa instância diferente não alcança o
     broadcast do host; aqui o servidor devolve o snapshot atual do lobby (lido
-    do store compartilhado) direcionado ao cliente que bateu. O `visto_em` tem
-    um piso de 30s para o resumo não ser reescrito a cada batida curta (o
-    cliente acelera o heartbeat na espera) e estourar o free tier da Upstash.
+    do store compartilhado) direcionado ao cliente que bateu.
+
+    Fase C: ao contrário dos demais handlers, este NÃO passa por `autenticar` —
+    lê pelo índice em processo (`sala_do_cliente`) e usa o cache tolerante a
+    defasagem (`store.carregar_sala_leve`), então cada batida não custa um GET +
+    deserialização na Upstash por cliente (estourava o free tier). Com o estado
+    vindo do cache (até 25s de defasagem) não roda `ia.processar` — mutação só
+    com leitura fresca, para não mover duas vezes o mesmo turno entre instâncias.
+    O `visto_em` tem piso de 60s para o resumo não ser reescrito a cada batida.
     """
-    if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 30:
+    client_id = request.sid
+    sala_id = sala_do_cliente(client_id)
+    if sala_id is None:
+        return
+    lobby, veio_do_cache = store.carregar_sala_leve(sala_id)
+    if lobby is None or lobby.buscar_jogador_pelo_client_id(client_id) is None:
+        return
+    if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
         lobby.marcar_visto()
     if lobby.status == 'espera':
-        emit("update_user_list", montar_payload_lista_usuarios(lobby), to=jogador.client_id)
-    if ia.processar(lobby):
+        emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
+    if not veio_do_cache and ia.processar(lobby):
         salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 

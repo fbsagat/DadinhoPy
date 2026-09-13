@@ -21,6 +21,11 @@ const diceImages = [
 
 // Envia a chave guardada anteriormente (via sessionStorage) para o servidor
 // reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
+// Fase D: a chave NÃO vai mais na query string do handshake (vazava em logs de
+// acesso). O servidor cria um "placeholder" no connect e a identidade é
+// retomada pela primeira mensagem (`retomar_identidade`). `tem_chave` é só um
+// sinal booleano não-secreto para o servidor não barrar quem pode estar
+// retomando (sala cheia/GC).
 const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
 // WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
 // request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
@@ -28,7 +33,7 @@ const chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
 const socket = io({
     autoConnect: true,
     transports: ['websocket', 'polling'],
-    query: { sala: sala_atual, chave_secreta: chave_resumo },
+    query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
 });
 socket.connect();
 
@@ -39,7 +44,7 @@ socket.connect();
 // pronto numa instância diferente não alcança o broadcast do host, então o
 // servidor devolve o snapshot atual do lobby para cada cliente que bate.
 // Só emite quando o socket está conectado e já temos a chave de uma sala.
-const INTERVALO_HEARTBEAT_ESPERA = 5000;
+const INTERVALO_HEARTBEAT_ESPERA = 20000;
 const INTERVALO_HEARTBEAT_PARTIDA = 60000;
 
 function agendar_heartbeat() {
@@ -323,6 +328,8 @@ socket.on('partidas_listadas', function (data) {
             t('js.busca.dados', { n: partida.dados_qtd }),
             partida.com_coringa ? t('js.busca.coringa_sim') : t('js.busca.coringa_nao'),
             t('js.busca.master', { nome: partida.master || '?' }),
+            // Fase F: selo de justiça verificável na busca.
+            partida.verificacao_ativa ? t('js.fair.ativo') : t('js.fair.inativo'),
             jogando ? t('js.busca.em_andamento') : t('js.prontos', { prontos: partida.prontos, total: partida.jogadores }),
         ];
         detalhes.textContent = detalhes_parts.join(' · ');
@@ -374,6 +381,19 @@ if (apelidoSalvo) {
     }
 }
 
+// Selo de verificação de integridade (provably fair) na sala de espera.
+function renderizar_badge_fair(config) {
+    const badge = document.getElementById('badge_fair');
+    if (!badge) {
+        return;
+    }
+    const ativo = !!(config && config.verificacao_ativa);
+    badge.style.display = 'inline-block';
+    badge.textContent = ativo ? t('js.fair.ativo') : t('js.fair.inativo');
+    badge.classList.toggle('text-bg-success', ativo);
+    badge.classList.toggle('text-bg-warning', !ativo);
+}
+
 // Atualiza a lista de jogadores e o estado da sala de espera
 socket.on("update_user_list", (data) => {
     const userListItems = document.getElementById("lista_de_jogadores");
@@ -412,6 +432,9 @@ socket.on("update_user_list", (data) => {
 
     // Aplica a configuração da partida (read-only para não-master).
     aplicar_config(data.config);
+
+    // Fase F: selo de verificação de integridade (provably fair) na espera.
+    renderizar_badge_fair(data.config);
 
     // Verificação ativa na sala de espera: guarda o compromisso do servidor e
     // envia o nonce/compromisso deste cliente (provably fair).
@@ -1143,6 +1166,7 @@ socket.on('reset_rodada', function (data) {
     const jogadores_dados = data.jogadores_dados_qtd;
     const botao = document.getElementById('bot_confe_fim');
     const botao_desc = document.getElementById('desconfiar');
+    rearmar_ok('bot_confe_fim'); // Fase A: nova rodada, "Ok" volta ao estado inicial.
     botao.disabled = false; // Reativa o input
     botao_desc.disabled = true; // Desativa o input
 
@@ -1164,6 +1188,9 @@ socket.on('reset_partida', function () {
     const botao_fogos = document.getElementById('comemorar');
     const bot_vencedor_fim = document.getElementById('bot_vencedor_fim');
     const bot_confe_fim = document.getElementById('bot_confe_fim');
+    // Fase A: partida nova, "Ok" da conferência/vitória volta ao estado inicial.
+    rearmar_ok('bot_vencedor_fim');
+    rearmar_ok('bot_confe_fim');
     bot_vencedor_fim.disabled = false; // Reativa o input
     bot_vencedor_fim.style.display = 'block' // Reativa o input
     bot_confe_fim.disabled = false; // Reativa o input
@@ -1231,7 +1258,9 @@ socket.on('vencedor_da_partida', function (data) {
     tocar_som_variante('aposta', [1, 2]);
     tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
-    h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: data.nome });
+    // Fase E: o template tem <br> (por isso innerHTML), mas o nome interpolado
+    // é escapado — apelidos são validados, isto é defesa em profundidade.
+    h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: escapar_html(data.nome) });
     iniciar_celebracao();
     // Fase 22: contador da jogada automática da tela de vitória (auto-confirma
     // o reset se o jogador ficar away from keyboard).
@@ -1242,6 +1271,15 @@ socket.on('vencedor_da_partida', function (data) {
 socket.on('soltar_fogos', function () {
     soltar_fogos();
 })
+
+// Escapa HTML em texto interpolado em innerHTML (defesa em profundidade: os
+// apelidos já são validados, mas nunca confiar em entrada em markup).
+function escapar_html(texto) {
+    const mapa = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(texto == null ? '' : texto).replace(/[&<>"']/g, function (c) {
+        return mapa[c];
+    });
+}
 
 // Monta o texto da conferência no idioma do jogador. O servidor manda campos
 // estruturados (quem ganhou/perdeu, quantidade apostada e real); se não vierem,
@@ -1462,12 +1500,17 @@ document.getElementById('desconfiar').addEventListener('click', () => {
 });
 
 // Funções após conectar
+let retomar_enviado = false;
 socket.on("connect_start", function (data) {
     // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
     // para não apagar a identidade de uma sala anterior.
+    // Fase D: guarda a chave no sessionStorage só quando não há uma sessão
+    // anterior para retomar (senão o placeholder sobrescreveria a identidade).
     if (data && data.chave_secreta) {
         chave_secreta = data.chave_secreta;
-        sessionStorage.setItem('dadinho_chave', chave_secreta);
+        if (!chave_resumo) {
+            sessionStorage.setItem('dadinho_chave', chave_secreta);
+        }
     }
     sou_master = !!(data && data.is_master);
     if (data && data.sala) {
@@ -1491,6 +1534,13 @@ socket.on("connect_start", function (data) {
             apelidoInput.value = data.username;
         }
     }
+    // Fase D: com uma sessão anterior guardada, retoma a identidade logo após
+    // o connect (uma vez por conexão). O servidor troca o placeholder pela
+    // identidade real e reemite o connect_start + snapshot.
+    if (chave_resumo && data && data.sala && !retomar_enviado) {
+        retomar_enviado = true;
+        socket.emit('retomar_identidade', { chave: chave_resumo });
+    }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
     if (textInput) {
@@ -1500,6 +1550,15 @@ socket.on("connect_start", function (data) {
         botaapelido.disabled = false;
     }
     aplicar_master();
+});
+
+// A chave guardada não pertence a esta sala (ex.: sessão de outra sala, ou a
+// identidade expirou): adota o placeholder como identidade nova e persiste a
+// chave dele no sessionStorage — senão a chave stale ficaria para sempre.
+socket.on('retomar_negado', function () {
+    if (chave_secreta) {
+        sessionStorage.setItem('dadinho_chave', chave_secreta);
+    }
 });
 
 // Indicadores de conexão/reconexão (heartbeat visual).
@@ -2509,6 +2568,19 @@ function marcar_ok_clicado(botaoId) {
     botao.textContent = t('js.ok_confirmado');
     botao.classList.remove('btn-primary');
     botao.classList.add('btn-success');
+}
+
+// Rearma o botão de "Ok" para a próxima rodada/partida: apaga a marca de
+// confirmação e devolve o texto/estilo padrão (o botão tem data-i18n="ui.ok").
+function rearmar_ok(botaoId) {
+    const botao = document.getElementById(botaoId);
+    if (!botao) {
+        return;
+    }
+    delete botao.dataset.confirmado;
+    botao.textContent = t('ui.ok');
+    botao.classList.remove('btn-success');
+    botao.classList.add('btn-primary');
 }
 
 function conferencia_final() {

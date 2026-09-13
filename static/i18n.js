@@ -207,6 +207,8 @@ I18N_DICIONARIOS.en = {
     // Busca (cards)
     'js.busca.vazia': 'No games found with these filters.',
     'js.busca.dados': '🎲 {n} dice',
+    'js.fair.ativo': '⚖️ provably fair',
+    'js.fair.inativo': '⚠️ no dice verification',
     'js.busca.coringa_sim': 'wild on',
     'js.busca.coringa_nao': 'no wild',
     'js.busca.master': 'host: {nome}',
@@ -577,6 +579,8 @@ I18N_DICIONARIOS['pt-BR'] = {
 
     'js.busca.vazia': 'Nenhuma partida encontrada com esses filtros.',
     'js.busca.dados': '🎲 {n} dado(s)',
+    'js.fair.ativo': '⚖️ justiça verificável',
+    'js.fair.inativo': '⚠️ sem verificação de dados',
     'js.busca.coringa_sim': 'coringa ativo',
     'js.busca.coringa_nao': 'sem coringa',
     'js.busca.master': 'master: {nome}',
@@ -934,6 +938,8 @@ I18N_DICIONARIOS.es = {
 
     'js.busca.vazia': 'No se encontraron partidas con esos filtros.',
     'js.busca.dados': '🎲 {n} dado(s)',
+    'js.fair.ativo': '⚖️ juego verificable',
+    'js.fair.inativo': '⚠️ sin verificación de dados',
     'js.busca.coringa_sim': 'comodín activo',
     'js.busca.coringa_nao': 'sin comodín',
     'js.busca.master': 'master: {nome}',
@@ -1291,6 +1297,8 @@ I18N_DICIONARIOS.fr = {
 
     'js.busca.vazia': 'Aucune partie trouvée avec ces filtres.',
     'js.busca.dados': '🎲 {n} dé(s)',
+    'js.fair.ativo': '⚖️ équité vérifiable',
+    'js.fair.inativo': '⚠️ sans vérification des dés',
     'js.busca.coringa_sim': 'joker actif',
     'js.busca.coringa_nao': 'sans joker',
     'js.busca.master': 'master : {nome}',
@@ -1648,6 +1656,8 @@ I18N_DICIONARIOS['zh-CN'] = {
 
     'js.busca.vazia': '没有找到符合筛选条件的对局。',
     'js.busca.dados': '🎲 {n} 颗骰子',
+    'js.fair.ativo': '⚖️ 可验证公平',
+    'js.fair.inativo': '⚠️ 无骰子验证',
     'js.busca.coringa_sim': '万能骰开启',
     'js.busca.coringa_nao': '无万能骰',
     'js.busca.master': '房主：{nome}',

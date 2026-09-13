@@ -15,6 +15,8 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 10** — Limpeza, organização e tooling. ✅ concluída
 - **Fase 11** — Jogadores IA (4 níveis). ✅ concluída
 - **Fase 14** — i18n (5 idiomas + fallback EN). ✅ concluída
+- **Fases 15–22** — espectadores, GC unificado, heartbeat/visto_em, home sem sala, expulsão, personalidade dos bots, jogada automática e status de confirmação. ✅ concluídas (resumo no fim do arquivo)
+- **Fases A–G** — revisão de segurança e custo (botão Ok, erro de rede no store, custo do heartbeat, chave fora da query, XSS defensivo, selo provably fair, docs). ✅ concluídas (resumo no fim do arquivo)
 
 ---
 
@@ -248,3 +250,32 @@ Objetivo: jogar em inglês, português (BR), espanhol, francês e chinês simpli
 - [x] **Verificação (`verificar.py`)** — checa `node --check` de `script.js` e `i18n.js` e a cobertura dos 4 idiomas em relação ao inglês.
 
 Verificação (local, `.venv`): `python verificar.py` (tudo OK: `py_compile`, `node --check static/*.js`, cobertura i18n, boot `VERCEL=1`, round-trip e integração Flask-SocketIO) e `python simular_ia.py --partidas 20 --dados 3` (hierarquia preservada). Teste manual recomendado: abrir em 2 abas, trocar o idioma pelo seletor e jogar uma partida completa.
+
+---
+
+## Fases 15–22 — resumo
+
+As fases seguintes foram documentadas de forma condensada (detalhes completos em `AGENTS.md`):
+
+- **Fase 15** — Espectadores: quem entra no meio de uma partida vira `Jogador` em `lobby.espectadores` (nunca em `lobby.jogadores`); gates de página nas confirmações (`conferencia_final`/`vencedor_final` só nas páginas 3/4); GC unificado `app.py:_gc_sala` fecha sala sem humano conectado.
+- **Fase 16** — Aposenta a sala padrão compartilhada `padrao` (sentinela de "sem código"); `handle_connect` não cria sala automaticamente.
+- **Fase 17** — Heartbeat (`visto_em`) esconde resumos órfãos do serverless na busca (`LIMITE_RESUMO_PARADO_SEGUNDOS`).
+- **Fase 18** — Home sem sala: `#painel_home` com "Criar sala" (`criar_sala`) e "Buscar partidas" (`listar_partidas`); re-sync da espera via heartbeat.
+- **Fase 19** — Expulsão de jogador (`expulsar_jogador`, master + `chave_secreta`); `ids` no payload da lista.
+- **Fase 20** — Personalidade dos bots (`ia_risco`/`ia_agressividade` sorteadas); modulam desconfiança, altura das apostas e tempo de pensamento.
+- **Fase 21** — Jogada automática por tempo máximo (`tempo_max_jogada` + `autojogar`): rola/aposta/desconfia/confirma pelo atrasado com o motor da IA; referências de tempo persistidas (`rodada.vez_em`, `rodada.inicio_rolagem_em`, `rodada.conferencia_em`, `partida.vitoria_em`).
+- **Fase 22** — Status de confirmação em tempo real (`rolagem_status`/`conferencia_status`/`vitoria_status` com `confirmados`/`pendentes`/`total` por apelido).
+
+## Fases A–G — revisão de segurança e custo
+
+Implementadas nesta revisão (refs em `AGENTS.md`):
+
+- **Fase A** — Botão "Ok" da conferência/vitória volta ao estado inicial entre rodadas/partidas (`rearmar_ok` limpa `data-confirmado`).
+- **Fase B** — `evento_mutavel` agora aborta silenciosamente também em falhas de rede/IO do store (`OSError`, `http.client.HTTPException`), evitando traceback e perda silenciosa de estado em blips da Upstash.
+- **Fase C** — Custo do heartbeat: cadência da espera 5s → 20s; `heartbeat` não passa mais por `autenticar`; leitura via cache tolerante a defasagem `store.carregar_sala_leve` (TTL 25s, por sala, atualizado a cada `salvar_sala`); `ia.processar` só roda com leitura fresca; piso do `visto_em` 30s → 60s. Estourava o free tier com poucos jogadores ociosos.
+- **Fase D** — `chave_secreta` sai da query string do handshake (vazava em logs): connect cria placeholder e a identidade é retomada pela primeira mensagem (`retomar_identidade`, `cooldown=None`); cliente manda só `tem_chave` (booleano não-secreto).
+- **Fase E** — `innerHTML` do vencedor agora escapa o nome interpolado (`escapar_html`); apelidos já eram validados, isto é defesa em profundidade.
+- **Fase F** — Selo "provably fair" (`js.fair.ativo`/`js.fair.inativo`) na busca e na sala de espera (`#badge_fair`), com `verificacao_ativa` no resumo.
+- **Fase G** — Documentação (`AGENTS.md`/`todo.md`) alinhada às fases acima.
+
+Verificação: `python verificar.py` (inclui `teste_retomar_identidade_por_evento`) e `python simular_ia.py`.
