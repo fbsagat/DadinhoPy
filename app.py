@@ -501,6 +501,7 @@ def iniciar_partida(dados, lobby, jogador):
     ia.processar(lobby)
     salvar_sala(lobby)
     # Fase 8: status virou 'jogando' — atualiza o resumo da busca de partidas.
+    lobby.marcar_visto()
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 
@@ -655,6 +656,20 @@ def verificar_desconectados(dados, lobby, jogador):
     achar_jogador já faz o GC unificado; aqui só o disparamos de novo.
     """
     _gc_sala(lobby)
+
+
+@socketio.on('heartbeat')
+@evento_mutavel
+@autenticar(extrair_chave=None)
+def heartbeat(dados, lobby, jogador):
+    """
+    Renova o sinal de vida do resumo da sala na busca (Fase 17). Sem isso, uma
+    instância serverless que morre sem disparar disconnect deixa o resumo
+    congelado e a sala fantasma aparecia como ativa por até o TTL do store. Não
+    altera o jogo: só marca `visto_em` e reescreve o resumo leve.
+    """
+    lobby.marcar_visto()
+    store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 
 @socketio.on('jogar_dados')

@@ -193,6 +193,10 @@ class Lobby:
         self.nome = f"Partida #{lobby_numero}"
         self.status = "espera"  # "espera" | "jogando"
         self.criado_em = datetime.now()
+        # Última vez que a sala deu sinal de vida (evento ou heartbeat do
+        # cliente). A busca usa isso para esconder resumos órfãos do serverless
+        # (instância que morreu sem disconnect, deixando o resumo congelado).
+        self.visto_em = self.criado_em
         self.config = Lobby.config_padrao()
         # Estado do commit-reveal enquanto a partida ainda não começou (ver seed.py).
         # None quando a verificação está desligada ou após a seed ser fixada na Partida.
@@ -217,6 +221,10 @@ class Lobby:
         Nome da room no Socket.IO correspondente a esta sala.
         """
         return sala_room(self.sala_id)
+
+    def marcar_visto(self):
+        """Registra o instante do último sinal de vida da sala (busca/heartbeat)."""
+        self.visto_em = datetime.now()
 
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
@@ -272,6 +280,7 @@ class Lobby:
             'nome': self.nome,
             'status': self.status,
             'criado_em': self.criado_em.isoformat() if self.criado_em else None,
+            'visto_em': self.visto_em.isoformat() if self.visto_em else None,
             'config': self.config,
             'seed_info': self.seed_info,
             'proxima_partida_num': self.proxima_partida_num,
@@ -361,6 +370,8 @@ class Lobby:
         lobby.status = dados.get('status', 'espera')
         criado_em = dados.get('criado_em')
         lobby.criado_em = datetime.fromisoformat(criado_em) if criado_em else datetime.now()
+        visto_em = dados.get('visto_em')
+        lobby.visto_em = datetime.fromisoformat(visto_em) if visto_em else lobby.criado_em
         lobby.config = dict(cls.config_padrao())
         lobby.config.update(dados.get('config') or {})
         lobby.seed_info = dados.get('seed_info')
@@ -695,6 +706,7 @@ class Lobby:
             'publica': bool(self.config.get('publica', True)),
             'master': master.username if master else None,
             'criada_em': self.criado_em.isoformat() if self.criado_em else None,
+            'visto_em': self.visto_em.isoformat() if self.visto_em else None,
             'pode_entrar': self.status == 'espera'
                            and len(self.jogadores) < int(self.config.get('max_jogadores', 6)),
             'pode_iniciar': pode_iniciar,

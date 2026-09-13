@@ -782,22 +782,54 @@ def teste_gc_unificado_sala_bot_sem_humano():
 
 
 def teste_busca_esconde_sala_sem_humano():
+    from datetime import datetime, timedelta
+    agora = datetime.now().isoformat()
+    velho = (datetime.now() - timedelta(seconds=9999)).isoformat()
     resumos = [
-        ("b0t", {"sala": "b0t", "publica": True, "jogadores": 2, "humanos": 0}),
-        ("hum4", {"sala": "hum4", "publica": True, "jogadores": 2, "humanos": 1}),
-        ("l3g4", {"sala": "l3g4", "publica": True, "jogadores": 2}),
+        ("b0t", {"sala": "b0t", "publica": True, "jogadores": 2, "humanos": 0,
+                 "visto_em": agora}),
+        ("hum4", {"sala": "hum4", "publica": True, "jogadores": 2, "humanos": 1,
+                  "visto_em": agora}),
+        ("l3g4", {"sala": "l3g4", "publica": True, "jogadores": 2, "visto_em": agora}),
+        # Fantasma do serverless: humanos=1 congelado de uma instância morta.
+        ("gz00", {"sala": "gz00", "publica": True, "jogadores": 2, "humanos": 1,
+                  "visto_em": velho}),
+        # Formato antigo, sem `visto_em`: tratado como morto (limpa os fantasmas).
+        ("antg", {"sala": "antg", "publica": True, "jogadores": 2, "humanos": 1}),
     ]
     for sala_id, resumo in resumos:
         modulo_store.salvar_resumo(sala_id, dict(resumo))
     try:
         salas = {r.get("sala") for r in funcoes_gerais.listar_resumos_partidas({})}
         assert "b0t" not in salas, "sala sem humano conectado não pode aparecer na busca"
-        assert "hum4" in salas, "sala com humano conectado deve aparecer"
+        assert "hum4" in salas, "sala com humano conectado e viva deve aparecer"
         assert "l3g4" in salas, "resumo antigo sem 'humanos' cai no total de jogadores"
+        assert "gz00" not in salas, "resumo parado (sem heartbeat) não pode aparecer"
+        assert "antg" not in salas, "resumo sem 'visto_em' é fantasma e não pode aparecer"
     finally:
         for sala_id, _ in resumos:
             modulo_store.remover_resumo(sala_id)
     _ok("busca esconde sala sem humano conectado")
+
+
+def teste_heartbeat_renova_resumo():
+    from datetime import datetime, timedelta
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    # Envelhece o resumo como se a sala tivesse parado (instância morta).
+    lobby = modulo_store.carregar_sala(SALA)
+    lobby.visto_em = datetime.now() - timedelta(seconds=9999)
+    modulo_store.salvar_resumo(SALA, lobby.resumo_partida())
+    salas = {r.get("sala") for r in funcoes_gerais.listar_resumos_partidas({})}
+    assert SALA not in salas, "pré-condição: resumo parado está escondido"
+
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"]})
+    salas = {r.get("sala") for r in funcoes_gerais.listar_resumos_partidas({})}
+    assert SALA in salas, "heartbeat deve renovar o visto_em e reexibir a sala"
+    c1.disconnect()
+    _limpar()
+    _ok("heartbeat renova o resumo da busca")
 
 
 def teste_sala_orfa_e_fechada():
@@ -1097,6 +1129,7 @@ def verificar_integracao():
         ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
         ("GC-bot-persistido", teste_gc_unificado_sala_bot_sem_humano),
         ("busca-humanos", teste_busca_esconde_sala_sem_humano),
+        ("heartbeat-resumo", teste_heartbeat_renova_resumo),
         ("B4-orfa-fechada", teste_sala_orfa_e_fechada),
         ("sala-padrao", teste_sala_padrao_cria_nova),
     ]

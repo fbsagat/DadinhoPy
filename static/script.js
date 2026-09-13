@@ -29,6 +29,15 @@ const socket = io({
 });
 socket.connect();
 
+// Heartbeat de sala: renova o "visto_em" no servidor para a busca distinguir
+// salas vivas das órfãs do serverless (instância que morreu sem disconnect).
+// Só emite quando o socket está conectado e já temos a chave de uma sala.
+setInterval(function () {
+    if (socket.connected && chave_secreta) {
+        socket.emit('heartbeat', { chave: chave_secreta });
+    }
+}, 60000);
+
 // ---------------------------------------------------------------------------
 // Fila de animação + narrador.
 // O servidor pode anexar "atraso" (ms) ao payload de um evento para simular o

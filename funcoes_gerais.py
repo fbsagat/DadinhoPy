@@ -1,5 +1,6 @@
 from flask_socketio import emit
 from modelos import Lobby, sala_room
+from datetime import datetime
 import re
 import secrets
 import store
@@ -7,6 +8,12 @@ import threading
 import time
 
 SALA_PADRAO = "padrao"
+
+# Tempo (segundos) que um resumo pode ficar sem sinal de vida (heartbeat/evento)
+# antes de sumir da busca. O cliente renova a cada 60s; o dobro dá folga para
+# uma batida perdida/rede. Sem isso, salas cuja instância serverless morreu sem
+# disconnect apareciam como ativas por dias (TTL).
+LIMITE_RESUMO_PARADO_SEGUNDOS = 150
 
 # Fase 9: código de sala gerado no servidor, com charset sem caracteres
 # ambíguos (sem 0/o, 1/l/i) e checagem de colisão contra o store.
@@ -312,7 +319,25 @@ def atualizar_lista_usuarios(lobby):
     }, to=lobby.sala_room())
     salvar_sala(lobby)
     # Fase 8: índice leve de resumos p/ a busca (evita reidratar os lobbies).
+    # Stamp do sinal de vida: resumos velhos são escondidos da busca (serverless).
+    lobby.marcar_visto()
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
+
+
+def _resumo_vivo(resumo):
+    """
+    True se o resumo teve sinal de vida dentro de LIMITE_RESUMO_PARADO_SEGUNDOS.
+    Resumo sem `visto_em` (formato antigo ou gravação órfã) conta como morto: é
+    exatamente o caso dos fantasmas do serverless que não dispararam disconnect.
+    """
+    visto = resumo.get('visto_em')
+    if not visto:
+        return False
+    try:
+        return (datetime.now() - datetime.fromisoformat(visto)).total_seconds() \
+            <= LIMITE_RESUMO_PARADO_SEGUNDOS
+    except (ValueError, TypeError):
+        return False
 
 
 def listar_resumos_partidas(filtros, sala_atual=None):
@@ -342,6 +367,10 @@ def listar_resumos_partidas(filtros, sala_atual=None):
         if humanos is None:
             humanos = resumo.get('jogadores') or 0
         if int(humanos or 0) < 1:
+            continue
+        # Sem sinal de vida recente é fantasma do serverless: some da busca até
+        # um cliente voltar (heartbeat/evento reescreve o resumo).
+        if not _resumo_vivo(resumo):
             continue
         if not resumo.get('publica'):
             continue
