@@ -62,6 +62,9 @@ I18N_DICIONARIOS.en = {
     'ui.lista.aguardando': 'Waiting for players...',
     'ui.iniciar': 'Start game',
 
+    // Jogadores
+    'ui.jogadores.titulo': '👥 Players',
+
     // Configurações
     'ui.config.titulo': 'Game settings',
     'ui.config.nome': 'Game name',
@@ -444,6 +447,8 @@ I18N_DICIONARIOS['pt-BR'] = {
     'ui.lista.aguardando': 'Aguardando jogadores...',
     'ui.iniciar': 'Iniciar partida',
 
+    'ui.jogadores.titulo': '👥 Jogadores',
+
     'ui.config.titulo': 'Configurações da partida',
     'ui.config.nome': 'Nome da partida',
     'ui.config.dados': 'Dados por jogador',
@@ -803,6 +808,8 @@ I18N_DICIONARIOS.es = {
     'ui.apelido_pronto': 'Listo',
     'ui.lista.aguardando': 'Esperando jugadores...',
     'ui.iniciar': 'Iniciar partida',
+
+    'ui.jogadores.titulo': '👥 Jugadores',
 
     'ui.config.titulo': 'Ajustes de la partida',
     'ui.config.nome': 'Nombre de la partida',
@@ -1164,6 +1171,8 @@ I18N_DICIONARIOS.fr = {
     'ui.lista.aguardando': 'En attente de joueurs...',
     'ui.iniciar': 'Lancer la partie',
 
+    'ui.jogadores.titulo': '👥 Joueurs',
+
     'ui.config.titulo': 'Réglages de la partie',
     'ui.config.nome': 'Nom de la partie',
     'ui.config.dados': 'Dés par joueur',
@@ -1523,6 +1532,8 @@ I18N_DICIONARIOS['zh-CN'] = {
     'ui.apelido_pronto': '准备',
     'ui.lista.aguardando': '等待玩家...',
     'ui.iniciar': '开始对局',
+
+    'ui.jogadores.titulo': '👥 玩家',
 
     'ui.config.titulo': '对局设置',
     'ui.config.nome': '对局名称',

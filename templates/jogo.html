@@ -13,7 +13,9 @@
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="../static/custom_styles.css">
 </head>
 
@@ -60,13 +62,12 @@
         style="z-index: 60; display: none; font-size: 1.1rem;"></div>
 
     <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 24vh;">
-        <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
-            style="display: block; width: 34%; height: auto;">
+        <h1 id="titulo_img" class="titulo-jogo">DADINHO</h1>
     </div>
     <p id="subtitulo_jogo" class="tagline-jogo text-center text-info mb-2" data-i18n-html="ui.subtitulo">O jogo oficial do
         <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!</p>
 
-    <div class="mt-2 container-fluid align-items-center app-main">
+    <div class="mt-1 container-fluid align-items-center app-main">
 
         <!-- TELA JOGADORES INICIO (0) / Sala de Espera -->
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
@@ -85,10 +86,10 @@
 
             <div id="painel_sala">
                 <div class="mb-2">
-                    <small class="text-light d-block mb-2"><span data-i18n="ui.sala.atual">Sala atual:</span> <span
+                    <small class="text-light d-block mb-1"><span data-i18n="ui.sala.atual">Sala atual:</span> <span
                             id="sala_atual" class="badge text-bg-info">#padrao</span>
                     </small>
-                    <small id="status_conexao" class="text-success d-block mb-2"></small>
+                    <small id="status_conexao" class="text-success d-block mb-1"></small>
                     <div class="d-flex justify-content-center gap-2 flex-wrap">
                         <button id="bot_sala_criar" class="btn btn-info" data-i18n="ui.sala.criar"
                             onclick="criar_sala()">Criar sala</button>
@@ -99,7 +100,7 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
+                <div class="mb-2">
                 <h3 id="nome_partida" class="text-info mb-1" data-i18n="ui.partida.titulo">Partida</h3>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
                     <span id="status_partida" class="badge text-bg-secondary"
@@ -111,44 +112,49 @@
             </div>
 
             <div class="container">
-                <div class="row justify-content-center g-3 align-items-start">
+                <div class="row justify-content-center g-2 align-items-start">
 
                     <div class="col-12 col-lg-5">
-                        <div>
-                            <input type="text" id="apelido" class="container form-control text-center mx-auto"
-                                style="width: 200px;"
-                                data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
-                                maxlength="10" autocomplete="nickname">
-                            <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
-                                onclick="enviar_apelido()">Pronto</button>
-                        </div>
+                        <div id="painel_jogador"
+                            class="container my-1 p-2 bg-dark text-light border border-info rounded text-center mx-auto"
+                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
+                            <h5 class="text-info mb-2" data-i18n="ui.jogadores.titulo">👥 Jogadores</h5>
+                            <div>
+                                <input type="text" id="apelido" class="container form-control text-center mx-auto"
+                                    style="width: 200px;"
+                                    data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
+                                    maxlength="10" autocomplete="nickname">
+                                <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
+                                    onclick="enviar_apelido()">Pronto</button>
+                            </div>
 
-                        <div class="container my-2 p-3 bg-dark text-light border border-info rounded gamer-container"
-                            id="lista_de_jogadores"
-                            style="--bs-bg-opacity: .8; width: 100%; max-width: 400px; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Orbitron', sans-serif;">
-                            <small data-i18n="ui.lista.aguardando">Aguardando jogadores...</small>
-                        </div>
+                            <div class="container my-1 p-2 bg-dark text-light border border-info rounded gamer-container"
+                                id="lista_de_jogadores"
+                                style="--bs-bg-opacity: .8; width: 100%; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Inter', sans-serif;">
+                                <small data-i18n="ui.lista.aguardando">Aguardando jogadores...</small>
+                            </div>
 
-                        <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
-                            <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
-                                onclick="alternar_pronto()">Ficar pronto</button>
-                            <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
-                                onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
+                            <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
+                                <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
+                                    onclick="alternar_pronto()">Ficar pronto</button>
+                                <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
+                                    onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
+                            </div>
                         </div>
                     </div>
 
                     <div class="col-12 col-lg-7 d-flex flex-wrap justify-content-center gap-3">
                         <div id="painel_config"
-                            class="container my-2 p-3 bg-dark text-light border border-secondary rounded text-center"
+                            class="container my-1 p-2 bg-dark text-light border border-secondary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
-                            <h5 class="text-info mb-3" data-i18n="ui.config.titulo">Configurações da partida</h5>
-                            <div class="mb-2">
+                            <h5 class="text-info mb-2" data-i18n="ui.config.titulo">Configurações da partida</h5>
+                            <div class="mb-1">
                                 <label class="form-label small d-block" for="config_nome"
                                     data-i18n="ui.config.nome">Nome da partida</label>
                                 <input type="text" id="config_nome" class="form-control form-control-sm text-center mx-auto"
                                     maxlength="30" data-i18n-placeholder="ui.config.nome" placeholder="Nome da partida">
                             </div>
-                            <div class="row g-2 mb-2">
+                            <div class="row g-2 mb-1">
                                 <div class="col-6">
                                     <label class="form-label small d-block" for="config_dados"
                                         data-i18n="ui.config.dados">Dados por jogador</label>
@@ -197,7 +203,7 @@
                                 <label class="form-check-label" for="config_verificacao"
                                     data-i18n="ui.config.verificacao">Verificar dados (provably fair)</label>
                             </div>
-                            <div class="row g-2 mb-2 mt-1">
+                            <div class="row g-2 mb-1 mt-1">
                                 <div class="col-12">
                                     <label class="form-label small d-block" for="config_tempo"
                                         data-i18n="ui.config.tempo">Tempo máximo de jogada</label>
@@ -210,15 +216,15 @@
                                     </select>
                                 </div>
                             </div>
-                            <small class="text-muted d-block mt-2" data-i18n="ui.config.nota">Somente o master edita as
+                            <small class="text-muted d-block mt-1" data-i18n="ui.config.nota">Somente o master edita as
                                 configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
                         </div>
 
                         <div id="painel_ia"
-                            class="container my-2 p-3 bg-dark text-light border border-primary rounded text-center"
+                            class="container my-1 p-2 bg-dark text-light border border-primary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
-                            <h5 class="text-info mb-3" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
-                            <div class="row g-2 mb-2">
+                            <h5 class="text-info mb-2" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
+                            <div class="row g-2 mb-1">
                                 <div class="col-6">
                                     <label class="form-label small d-block" for="ia_nivel"
                                         data-i18n="ui.ia.nivel">Nível</label>
@@ -247,7 +253,7 @@
                                 <button class="btn btn-sm btn-outline-danger" data-i18n="ui.ia.remover"
                                     onclick="remover_ias()">Remover IAs</button>
                             </div>
-                            <small class="text-muted d-block mt-2" data-i18n="ui.ia.nota">Bots entram prontos e jogam
+                            <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
                                 sozinhos. Só o master controla.</small>
                         </div>
                     </div>
@@ -368,7 +374,7 @@
                     style="width: 12rem;">É a sua vez</span>
             </div>
 
-            <div class="container-sm mb-4 bg-dark bg-opacity-50 rounded p-2 shadow-lg"
+            <div class="container-sm mb-2 bg-dark bg-opacity-50 rounded p-2 shadow-lg"
                 style="max-width: 450px; margin: 0 auto;">
                 <!-- Container principal -->
                 <div class="d-flex justify-content-center align-items-center">
@@ -457,7 +463,7 @@
                 class="text-center fs-6 fw-bold text-success-emphasis bg-primary-subtle border border-primary-subtle rounded-4">
             </p>
         </div>
-        <div class='container my-4 p-3 mb-2 bg-black text-white border border-light rounded'
+        <div class='container my-2 p-2 mb-1 bg-black text-white border border-light rounded'
             style="--bs-bg-opacity: .3;">
             <h1 class="fw-bold text-primary hero" data-i18n="ui.conf.titulo">Conferência</h1>
 
@@ -474,9 +480,9 @@
     <!-- TELA CONFERENCIA FIM -->
     <!-- TELA VITORIA INICIO (4) -->
     <div id="tela_vitoria" class="tela_vitoria container-fluid text-center" style="display: none;">
-        <h1 id="h1_vencedor" class="display-4 fw-bold text-center hero mb-5" style="font-size: 4rem;">
+        <h1 id="h1_vencedor" class="display-4 fw-bold text-center hero mb-3">
         </h1>
-        <p class="tagline-jogo text-center text-info mb-4" data-i18n-html="ui.subtitulo">O jogo oficial do <a
+        <p class="tagline-jogo text-center text-info mb-2" data-i18n-html="ui.subtitulo">O jogo oficial do <a
                 href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!</p>
         <div class="d-flex flex-column justify-content-center align-items-center">
             <button id="comemorar" class="btn btn-success mt-3" data-i18n="ui.vitoria.comemorar"

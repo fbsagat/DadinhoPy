@@ -879,21 +879,17 @@ socket.on("mudar_pagina", function (data) {
     aplicar_estado_narrador();
     // Mostra a próxima página
     paginas[indiceAtual].style.display = "block";
+    // Fase 32 (P1): o título é texto "DADINHO" (sem imagens titulo.png/titulo_p).
+    // Só o tamanho varia por página para abrir espaço nas telas de jogo.
     if (data.pag_numero === 2) {
-        // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-        logodiv.style.height = '10vh';
-        logo.src = "../static/imagens/titulo_p.png";
-        logo.style.width = '25%';
+        logodiv.style.height = '8vh';
+        logo.style.fontSize = 'clamp(1.6rem, 2.6vw, 2.8rem)';
     } else if (data.pag_numero === 3) {
-        // logo.style.display = "none"; // Escondekk o logotipo pra abrir espaço
-        logodiv.style.height = '26vh';
-        logo.src = "../static/imagens/titulo.png";
-        logo.style.width = '34%';
+        logodiv.style.height = '12vh';
+        logo.style.fontSize = 'clamp(2rem, 3.4vw, 3.6rem)';
     } else {
-        // logo.style.display = "block"; // Exibe o logotipo
-        logodiv.style.height = '24vh';
-        logo.src = "../static/imagens/titulo.png";
-        logo.style.width = '34%';
+        logodiv.style.height = '12vh';
+        logo.style.fontSize = 'clamp(2rem, 3.6vw, 3.8rem)';
     }
     // Assinatura do jogo: some durante as telas de jogo (1 e 2) para dar espaço.
     const subtitulo = document.getElementById('subtitulo_jogo');
@@ -999,16 +995,16 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     const imgDiv = document.createElement('div');
     const img = document.createElement('img');
     img.src = `../static/imagens/dado/${imageIndex}.png`;
-    img.className = 'diceImage img-fluid ms-4';
+    img.className = 'diceImage img-fluid ms-1';
     img.alt = 'Imagem 1';
-    img.width = 40;
-    img.height = 40;
+    img.width = 26;
+    img.height = 26;
     imgDiv.appendChild(img);
 
     const textDiv = document.createElement('div');
-    textDiv.className = 'mt-2';
+    textDiv.className = 'mt-0';
     const heading = document.createElement('h1');
-    heading.className = 'fs-3';
+    heading.className = 'fs-6 mb-0';
     heading.textContent = text;
     textDiv.appendChild(heading);
 
@@ -1026,7 +1022,7 @@ socket.on('construtor_dados', function (data) {
     tela_jogar_dados.innerHTML = ""
 
     if (espectador === false) {
-        container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
+        container.className = 'container my-2 p-2 mb-1 bg-black text-white border border-light rounded';
         container.style = '--bs-bg-opacity: .3;';
 
         // Criação do botão Jogar Dados
@@ -1041,7 +1037,7 @@ socket.on('construtor_dados', function (data) {
 
         // Criação da div interna container para organizar as colunas
         const containerInterno = document.createElement('div');
-        containerInterno.className = 'container mt-5';
+        containerInterno.className = 'container mt-3';
 
         // Criação da linha de dados
         const row = document.createElement('div');
@@ -1082,12 +1078,12 @@ socket.on('construtor_dados', function (data) {
     } else {
         // Cria a div principal
         const container = document.createElement('div');
-        container.className = 'container my-4 p-3 mb-2 bg-black text-white border border-light rounded';
+        container.className = 'container my-2 p-2 mb-1 bg-black text-white border border-light rounded';
         container.style.setProperty('--bs-bg-opacity', '.3');
 
         // Cria o sub-container centralizado
         const subContainer = document.createElement('div');
-        subContainer.className = 'container mt-5 d-flex justify-content-center align-items-center';
+        subContainer.className = 'container mt-3 d-flex justify-content-center align-items-center';
 
         // Cria o texto com badge
         const badge = document.createElement('span');
@@ -1156,7 +1152,9 @@ socket.on('construtor_html', function (data) {
         // Criação do card
         const card = document.createElement('div');
         card.className = 'card border border-secondary border-1 text-bg-dark';
-        card.style.minHeight = '200px'; // Altura mínima do card; cresce com o conteúdo no mobile.
+        // Fase 32 (P3): altura FIXA no desktop (o corpo rola se o histórico
+        // passar de 3 jogadas) — todos os cards ficam do mesmo tamanho.
+        card.style.minHeight = '148px';
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
@@ -1402,36 +1400,23 @@ socket.on('reset_partida', function () {
 socket.on('formatador_coletivo', function (data) {
     const jogadores = data.jogadores_nomes;
     const jog_da_vez = data.jogador_inicial_nome;
-    const eu = nome_jogador;
     // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
     // isso para pedir o dispatcher reenviado se o indicador se perder).
     vez_atual_nome = String(jog_da_vez || '');
 
-    jogadores.forEach((jogador, index) => {
+    jogadores.forEach((jogador) => {
         const card = document.getElementById(`card_${jogador}`);
 
         if (!card) {
             return;
         }
 
-        if (jogador === eu) {
-            if (jogador === jog_da_vez) {
-                // // Aqui para o jogador na própria vez, card dele
-                card.className = 'card border border-primary border-4 text-bg-dark';
-            } else {
-                // Aqui para o jogador na espera da vez, card dele
-                card.className = 'card border border-secondary border-1 text-bg-dark';
-            }
-            // Aqui para todos os jogadores sendo eu o da vez
-        } else {
-            if (jogador === jog_da_vez) {
-                // Aqui para o jogador na espera da vez, card do da vez
-                card.className = 'card border border-warning border-2 text-bg-dark';
-            } else {
-                // Aqui para o jogador na própria vez, card do(s) jogaor(es) aguardando
-                card.className = 'card border border-secondary border-1 text-bg-dark';
-            }
-            // Aqui para todos os jogadores não sendo eu o da vez
+        // Fase 32 (P4): indicador de vez para TODOS — borda verde pulsante
+        // (classe `card-da-vez`) no card de quem está na vez. Reseta o card
+        // para o estado base e aplica o marcador só no da vez.
+        card.className = 'card border border-secondary border-1 text-bg-dark';
+        if (jogador === jog_da_vez) {
+            card.classList.add('card-da-vez');
         }
     });
 })

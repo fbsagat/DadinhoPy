@@ -33,7 +33,7 @@ body {
     overflow-x: hidden;
     /* Evita rolagem horizontal; vertical liberada p/ telas pequenas */
     overflow-y: auto;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
     overscroll-behavior-y: contain;
 }
 
@@ -173,7 +173,7 @@ canvas {
 }
 
 #h1_vencedor { /* Aplica as animações somente ao h1 com o id "h1_vencedor" */
-    font-family: 'Arial', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     background: linear-gradient(to right, #ff6a00, #ff3a6b);
     color: transparent;
     -webkit-background-clip: text;
@@ -215,8 +215,7 @@ canvas {
     }
 
     #titulo_img {
-        width: 72vw !important;
-        max-width: 340px;
+        font-size: clamp(1.6rem, 8vw, 2.6rem) !important;
     }
 
     #h1_vencedor {
@@ -280,7 +279,7 @@ canvas {
 
 /* Fase 5: sala de espera e busca de partidas. */
 #painel_config {
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
 #lista_partidas {
@@ -363,7 +362,7 @@ canvas {
 }
 
 .narrador-header {
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     font-size: 0.8rem;
     color: #0dcaf0;
     border-bottom: 1px solid rgba(13, 202, 240, 0.3);
@@ -522,7 +521,7 @@ canvas {
 
 .alerta-titulo {
     margin: 0;
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     font-size: 1.15rem;
     color: var(--cor-info);
 }
@@ -582,7 +581,7 @@ canvas {
     width: 100%;
     max-width: 1440px;
     margin: 0 auto;
-    padding: 8px 16px 44px;
+    padding: 8px 16px 20px;
 }
 
 @media (min-width: 1600px) {
@@ -599,7 +598,7 @@ h4,
 h5,
 #nome_partida,
 .badge {
-    font-family: 'Orbitron', 'Segoe UI', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
 /* ------- Transição suave entre telas ------- */
@@ -620,22 +619,35 @@ h5,
 
 /* ------- Título do jogo ------- */
 #div_titulo_img {
-    padding-top: 48px;
+    padding-top: 40px;
     /* Espaço para os botões fixos no topo */
     transition: height 0.3s ease;
     flex-shrink: 0;
 }
 
+/* Fase 32 (P1): o título vira texto "DADINHO" (a fonte Orbitron ficou só na
+   marca; o resto do app usa Inter, mais legível). */
 #titulo_img {
-    max-width: 640px;
-    max-height: 28vh;
-    object-fit: contain;
-    filter: drop-shadow(0 8px 22px rgba(13, 202, 240, 0.22));
+    font-family: 'Orbitron', 'Inter', sans-serif;
+    font-weight: 900;
+    font-size: clamp(2rem, 3.6vw, 3.8rem);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin: 0;
+    line-height: 1;
+    padding-left: 0.16em;
+    /* compensa o letter-spacing final p/ centralizar */
+    background: linear-gradient(135deg, #0dcaf0 0%, #1d9bf0 50%, #a5c8ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 6px 18px rgba(13, 202, 240, 0.28));
+    user-select: none;
 }
 
 /* Subtítulo / assinatura do jogo (MemeTrigger). */
 .tagline-jogo {
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     font-size: 0.9rem;
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -714,6 +726,7 @@ h5,
 
 /* ------- Painéis ------- */
 #painel_config,
+#painel_jogador,
 #lista_de_jogadores,
 .tela_busca .container,
 #tela_jogar_dados .container {
@@ -775,7 +788,7 @@ h5,
     padding: 1px 6px;
     background-color: #ffc107;
     color: #001125;
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     font-size: 0.58rem;
     font-weight: 700;
     letter-spacing: 0.5px;
@@ -791,14 +804,18 @@ h5,
     }
 }
 
-/* Grid adaptável no desktop: os cards acompanham o nº de jogadores. */
+/* Grid adaptável no desktop: cards do mesmo tamanho (`auto-fill` mantém as
+   trilhas iguais mesmo na última linha com poucos jogadores). Fase 32 (P2):
+   `auto-fit` era usado — na última linha os cards esticavam a largura toda. */
 @media (min-width: 992px) {
     #cards {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
         gap: 0.6rem;
         justify-content: center;
         width: 100%;
+        max-height: 340px;
+        overflow-y: auto;
     }
 
     #cards > div {
@@ -806,6 +823,55 @@ h5,
         max-width: none !important;
         flex: none !important;
         margin: 0;
+    }
+}
+
+/* Fase 32 (P3): cards de jogadores com altura FIXA e compactos — o histórico
+   de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo. */
+#cards .card {
+    height: 148px;
+}
+
+#cards .card-body {
+    /* padding-top extra p/ não cortar o selo "ÚLTIMA" (top: -9px) da 1ª jogada */
+    padding: 0.6rem 0.4rem 0.3rem;
+    overflow-y: auto;
+}
+
+#cards .card-body .col-md-12 {
+    padding: 0;
+    margin-bottom: 0.2rem !important;
+}
+
+#cards .card-body h1 {
+    font-size: 0.85rem !important;
+    margin: 0 !important;
+}
+
+#cards .diceImage {
+    width: 24px !important;
+    height: 24px !important;
+}
+
+/* Fase 32 (P4): indicador de quem está na vez, verde pulsante, visível para
+   todos (a classe é aplicada por `formatador_coletivo`, que vai para a room). */
+#cards .card.card-da-vez {
+    border-color: #198754 !important;
+    border-width: 3px;
+    box-shadow: 0 0 12px rgba(25, 135, 84, 0.65);
+    animation: pulso_verde 1.6s ease-in-out infinite;
+}
+
+@keyframes pulso_verde {
+    0%,
+    100% {
+        box-shadow: 0 0 8px rgba(25, 135, 84, 0.5);
+        border-color: #198754;
+    }
+
+    50% {
+        box-shadow: 0 0 22px rgba(25, 135, 84, 0.95), 0 0 40px rgba(25, 135, 84, 0.4);
+        border-color: #7bd389;
     }
 }
 
@@ -897,7 +963,21 @@ h5,
 
 /* ------- Vitória (tela 4) ------- */
 #tela_vitoria {
-    padding-top: 40px;
+    padding-top: 16px;
+}
+
+/* Desktop 1080p: vencedor em tamanho que cabe com o resto da tela. */
+@media (min-width: 992px) {
+    #h1_vencedor {
+        font-size: clamp(2.4rem, 3.4vw, 3.2rem) !important;
+    }
+
+    /* Lista de jogadores com scroll interno — a sala de espera não cresce
+       além da tela mesmo com o máximo de jogadores. */
+    #lista_de_jogadores {
+        max-height: 220px;
+        overflow-y: auto;
+    }
 }
 
 /* ------- Painel de dicas: ocupa a largura toda em telas estreitas ------- */
