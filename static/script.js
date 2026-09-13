@@ -1445,9 +1445,9 @@ socket.on('vencedor_da_partida', function (data) {
     tocar_som_variante('aposta', [1, 2]);
     tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
-    // Fase E: o template tem <br> (por isso innerHTML), mas o nome interpolado
-    // é escapado — apelidos são validados, isto é defesa em profundidade.
-    h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: escapar_html(data.nome) });
+    // Fase E + P5: o template tem <br> (por isso innerHTML); o nome interpolado
+    // é escapado dentro de `t()` (`_interpolar` no i18n.js), sem dupla codificação.
+    h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: data.nome });
     iniciar_celebracao();
     // Fase 22: contador da jogada automática da tela de vitória (auto-confirma
     // o reset se o jogador ficar away from keyboard).
@@ -1458,15 +1458,6 @@ socket.on('vencedor_da_partida', function (data) {
 socket.on('soltar_fogos', function () {
     soltar_fogos();
 })
-
-// Escapa HTML em texto interpolado em innerHTML (defesa em profundidade: os
-// apelidos já são validados, mas nunca confiar em entrada em markup).
-function escapar_html(texto) {
-    const mapa = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return String(texto == null ? '' : texto).replace(/[&<>"']/g, function (c) {
-        return mapa[c];
-    });
-}
 
 // Monta o texto da conferência no idioma do jogador. O servidor manda campos
 // estruturados (quem ganhou/perdeu, quantidade apostada e real); se não vierem,
@@ -3036,6 +3027,7 @@ function iniciar_celebracao() {
             confetes.push(criar_confete(true));
         }
     }
+    garantir_loop_animacao(); // P1: liga o loop de animação (parado ocioso).
     if (!intervalo_fogos) {
         disparar_fogos(3);
         intervalo_fogos = setInterval(function () {
@@ -3069,6 +3061,7 @@ function disparar_fogos(quantidade) {
 }
 
 function soltar_fogos() {
+    garantir_loop_animacao(); // P1: fogos avulsos também ligam o loop.
     disparar_fogos(2 + Math.floor(Math.random() * 3));
 }
 
@@ -3125,13 +3118,29 @@ function drawParticles() {
     ctx.globalAlpha = 1;
 }
 
-function animate() {
-    updateParticles();
-    drawParticles();
-    requestAnimationFrame(animate);
+let _loop_animacao_ativo = false;
+
+// P1: liga o loop de animação sob demanda. Antes, `animate()` rodava para
+// sempre e `drawParticles` fazia `clearRect` do viewport inteiro a cada frame
+// mesmo sem partículas/confetes — custo ocioso de CPU no mobile.
+function garantir_loop_animacao() {
+    if (!_loop_animacao_ativo) {
+        _loop_animacao_ativo = true;
+        requestAnimationFrame(animate);
+    }
 }
 
-animate();
+function animate() {
+    if (celebrando || particles.length > 0 || confetes.length > 0) {
+        updateParticles();
+        drawParticles();
+        requestAnimationFrame(animate);
+    } else {
+        // Sem festa: para o loop (a próxima celebração o religa).
+        _loop_animacao_ativo = false;
+        ctx.clearRect(0, 0, largura_canvas, altura_canvas);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Verificação de integridade (provably fair) — espelha seed.py no cliente.

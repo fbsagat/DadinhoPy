@@ -24,7 +24,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 28** — Infra: robustez do store e locks (blob corrompido, `Partida` vazia, `esquecer_sala`). ✅ concluída
 - **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ✅ concluída
 - **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ✅ concluída
-- **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ⬜ pendente
+- **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ✅ concluída
 
 ---
 
@@ -363,15 +363,15 @@ Objetivo: eliminar os bugs de interação que "travam" o jogador na tela.
 
 Verificação: `node --check static/script.js` OK + `python verificar.py` 100% verde (integração existente). Teste manual em 2 abas: alerta sobre alerta (a cadeia do 1º continua — ex.: `sala_cheia` e a criação de sala em sequência), 2 turnos seguidos sem clicar em dado exigem nova seleção (pede `msg.selecione_dado`), `#increase` para no total da mesa.
 
-## Fase 31 — Frontend: performance, CSS e segurança
+## Fase 31 — Frontend: performance, CSS e segurança ✅ concluída
 
 Objetivo: loop de confete sem custo ocioso, conflitos de CSS resolvidos e disciplina anti-XSS fechada.
 
-- [ ] **P1 — Gate no `requestAnimationFrame`** (`script.js:3082-3088`): `animate()` roda para sempre e `drawParticles` faz `clearRect` do viewport inteiro a cada frame mesmo sem partículas/confetes; rodar o loop só quando `celebrando || particles.length || confetes.length`.
-- [ ] **P2 — `.selected` vs `:hover`** (`custom_styles.css:101-114` vs `126-133`): mesma especificidade de `:hover` sobrescreve `transform`/`transition` e a face selecionada "des-seleciona" no hover; unificar a regra (ex.: `scale(1.3)` também no hover da selecionada).
-- [ ] **P3 — Overlap `.narrador` × `.painel-dicas` no mobile** (`custom_styles.css:347-391`, `690-699`, `922-930`): painéis ancorados em baixo se sobrepõem em viewports ~600px; reconciliar as âncoras.
-- [ ] **P4 — CSS morto**: `.topo-fixo`, `.custom-list`, `.fixed-top-image` não casam com `jogo.html`; `no-gutters` é resíduo do Bootstrap 4.
-- [ ] **P5 — CSP e blindar `_interpolar`** (`i18n.js:1898-1908`): a interpolação não escapa (hoje seguro por disciplina de `textContent`/`escapar_html`); escapar lá mesmo e avaliar `Content-Security-Policy` (meta ou header).
-- [ ] **P6 — `<canvas>` com `z-index:-1`** (`custom_styles.css:194-201`): depende do quirk de propagação do body; subir para `z-index:0` mantendo os painéis na frente.
+- [x] **P1 — Gate no `requestAnimationFrame`** (`script.js:3082-3088`): `animate()` rodava para sempre e `drawParticles` fazia `clearRect` do viewport inteiro a cada frame mesmo sem partículas/confetes. Agora o loop é ligado sob demanda (`garantir_loop_animacao`, chamado em `iniciar_celebracao`/`soltar_fogos`) e roda só enquanto `celebrando || particles.length || confetes.length`; ao parar, limpa o canvas.
+- [x] **P2 — `.selected` vs `:hover`** (`custom_styles.css:101-114` vs `126-133`): `:hover` tinha a mesma especificidade e, por vir depois, sobrescrevia `transform: scale(1.3)` da face selecionada (ela "des-selecionava" no hover). Nova regra `.image-button.selected img:hover` (específica) mantém `scale(1.3)` + brilho.
+- [x] **P3 — Overlap `.narrador` × `.painel-dicas` no mobile** (`custom_styles.css:347-391`, `690-699`, `922-930`): ambos fixos no rodapé se sobrepunham em viewports ~600px. Em ≤768px a dica vai para o topo (`top: 64px`, abaixo dos botões/contador fixos); o narrador mantém o rodapé (e a regra ≤480px foi reconciliada).
+- [x] **P4 — CSS morto**: removidos `.topo-fixo`, `.custom-list`, `.fixed-top-image` e `.row.no-gutters` (não casam com `jogo.html`; `no-gutters` é resíduo do Bootstrap 4 — os cards agora usam `g-1` do Bootstrap 5).
+- [x] **P5 — Blindar `_interpolar`** (`i18n.js:1898-1908`): a interpolação agora escapa o valor (`_escapar_html`), então o valor nunca entra cru no `innerHTML` (ex.: `js.vitoria_texto`, que tem `<br>`); removida a dupla codificação no `vencedor_da_partida` e a função `escapar_html` (agora morta). **CSP avaliado e adiado**: o app tem ~21 handlers `onclick` inline + estilos inline + recursos de CDN (socket.io, Bootstrap, Google Fonts) — um CSP estrito exigiria `'unsafe-inline'` no `script-src` (valor de segurança baixo) e o refactor dos handlers exige teste real em navegador (o único meio de verificação do projeto).
+- [x] **P6 — `<canvas>` com `z-index:-1`** (`custom_styles.css:194-201`): dependia do quirk de propagação do background do body (poderia sumir atrás do fundo). Agora `z-index: 0` + `pointer-events: none` (não intercepta cliques; os painéis com `z-index` 55+ seguem na frente).
 
-Verificação: `node --check static/script.js`, `python verificar.py` (cobertura i18n — P5 não pode trocar chaves) e teste manual de perf no mobile/devtools (loop de animação parado em telas sem festa).
+Verificação: `node --check static/script.js`/`static/i18n.js` OK, `python verificar.py` 100% verde (cobertura i18n intocada — P5 não trocou chaves). Teste manual de perf no mobile/devtools: o `requestAnimationFrame` deve estar parado em telas sem festa (loop só roda na celebração).

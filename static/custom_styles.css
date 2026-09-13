@@ -37,51 +37,9 @@ body {
     overscroll-behavior-y: contain;
 }
 
-.custom-list {
-    background-color: #002952;
-    /* Fundo escuro */
-    color: white;
-    /* Texto claro */
-    max-width: 720px;
-    /* Largura máxima da lista */
-    margin: auto;
-    /* Centraliza a lista */
-    border-radius: 0.25rem;
-    /* Bordas arredondadas */
-}
-
-/* Estilo para a imagem fixa no topo */
-.fixed-top-image {
-    position: fixed;
-    /* Faz a imagem ficar fixa */
-    top: 0;
-    /* Posiciona no topo */
-    left: 50%;
-    /* Centraliza horizontalmente */
-    transform: translateX(-50%);
-    /* Ajusta para que a imagem fique centralizada */
-    z-index: 1000;
-    /* Garante que a imagem fique acima de outros elementos */
-}
-
-.topo-fixo {
-    position: fixed;
-    top: 0;
-    width: 100%;
-    z-index: 1000;
-    background-color: rgba(255, 255, 255, 0);
-}
-
-/* Reduzindo o espaço entre as colunas */
-.row.no-gutters {
-    margin-left: 0;
-    margin-right: 0;
-}
-
-.row.no-gutters>[class*="col-"] {
-    padding-left: 1px;
-    padding-right: 1px;
-}
+/* Fase 31 (P4): removidos os blocos mortos `.custom-list`, `.fixed-top-image`,
+   `.topo-fixo` e `.row.no-gutters` (resíduo do Bootstrap 4) — não casam com o
+   `jogo.html` atual; os cards usam `g-1` do Bootstrap 5 para o espaçamento. */
 
 /* Ajusta os botões para manter foco apenas na imagem */
 .image-button {
@@ -130,6 +88,14 @@ body {
     /* Imagem mais clara */
     transition: transform 0.4s ease, filter 0.4s ease;
     /* Transição suave */
+}
+
+/* Fase 31 (P2): a face selecionada não pode "des-selecionar" no hover — a regra
+   `:hover` acima tem a MESMA especificidade de `.selected` e, por vir depois,
+   sobrescrevia o `scale(1.3)` da selecionada. Aqui a específica vence. */
+.image-button.selected img:hover {
+    transform: scale(1.3);
+    filter: brightness(1.2);
 }
 
 /* Remove as setas de incremento e decremento dos inputs */
@@ -197,7 +163,13 @@ canvas {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: -1; /* Coloca o canvas atrás de outros elementos */
+    /* Fase 31 (P6): antes `z-index: -1` dependia do quirk de propagação do
+       background do body (o canvas podia sumir atrás do fundo). Com `0` o
+       canvas fica sobre o conteúdo estático, mas transparente e com
+       `pointer-events: none` — não bloqueia cliques; os painéis (z-index 55+)
+       seguem na frente. */
+    z-index: 0;
+    pointer-events: none;
 }
 
 #h1_vencedor { /* Aplica as animações somente ao h1 com o id "h1_vencedor" */
@@ -696,6 +668,16 @@ h5,
         width: auto;
         max-height: 26vh;
     }
+    /* Fase 31 (P3): o painel de dicas ancorado embaixo disputava o rodapé com o
+       narrador (também fixo) e se sobrepunham em viewports ~600px. A dica vai
+       para o topo (abaixo dos botões/contador fixos); o narrador mantém o rodapé. */
+    .painel-dicas {
+        bottom: auto;
+        top: 64px;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+    }
 }
 
 /* ------- Botões ------- */
@@ -921,9 +903,10 @@ h5,
 /* ------- Painel de dicas: ocupa a largura toda em telas estreitas ------- */
 @media (max-width: 480px) {
     .painel-dicas {
+        top: 60px;
+        bottom: auto;
         left: 8px;
         right: 8px;
-        bottom: 8px;
         width: auto;
         transform: none;
     }

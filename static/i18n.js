@@ -1894,6 +1894,18 @@ function _resolver_face(valor, quantidade) {
     return t(chave);
 }
 
+// Fase 31 (P5): escapa o valor interpolado (defesa em profundidade). A
+// interpolação alimenta `innerHTML` em alguns pontos (ex.: `js.vitoria_texto`,
+// que tem <br>), então o valor nunca entra cru no markup. Apelidos são
+// validados no servidor (nunca contêm & < > " '), então nada muda em sinks de
+// `textContent`.
+function _escapar_html(valor) {
+    const mapa = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(valor).replace(/[&<>"']/g, function (c) {
+        return mapa[c];
+    });
+}
+
 // Substitui {param} mantendo o marcador quando o valor não veio.
 function _interpolar(texto, params) {
     if (!params || !texto) {
@@ -1903,7 +1915,7 @@ function _interpolar(texto, params) {
         if (params[chave] === undefined || params[chave] === null) {
             return marcador;
         }
-        return String(params[chave]);
+        return _escapar_html(params[chave]);
     });
 }
 
