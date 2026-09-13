@@ -730,8 +730,13 @@ def escolher_apelido(dados, lobby, jogador):
     Esta função recebe o apelido do jogador no front-end e atualiza o seu modelo, antes faz umas validações.
     """
     if jogador.partida_atual is None and jogador.rodada_atual is None and jogador.turno_atual is None:
+        # Apelido é editável na espera quantas vezes o jogador quiser, mas fica
+        # travado a partir do "ficar pronto" (mesma regra do front-end).
+        if jogador.pronto:
+            return
         apelido = dados.get("apelido_msg", '')
-        apelido_n = lobby.verificar_apelido(apelido if validar_input(apelido) else 'NOME_BUGADO')
+        apelido_n = lobby.verificar_apelido(apelido if validar_input(apelido) else 'NOME_BUGADO',
+                                            atual=jogador.username)
         jogador.username = apelido_n
         emit("update_username", {'nome_jogador': jogador.username}, to=jogador.client_id)
         atualizar_lista_usuarios(lobby)

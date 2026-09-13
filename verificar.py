@@ -2468,6 +2468,40 @@ def teste_iniciar_repetido_nao_toca_grace():
     _ok("iniciar repetido com a sala jogando não toca a graça (Fase 30)")
 
 
+def teste_apelido_editavel_ate_pronto():
+    """
+    Fase 31: o apelido pode ser trocado quantas vezes quiser na espera (sem
+    colidir consigo mesmo), mas fica travado a partir do "ficar pronto".
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    # Reenviar o próprio apelido não vira "Ana_1" (exclui a si da unicidade).
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("apelido", {"apelido_msg": "AnaNova"})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if not j.is_ia and j.username.startswith("Ana"))
+    assert ana.username == "AnaNova", \
+        f"apelido deve ser trocado livremente na espera, veio {ana.username}"
+    # Apelido que já existe na sala ganha sufixo numérico.
+    c2.emit("apelido", {"apelido_msg": "AnaNova"})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert any(j.username == "AnaNova_1" for j in lobby.jogadores), \
+        "apelido duplicado ganha sufixo numérico"
+    # Pronto: o apelido não muda mais.
+    c1.emit("ficar_pronto", {"chave": cs1["chave_secreta"]})
+    c1.emit("apelido", {"apelido_msg": "NaoPode"})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "AnaNova")
+    assert ana.username == "AnaNova", "apelido travado depois de ficar pronto"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("apelido editável na espera e travado ao ficar pronto")
+
+
 def teste_iniciar_caido_sem_apelido_removido():
     """
     Fase 30: quem caiu na espera SEM apelido é removido no início (não vira bot
@@ -2630,6 +2664,7 @@ def verificar_integracao():
         ("iniciar-repetido-grace", teste_iniciar_repetido_nao_toca_grace),
         ("caido-sem-apelido", teste_iniciar_caido_sem_apelido_removido),
         ("sair-da-sala", teste_sair_da_sala_espectador),
+        ("apelido-editavel", teste_apelido_editavel_ate_pronto),
     ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15

@@ -579,11 +579,22 @@ socket.on("update_user_list", (data) => {
 
         // Botão "Ficar pronto" reflete o estado atual do próprio jogador.
         const bot_pronto = document.getElementById('bot_pronto');
+        const meu_indice = data.users.indexOf(nome_jogador);
+        const eu_pronto = meu_indice !== -1 && data.prontos[meu_indice] === true;
         if (bot_pronto) {
-            const meu_indice = data.users.indexOf(nome_jogador);
-            const eu_pronto = meu_indice !== -1 && data.prontos[meu_indice] === true;
             bot_pronto.textContent = eu_pronto ? t('js.pronto_desfazer') : t('js.ficar_pronto');
             bot_pronto.disabled = data.status === 'jogando';
+        }
+        // Apelido editável na espera quantas vezes o jogador quiser, mas travado
+        // ao ficar pronto (e destravado ao desfazer o pronto).
+        const apelidoInput = document.getElementById('apelido');
+        const botaapelido = document.getElementById('botapel');
+        const apelido_travado = data.status === 'jogando' || eu_pronto;
+        if (apelidoInput) {
+            apelidoInput.disabled = apelido_travado;
+        }
+        if (botaapelido) {
+            botaapelido.disabled = apelido_travado;
         }
 
         const iniciar_jogo = document.getElementById('iniciar_jogo');
@@ -1875,14 +1886,13 @@ socket.on('jogador_desconectado', function (data) {
 // Função para enviar apelido ao servidor
 function enviar_apelido() {
     const textInput = document.getElementById("apelido");
-    const botaapelido = document.getElementById('botapel');
     let apelido = textInput.value.trim();
     if (apelido) {
         localStorage.setItem('dadinho_apelido', apelido); // Lembra entre sessões
         sessionStorage.setItem('dadinho_apelido', apelido); // Mantém entre trocas de sala
         socket.emit('apelido', { apelido_msg: textInput.value });
-        textInput.disabled = true; // Desativa o input
-        botaapelido.disabled = true; // Desativa o input
+        // O input não é desativado aqui: o apelido pode ser trocado quantas
+        // vezes quiser na espera; o travamento acontece ao ficar pronto.
     } else {
         mostrar_alerta(t('msg.preencha_nome'), 'aviso');
     }

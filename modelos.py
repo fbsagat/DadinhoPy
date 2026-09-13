@@ -895,13 +895,15 @@ class Lobby:
         jogador.rodadas = []
         jogador.turnos = []
 
-    def verificar_apelido(self, nome):
+    def verificar_apelido(self, nome, atual=None):
         """
         Faz umas validações de nomes.
         :param nome: Nome que vem do front-end.
+        :param atual: Apelido atual do próprio jogador (exclui a si mesmo da
+            checagem de unicidade — reenviar o próprio apelido não vira "_1").
         """
-        nomes = [jogador.username for jogador in self.jogadores]
-        nomes += [espectador.username for espectador in self.espectadores]
+        nomes = [jogador.username for jogador in self.jogadores if jogador.username != atual]
+        nomes += [espectador.username for espectador in self.espectadores if espectador.username != atual]
         if nome not in nomes:  # Verifica se o nome é único
             return nome  # Se for único, retorna o nome original
             # Se o nome já existe, adiciona um índice até que o nome se torne único
