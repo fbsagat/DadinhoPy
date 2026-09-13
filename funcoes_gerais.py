@@ -484,7 +484,7 @@ def listar_resumos_partidas(filtros, sala_atual=None):
 
 
 def validar_input(texto, tamanho_minimo=1, tamanho_maximo=12, permitir_espacos=True,
-                  caracteres_permitidos=r"^[a-zA-Z0-9\s\-\_\.\@\#\!\$\%\&\*\(\)\+\=\,\;\:\'\"\?\[\]\{\}\\\/áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]*$"):
+                  caracteres_permitidos=r"^[a-zA-Z0-9\s\-_.@#!$%*()+=,;:?{}\[\]\\/áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]*$"):
     """
     Valida o texto recebido do front-end para verificar se é válido ou inválido.
     Args:

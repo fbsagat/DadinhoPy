@@ -1381,6 +1381,8 @@ class Rodada:
                 return None
             if face_ant < face and qtd_ant == qtd:
                 return None
+            if face_ant == face:
+                return _motivo('msg.jogada.repetir_face', qtd_ant=qtd_ant, qtd=qtd)
             if qtd < qtd_ant:
                 return _motivo('msg.jogada.diminuir', qtd=qtd, qtd_ant=qtd_ant)
             return _motivo('msg.jogada.face_menor', qtd=qtd, qtd_ant=qtd_ant)
