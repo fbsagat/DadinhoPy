@@ -836,17 +836,22 @@ def heartbeat(dados=None):
     autoritativa (ex.: o master iniciou a partida e o `mudar_pagina` ficou na
     instância dele), o servidor devolve o snapshot completo da tela atual
     (`enviar_snapshot_sala`) — senão o jogador da outra instância fica preso na
-    sala de espera para sempre. A leitura é fresca do store (ignorando o cache)
-    quando há indício de defasagem: página divergente, ou re-sync do master na
-    espera (a lista dele é quem libera o "iniciar partida").
+    sala de espera para sempre.
+
+    Fase E2: o re-sync da espera SEMPRE lê o estado fresco do store (não só o
+    master, e não via o cache da Fase C). Antes, o jogador não-master da espera
+    recebia a lista do cache defasado e o início da partida só era detectado
+    quando o cache expirava — na Vercel isso era o bug recorrente de o host não
+    ver quem entra/fica pronto e o jogador não avançar de tela.
 
     Fase C: ao contrário dos demais handlers, este NÃO passa por `autenticar` —
     lê pelo índice em processo (`sala_do_cliente`) e usa o cache tolerante a
-    defasagem (`store.carregar_sala_leve`), então cada batida não custa um GET +
-    deserialização na Upstash por cliente (estourava o free tier). Com o estado
-    vindo do cache (até 25s de defasagem) não roda `ia.processar` — mutação só
-    com leitura fresca, para não mover duas vezes o mesmo turno entre instâncias.
-    O `visto_em` tem piso de 60s para o resumo não ser reescrito a cada batida.
+    defasagem (`store.carregar_sala_leve`) para o heartbeat da PARTIDA, evitando
+    um GET + deserialização na Upstash por cliente (estourava o free tier). Com
+    o estado vindo do cache (até 25s de defasagem) não roda `ia.processar` —
+    mutação só com leitura fresca, para não mover duas vezes o mesmo turno entre
+    instâncias. O `visto_em` tem piso de 60s para o resumo não ser reescrito a
+    cada batida.
     """
     dados = dados if isinstance(dados, dict) else {}
     client_id = request.sid
@@ -862,16 +867,24 @@ def heartbeat(dados=None):
     # Re-sync entre instâncias (Fases 18/19/E): a lista da espera e o snapshot
     # da página corrente vêm do store compartilhado para quem bateu, cobrindo o
     # gap dos broadcasts que ficam presos na instância de origem.
+    #
+    # Fase E2: o re-sync SEMPRE lê o estado fresco do store (o cache tolerante
+    # a defasagem da Fase C fica só para o heartbeat da partida). Antes, a lista
+    # da espera vinha do cache até 25s para os não-master, e o início da partida
+    # só era detectado quando o cache expirava — na Vercel, com host e jogador em
+    # instâncias diferentes, o host não via quem entra/fica pronto e o jogador
+    # ficava preso na espera quando o master iniciava (o `mudar_pagina` fica na
+    # instância do host). Recarregar do store a cada batida da espera (a cada
+    # 20s) é o custo certo para o re-sync; o cache ainda evita o GET da partida.
     if pagina_cliente != pagina_sala or lobby.status == 'espera':
-        if pagina_cliente != pagina_sala or (lobby.status == 'espera' and jogador.master):
-            lobby = store.carregar_sala(sala_id)
-            veio_do_cache = False
-            if lobby is None:
-                return
-            jogador = lobby.buscar_jogador_pelo_client_id(client_id)
-            if jogador is None:
-                return
-            pagina_sala = lobby.pagina or 0
+        lobby = store.carregar_sala(sala_id)
+        veio_do_cache = False
+        if lobby is None:
+            return
+        jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+        if jogador is None:
+            return
+        pagina_sala = lobby.pagina or 0
         if lobby.status == 'espera':
             emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
         if pagina_cliente != pagina_sala:

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "references": {
+    "regras": {
+      "path": "Dadinho idéia.txt",
+      "description": "Spec/design do jogo (telas, regras, fluxo). Leia antes de mudar qualquer comportamento de jogo."
+    },
+    "docs": {
+      "path": "docs",
+      "description": "Referências do projeto: docs/arquitetura.md, docs/fluxo.md (mapa de eventos) e docs/verificacao.md (verificação e deploy)."
+    }
+  }
+}

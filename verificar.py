@@ -999,6 +999,58 @@ def teste_heartbeat_resincroniza_lobby():
     _ok("heartbeat re-sincroniza o lobby entre instâncias")
 
 
+def teste_heartbeat_espera_fresco_entre_instancias():
+    # Fase E2 (regra de impedimento): o re-sync da sala de espera não pode
+    # depender do cache tolerante a defasagem (Fase C). Na Vercel, com o cache
+    # velho da própria instância, o host não via quem entra/fica pronto e o
+    # jogador não-master ficava preso na página 0 quando o master iniciava — o
+    # `mudar_pagina` ficava na instância do host e o início da partida só era
+    # detectado quando o cache expirava (até ~45s). Simula a instância com o
+    # cache congelado (outra instância não sabe do que aconteceu) e exige que o
+    # heartbeat recarregue do store compartilhado a cada batida da espera.
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    lobby_so_ana = modulo_store.Lobby.de_dict(modulo_store.carregar_sala(SALA).para_dict())
+
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    # Cache da instância do host congelado ANTES de Bia entrar.
+    with modulo_store._cache_salas_guard:
+        modulo_store._cache_salas[SALA] = (lobby_so_ana, time.monotonic())
+
+    c1.get_received()
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"], "pagina": 0})
+    eventos = c1.get_received()
+    atualizacoes = [e for e in eventos if e["name"] == "update_user_list"]
+    assert atualizacoes, "heartbeat na espera deve responder com update_user_list"
+    payload = atualizacoes[-1]["args"][0]
+    assert payload.get("users") == ["Ana", "Bia"], \
+        f"host deve ver o jogador da outra instância mesmo com cache velho: {payload.get('users')}"
+    assert payload.get("prontos") == [False, True], \
+        f"host deve ver a prontidão mesmo com cache velho: {payload.get('prontos')}"
+
+    # Partida inicia: congela o cache da instância do jogador no estado da espera.
+    lobby_pre = modulo_store.Lobby.de_dict(modulo_store.carregar_sala(SALA).para_dict())
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1 and lobby.status == "jogando"
+    with modulo_store._cache_salas_guard:
+        modulo_store._cache_salas[SALA] = (lobby_pre, time.monotonic())
+
+    c2.get_received()
+    c2.emit("heartbeat", {"chave": cs2["chave_secreta"], "pagina": 0})
+    eventos = c2.get_received()
+    mudancas = [e for e in eventos if e["name"] == "mudar_pagina"]
+    assert mudancas and mudancas[-1]["args"][0]["pag_numero"] == 1, \
+        "jogador da outra instância deve ir para a página 1 mesmo com cache velho"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("heartbeat da espera lê fresco do store entre instâncias")
+
+
 def teste_sala_orfa_e_fechada():
     _limpar()
     c1, cs1, _ = _conectar()
@@ -1801,6 +1853,7 @@ def verificar_integracao():
         ("busca-humanos", teste_busca_esconde_sala_sem_humano),
         ("heartbeat-resumo", teste_heartbeat_renova_resumo),
         ("heartbeat-sync", teste_heartbeat_resincroniza_lobby),
+        ("heartbeat-espera-fresco", teste_heartbeat_espera_fresco_entre_instancias),
         ("B4-orfa-fechada", teste_sala_orfa_e_fechada),
         ("sala-padrao", teste_sala_padrao_fica_na_home),
     ]

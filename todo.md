@@ -277,5 +277,6 @@ Implementadas nesta revisão (refs em `AGENTS.md`):
 - **Fase E** — `innerHTML` do vencedor agora escapa o nome interpolado (`escapar_html`); apelidos já eram validados, isto é defesa em profundidade.
 - **Fase F** — Selo "provably fair" (`js.fair.ativo`/`js.fair.inativo`) na busca e na sala de espera (`#badge_fair`), com `verificacao_ativa` no resumo.
 - **Fase G** — Documentação (`AGENTS.md`/`todo.md`) alinhada às fases acima.
+- **Fase E2** — Re-sync da sala de espera SEMPRE lê o estado fresco do store a cada batida (não só o master, e não via o cache da Fase C): o jogador não-master recebia a lista do cache defasado e o início da partida só era detectado quando o cache expirava — na Vercel o host não via quem entra/fica pronto e o jogador não avançava de tela. Regressão guardada em `verificar.py` (`heartbeat-espera-fresco`).
 
 Verificação: `python verificar.py` (inclui `teste_retomar_identidade_por_evento`) e `python simular_ia.py`.

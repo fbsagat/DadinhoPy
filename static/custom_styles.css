@@ -367,14 +367,17 @@ canvas {
     flex-shrink: 0;
 }
 
-/* Narrador da partida (Fase 12): log das jogadas + "pensando" dos bots. */
+/* Narrador da partida (Fase 12): log das jogadas + "pensando" dos bots.
+   No desktop fica no canto inferior esquerdo: no topo (60px) cobria a
+   barra de dados e os cards mais à esquerda da mesa em telas 1080p. */
 .narrador {
     position: fixed;
-    top: 60px;
+    top: auto;
+    bottom: 16px;
     left: 12px;
     z-index: 55;
     width: min(88vw, 330px);
-    max-height: 42vh;
+    max-height: 36vh;
     display: flex;
     flex-direction: column;
     padding: 8px 10px;
