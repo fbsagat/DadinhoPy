@@ -61,6 +61,11 @@
     <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
         style="z-index: 60; display: none; font-size: 1.1rem;"></div>
 
+    <!-- Fase 30: o espectador pode sair da sala e voltar ao menu. O botão só
+         aparece para quem está assistindo (não-jogador) durante a partida. -->
+    <button id="bot_sair_da_sala" class="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2"
+        style="z-index: 60; display: none;" data-i18n="ui.sair_da_sala" onclick="sair_da_sala()">Sair da sala</button>
+
     <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 24vh;">
         <h1 id="titulo_img" class="titulo-jogo">DADINHO</h1>
     </div>

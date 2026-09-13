@@ -213,6 +213,19 @@ def verificar_roundtrip():
     _checar("round-trip personalidade IA",
             [(j.ia_risco, j.ia_agressividade) for j in copia.jogadores if j.is_ia] == [(0.3, 0.9)])
 
+    # Fase 30: vagas recentes (motivo do retomar_negado) sobrevivem ao round-trip.
+    lobby.registrar_vaga_perdida(espectador)
+    dados_com_vaga = lobby.para_dict()
+    copia_vaga = modelos.Lobby.de_dict(dados_com_vaga)
+    _checar("round-trip vagas recentes",
+            espectador.chave_secreta in copia_vaga.vagas_recentes
+            and copia_vaga.vagas_recentes[espectador.chave_secreta].get('nome') == "Eva")
+
+    # v7 -> v8: o registro de vagas recentes passa a existir (vazio em salas antigas).
+    v7 = {"sala_id": "v7", "lobby_num": 1, "versao": 7, "jogadores": [], "partidas": []}
+    m7 = modelos.Lobby.de_dict(dict(v7))
+    _checar("migração v7 -> v8", m7.vagas_recentes == {}, str(m7.vagas_recentes))
+
     # v1 -> v3: campos da sala de espera e prontidão passam a existir.
     v1 = {"sala_id": "v1", "lobby_num": 1, "versao": 1,
           "jogadores": [{"client_id": "x", "chave_secreta": "k"}], "partidas": []}
@@ -2086,8 +2099,12 @@ def teste_retomar_negado_chave_stale():
     chave_stale = "a" * 32
     c2.emit("retomar_identidade", {"chave": chave_stale})
     eventos = c2.get_received()
-    assert _achar_evento(eventos, "retomar_negado") is not None, \
-        "chave que não pertence à sala deve responder retomar_negado"
+    negado = [e for e in eventos if e["name"] == "retomar_negado"]
+    assert negado, "chave que não pertence à sala deve responder retomar_negado"
+    # Fase 30: chave stale (sessão de outra sala) tem o motivo próprio.
+    motivo = negado[-1]["args"][0].get("motivo", {})
+    assert motivo.get("chave") == "msg.retomar_outra_sala", \
+        f"chave stale deve ter motivo outra_sala, veio {motivo}"
     lobby = modulo_store.carregar_sala(SALA)
     assert len(lobby.jogadores) == 2, "placeholder segue como jogador novo"
     c2.disconnect()
@@ -2229,6 +2246,300 @@ def teste_ultimo_humano_sala_de_ias_ganha_grace():
     _ok("último humano de sala só de IAs ganha a janela de reconexão (Fase 23)")
 
 
+def teste_volta_apos_substituicao_ia():
+    """
+    Fase 30: caiu no meio da partida com a substituição ligada -> a graça expira
+    e a IA joga no lugar -> o humano volta e retoma o controle (`is_ia` volta a
+    False sem duplicar). Cobre o ramo `era_bot_nativo`/`is_ia=False` da
+    `retomar_identidade`.
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"substituir_desconectado_por_ia": True}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    ana_chave = ana.chave_secreta
+    ana_sid = ana.client_id
+
+    # Ana cai e a graça expira: vira IA (Bia está ativa). A partida segue.
+    c1.disconnect()
+    c2.emit("verificar_desconectados")  # grace = 0 no teste
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.is_ia, "caído com a opção ligada deve virar IA"
+    assert ana.client_id == ana_sid, "substituído mantém sid e chave"
+
+    # Ana volta (sid novo): a retomada devolve o controle na mesma partida.
+    c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    c1b.emit("retomar_identidade", {"chave": ana_chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    anas = [j for j in lobby.jogadores if j.username == "Ana"]
+    assert len(anas) == 1, "retomada não pode duplicar o jogador"
+    assert anas[0].is_ia is False, "retomada deve devolver o controle ao humano"
+    assert anas[0].ia_nivel is None, "nível de IA deve ser limpo na retomada"
+    assert anas[0].desconectado_em is None, "retomada deve encerrar a janela"
+    assert anas[0].partida_atual is lobby.partidas[-1], "a partida segue com Ana"
+    eventos = c1b.get_received()
+    assert _achar_evento(eventos, "construtor_dados") is not None, \
+        "snapshot da identidade retomada deve ser enviado"
+    c1b.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("volta após substituição por IA devolve o controle (Fase 30)")
+
+
+def teste_grace_espera_preserva_identidade():
+    """
+    Fase 30: quem cai na ESPERA ganha a janela de reconexão e, ao voltar,
+    mantém apelido e prontidão (antes um blip de conexão removia o jogador na
+    hora e ele voltava como identidade nova, sem nada).
+    """
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 30
+    try:
+        _limpar()
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("ficar_pronto", {"chave": cs1["chave_secreta"]})
+        c1.get_received()  # descarta os eventos do apelido/pronto
+        ana_chave = cs1["chave_secreta"]
+
+        c1.disconnect()  # caiu na espera: entra na graça, não é removido
+        lobby = modulo_store.carregar_sala(SALA)
+        ana = next(j for j in lobby.jogadores if j.username == "Ana")
+        assert ana.desconectado_em is not None, "queda na espera deve ganhar a janela"
+        assert ana.pronto, "prontidão preservada durante a graça"
+
+        # Volta com sid novo: retoma a identidade (apelido/pronto intactos).
+        c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c1b.emit("retomar_identidade", {"chave": ana_chave})
+        lobby = modulo_store.carregar_sala(SALA)
+        anas = [j for j in lobby.jogadores if j.username == "Ana"]
+        assert len(anas) == 1, "retomada não pode duplicar"
+        assert anas[0].desconectado_em is None, "retomada deve encerrar a janela"
+        assert anas[0].pronto, "prontidão preservada na retomada"
+        assert anas[0].master, "master não pode ser perdido na retomada"
+        c1b.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("queda na espera ganha graça e preserva identidade (Fase 30)")
+
+
+def teste_retomar_negado_vaga_perdida():
+    """
+    Fase 30: vaga expirada por inatividade tem motivo próprio no `retomar_negado`
+    (diferente da chave stale de outra sala).
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    ana_chave = ana.chave_secreta
+
+    # Ana cai e a graça expira SEM a opção de IA: é removida (vaga registrada).
+    c1.disconnect()
+    c2.emit("verificar_desconectados")  # grace = 0 no teste
+    lobby = modulo_store.carregar_sala(SALA)
+    assert all(j.username != "Ana" for j in lobby.jogadores), "Ana deve sair da sala"
+    assert ana_chave in lobby.vagas_recentes, "remoção deve registrar a vaga"
+
+    # Ana volta: retomar_negado com o motivo de vaga perdida.
+    c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    c1b.emit("retomar_identidade", {"chave": ana_chave})
+    eventos = c1b.get_received()
+    negado = [e for e in eventos if e["name"] == "retomar_negado"]
+    assert negado, "deve receber retomar_negado"
+    motivo = negado[-1]["args"][0].get("motivo", {})
+    assert motivo.get("chave") == "msg.vaga_perdida_inatividade", \
+        f"vaga expirada deve ter motivo vaga_perdida_inatividade, veio {motivo}"
+    c1b.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("retomar_negado com motivo de vaga perdida (Fase 30)")
+
+
+def teste_iniciar_sem_fantasma():
+    """
+    Fase 30: quem caiu na ESPERA (dentro da graça) não entra na mesa como
+    fantasma quando o master inicia — vira IA (opção ligada) e, ao voltar,
+    retoma o controle. Sem a opção, é removido antes do início.
+    """
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 30
+    try:
+        # Com a opção ligada: o caído vira IA na partida.
+        _limpar()
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"substituir_desconectado_por_ia": True}})
+        c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+        c2.disconnect()  # Bia cai na espera, ainda dentro da graça
+        lobby = modulo_store.carregar_sala(SALA)
+        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        assert bia.desconectado_em is not None, "queda na espera entra na graça"
+
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        assert bia.is_ia, "caído da espera com opção ligada vira IA na partida"
+        assert bia.partida_atual is lobby.partidas[-1], "IA deve entrar na mesa"
+        assert lobby.pagina == 1
+
+        # Bia volta: retoma o controle na partida.
+        c2b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c2b.emit("retomar_identidade", {"chave": cs2["chave_secreta"]})
+        lobby = modulo_store.carregar_sala(SALA)
+        bias = [j for j in lobby.jogadores if j.username == "Bia"]
+        assert len(bias) == 1 and not bias[0].is_ia, "retomada devolve o controle"
+        c2b.disconnect()
+        c1.disconnect()
+
+        # Sem a opção: o caído da espera é removido e a partida segue sem ele.
+        _limpar()
+        c3, cs3, _ = _conectar()
+        c4, cs4, _ = _conectar()
+        c3.emit("apelido", {"apelido_msg": "Ana"})
+        c4.emit("apelido", {"apelido_msg": "Bia"})
+        c3.emit("adicionar_ia", {"chave": cs3["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c4.emit("ficar_pronto", {"chave": cs4["chave_secreta"]})
+        c4.disconnect()
+        c3.emit("iniciar_partida", {"chave": cs3["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert all(j.username != "Bia" for j in lobby.jogadores), \
+            "sem a opção, o caído da espera deve sair da mesa"
+        assert lobby.pagina == 1, "a partida segue sem o caído (master + bot)"
+        c3.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("início sem fantasma: caído da espera vira IA ou sai (Fase 30)")
+
+
+def teste_iniciar_repetido_nao_toca_grace():
+    """
+    Fase 30: um `iniciar_partida` repetido com a sala já em `jogando` (clique
+    duplo, segundo tab) não pode converter/remover quem está na janela de graça.
+    """
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 30
+    try:
+        _limpar()
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"substituir_desconectado_por_ia": True}})
+        c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.status == "jogando"
+
+        # Bia cai na partida (em graça) e o master re-emite iniciar_partida.
+        c2.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        assert bia.desconectado_em is not None, "pré-condição: Bia em graça"
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        assert bia is not None, "iniciar repetido não pode remover quem está em graça"
+        assert not bia.is_ia, "iniciar repetido não pode converter a graça em IA"
+        assert bia.desconectado_em is not None, "a janela de graça segue valendo"
+        c1.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("iniciar repetido com a sala jogando não toca a graça (Fase 30)")
+
+
+def teste_iniciar_caido_sem_apelido_removido():
+    """
+    Fase 30: quem caiu na espera SEM apelido é removido no início (não vira bot
+    sem nome — um bot sem nome travaria `pode_iniciar` em `sem_apelido`).
+    """
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 30
+    try:
+        _limpar()
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()  # não define apelido
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"substituir_desconectado_por_ia": True}})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c2.disconnect()  # caiu na espera sem apelido, em graça
+        lobby = modulo_store.carregar_sala(SALA)
+        caiu = next(j for j in lobby.jogadores
+                    if not j.is_ia and not j.master and j.desconectado_em is not None)
+        assert caiu is not None, "pré-condição: caído sem apelido na graça"
+
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.pagina == 1, "partida inicia com master + bot"
+        assert all(j.username for j in lobby.jogadores), \
+            "não pode sobrar bot sem nome na mesa"
+        c1.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("caído sem apelido na espera é removido (não vira bot sem nome)")
+
+
+def teste_sair_da_sala_espectador():
+    """
+    Fase 30: o espectador pode sair da sala e voltar ao menu — o servidor o
+    remove (lobby, índice sid) e a partida segue. Jogador ativo não sai via
+    `sair_da_sala` (segue usando a janela de reconexão).
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    c3, _, ev3 = _conectar()  # entra no meio: espectador
+    assert _achar_evento(ev3, "espectador") is not None
+    lobby = modulo_store.carregar_sala(SALA)
+    esp = next(e for e in lobby.espectadores)
+    esp_sid = esp.client_id
+    assert funcoes_gerais.sala_do_cliente(esp_sid) == SALA
+
+    # Jogador ativo tentando sair: no-op (não é espectador).
+    c2.emit("sair_da_sala", {"chave": cs2["chave_secreta"]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.espectadores) == 1, "jogador ativo não pode sair via sair_da_sala"
+
+    # Espectador sai (sem precisar de chave: a identidade é o sid).
+    c3.emit("sair_da_sala", {"chave": ""})
+    eventos = c3.get_received()
+    assert _achar_evento(eventos, "saiu_da_sala") is not None, "deve confirmar a saída"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert not lobby.espectadores, "espectador deve sair do lobby"
+    assert funcoes_gerais.sala_do_cliente(esp_sid) is None, "índice sid deve ser limpo"
+    assert lobby.status == "jogando" and lobby.pagina == 1, "a partida segue"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("espectador sai da sala e a partida segue (Fase 30)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -2311,11 +2622,21 @@ def verificar_integracao():
         ("H2-aposta-max", teste_h2_aposta_irrespondivel_clampeada),
         ("H3-cap-placeholder", teste_h3_cap_placeholder_nao_burla_limite),
     ]
+    testes_fase30 = [
+        ("volta-apos-substituicao", teste_volta_apos_substituicao_ia),
+        ("grace-espera", teste_grace_espera_preserva_identidade),
+        ("negado-vaga-perdida", teste_retomar_negado_vaga_perdida),
+        ("inicio-sem-fantasma", teste_iniciar_sem_fantasma),
+        ("iniciar-repetido-grace", teste_iniciar_repetido_nao_toca_grace),
+        ("caido-sem-apelido", teste_iniciar_caido_sem_apelido_removido),
+        ("sair-da-sala", teste_sair_da_sala_espectador),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
-                           + testes_fase23 + testes_fase25 + testes_fase29):
+                           + testes_fase23 + testes_fase25 + testes_fase29
+                           + testes_fase30):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

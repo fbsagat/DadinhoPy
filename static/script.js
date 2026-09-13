@@ -8,6 +8,8 @@ let modo_home = !sala_atual;
 let sou_master = false;
 // Contexto da aposta recebido em `meu_turno` para calibrar o mínimo do input.
 let contexto_min_aposta = null;
+// Fase 30: se o cliente está assistindo (espectador) — mostra o botão de sair.
+let eh_espectador = false;
 
 // Imagens dos dados (1-6): constante global reutilizada na animação de rolagem.
 const diceImages = [
@@ -809,6 +811,29 @@ socket.on('expulso_da_sala', function () {
     });
 });
 
+// Fase 30: botão de "Sair da sala" visível só para quem está assistindo
+// (espectador) durante a partida — quem está jogando usa a janela de reconexão.
+function atualizar_botao_sair() {
+    const botao = document.getElementById('bot_sair_da_sala');
+    if (botao) {
+        botao.style.display = eh_espectador ? 'block' : 'none';
+    }
+}
+
+// O espectador escolheu sair: o servidor confirma e voltamos ao menu.
+socket.on('saiu_da_sala', function () {
+    chave_secreta = '';
+    sessionStorage.removeItem('dadinho_chave');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('sala');
+    url.searchParams.delete('chave_secreta');
+    window.location.href = url.toString();
+});
+
+function sair_da_sala() {
+    socket.emit('sair_da_sala', { chave: chave_secreta });
+}
+
 // Aviso para quem ficou na sala: o master expulsou alguém.
 socket.on('jogador_expulso', function (data) {
     const painel = document.getElementById('motivo_iniciar');
@@ -863,6 +888,10 @@ socket.on("mudar_pagina", function (data) {
         if (painel_aud) {
             painel_aud.style.display = 'none';
         }
+        // Fase 30: de volta ao lobby (reset/entrada), ninguém é espectador —
+        // esconde o botão de sair.
+        eh_espectador = false;
+        atualizar_botao_sair();
         limpar_narrador();
         parar_celebracao();
     }
@@ -1017,6 +1046,9 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
     const espectador = data.espectador;
+    // Fase 30: quem entra assistindo (vaga perdida/busca) também vê o botão.
+    eh_espectador = espectador === true;
+    atualizar_botao_sair();
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
     tela_jogar_dados.innerHTML = ""
@@ -1617,6 +1649,9 @@ socket.on('vitoria_status', function (data) {
 // Ações a aplicar no jogador que virou espectador, broadcast=False
 socket.on('espectador', function (data) {
     tocar_som_variante('pegar_dados', [1, 2]);
+    // Fase 30: quem virou espectador (perdeu todos os dados) ganha o botão de sair.
+    eh_espectador = true;
+    atualizar_botao_sair();
     const painel_jogada = document.getElementById('painel_jogada');
     const bot_confe_fim = document.getElementById('bot_confe_fim');
     const painel_aguarde = document.getElementById('painel_aguarde');
@@ -1726,7 +1761,13 @@ socket.on("connect_start", function (data) {
 // chave dele no sessionStorage — senão a chave stale ficaria para sempre.
 // Fase D2: `chave_resumo` passa a apontar para a chave do placeholder, para um
 // reconnect com sid novo (morte de instância) retomar a identidade correta.
-socket.on('retomar_negado', function () {
+socket.on('retomar_negado', function (data) {
+    // Fase 30: o motivo explica por que a retomada falhou (vaga perdida por
+    // inatividade nesta sala vs. sessão de outra sala).
+    const motivo = (data && data.motivo && data.motivo.chave)
+        ? t(data.motivo.chave, data.motivo.params)
+        : t('msg.retomar_outra_sala');
+    mostrar_alerta(motivo, 'aviso');
     if (chave_secreta) {
         chave_resumo = chave_secreta;
         sessionStorage.setItem('dadinho_chave', chave_secreta);

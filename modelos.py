@@ -14,7 +14,12 @@ def sala_room(sala_id):
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 7
+VERSAO_ATUAL = 8
+
+# Janela (segundos) em que a vaga de um humano removido fica registrada no
+# lobby (Fase 30): permite o `retomar_identidade` dizer por que a retomada foi
+# negada (vaga expirada por inatividade vs. sessão de outra sala).
+VAGAS_RECENTES_SEGUNDOS = 300
 
 
 def _migrar_v1_para_v2(dados):
@@ -67,6 +72,12 @@ def _migrar_v6_para_v7(dados):
     return dados
 
 
+def _migrar_v7_para_v8(dados):
+    """v7 -> v8 (Fase 30): registro de vagas recentes (motivo do retomar_negado)."""
+    dados.setdefault('vagas_recentes', {})
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
@@ -74,6 +85,7 @@ MIGRACOES = {
     4: _migrar_v4_para_v5,
     5: _migrar_v5_para_v6,
     6: _migrar_v6_para_v7,
+    7: _migrar_v7_para_v8,
 }
 
 
@@ -233,6 +245,10 @@ class Lobby:
         # Estado do commit-reveal enquanto a partida ainda não começou (ver seed.py).
         # None quando a verificação está desligada ou após a seed ser fixada na Partida.
         self.seed_info = None
+        # Fase 30: chave_secreta -> {'nome', 'em'} de humanos removidos (janela de
+        # graça expirada, início de partida, expulsão). Permite o retorno explicar
+        # por que a vaga foi perdida (motivo do `retomar_negado`).
+        self.vagas_recentes = {}
 
     @staticmethod
     def config_padrao():
@@ -260,6 +276,38 @@ class Lobby:
     def marcar_visto(self):
         """Registra o instante do último sinal de vida da sala (busca/heartbeat)."""
         self.visto_em = datetime.now()
+
+    def registrar_vaga_perdida(self, jogador):
+        """
+        Fase 30: registra a vaga de um humano removido (chave_secreta -> nome e
+        instante) para o `retomar_identidade` explicar o `retomar_negado`.
+        Expurga entradas antigas (VAGAS_RECENTES_SEGUNDOS) ao gravar.
+        """
+        if jogador.is_ia or not jogador.chave_secreta:
+            return
+        agora = datetime.now()
+        limite = (agora.timestamp() - VAGAS_RECENTES_SEGUNDOS)
+        self.vagas_recentes = {c: v for c, v in self.vagas_recentes.items()
+                               if isinstance(v, dict) and v.get('em') is not None
+                               and v['em'].timestamp() > limite}
+        self.vagas_recentes[jogador.chave_secreta] = {
+            'nome': jogador.username,
+            'em': agora,
+        }
+
+    def buscar_vaga_recente(self, chave_secreta):
+        """
+        Fase 30: retorna {'nome', 'em'} da vaga recente da chave, ou None se não
+        houver registro vigente (sessão de outra sala / vaga antiga demais).
+        """
+        if not chave_secreta:
+            return None
+        vaga = self.vagas_recentes.get(chave_secreta)
+        if not isinstance(vaga, dict) or vaga.get('em') is None:
+            return None
+        if (datetime.now() - vaga['em']).total_seconds() > VAGAS_RECENTES_SEGUNDOS:
+            return None
+        return vaga
 
     def status_vitoria_dict(self):
         """Quem já confirmou o "Ok" da vitória (página 4), por apelido (Fase 22)."""
@@ -332,6 +380,9 @@ class Lobby:
             'config': self.config,
             'seed_info': self.seed_info,
             'proxima_partida_num': self.proxima_partida_num,
+            'vagas_recentes': {chave: {'nome': vaga.get('nome'), 'em': vaga['em'].isoformat()}
+                               for chave, vaga in self.vagas_recentes.items()
+                               if isinstance(vaga, dict) and vaga.get('em') is not None},
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
             'espectadores': [jogador.para_dict(self) for jogador in self.espectadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
@@ -427,6 +478,17 @@ class Lobby:
         lobby.seed_info = dados.get('seed_info')
         ultimo_num = max((p.get('partida_num', 0) for p in dados.get('partidas', []) or []), default=0)
         lobby.proxima_partida_num = dados.get('proxima_partida_num') or (int(ultimo_num) + 1)
+        lobby.vagas_recentes = {}
+        for chave, vaga in (dados.get('vagas_recentes') or {}).items():
+            if not isinstance(vaga, dict) or not vaga.get('em'):
+                continue
+            try:
+                lobby.vagas_recentes[str(chave)] = {
+                    'nome': vaga.get('nome'),
+                    'em': datetime.fromisoformat(vaga['em']),
+                }
+            except (ValueError, TypeError):
+                continue
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):

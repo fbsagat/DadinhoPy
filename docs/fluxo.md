@@ -54,6 +54,7 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 | `solicitar_auditoria` | `solicitar_auditoria` | chave |
 | `adicionar_ia`/`completar_com_ias`/`remover_ia` (chave) | app.py:712/723/734 | master + chave |
 | `expulsar_jogador` (`chave`, `client_id`) | `expulsar_jogador` | master + chave |
+| `sair_da_sala` | `sair_da_sala` | extrair_chave=None, só espectador |
 | `listar_partidas` (`filtros`, `sala_atual`) | `listar_partidas` | evento_leitura |
 | `criar_sala` | `criar_sala` | — |
 | `verificar_desconectados` | `verificar_desconectados` | extrair_chave=None |
@@ -75,14 +76,15 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 |---|---|---|---|
 | `connect_start` | app.py:445 | cliente | 1661 |
 | `sala_cheia` | app.py:426/432 | cliente | 432 |
-| `retomar_negado` | app.py:504 | cliente | 1717 |
+| `retomar_negado` (`motivo` {chave, params}; Fase 30: `msg.vaga_perdida_inatividade` vs `msg.retomar_outra_sala`) | app.py:621 | cliente | 1729 |
 | `update_username` | app.py:592 | cliente | 1740 |
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
-| `jogador_substituido_por_ia` | app.py:191 | sala | 778 |
+| `jogador_substituido_por_ia` | app.py:257 | sala | 780 |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
-| `jogador_desconectado` | app.py:558 | cliente | 1808 |
+| `saiu_da_sala` | app.py:949 | cliente | 824 |
+| `jogador_desconectado` | app.py:699 | cliente | 1835 |
 | `mudar_pagina` | funcoes_gerais:178/230 | sala/cliente | 832 |
 | `meus_dados` | app.py:933 | cliente | 899 |
 | `dados_mesa` | funcoes_gerais:280 | cliente | 925 |

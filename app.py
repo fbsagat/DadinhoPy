@@ -190,6 +190,8 @@ def _remover_jogador_da_sala(lobby, jogador):
     # fica maior que o lobby atual e o "Ok" da vitória nunca libera o reset.
     if jogador.confirmou_vencedor:
         lobby.conferiram_vencedor = max(0, lobby.conferiram_vencedor - 1)
+    # Fase 30: registra a vaga liberada (para o retorno explicar o retomar_negado).
+    lobby.registrar_vaga_perdida(jogador)
     lobby.remover_jogador(jogador.client_id)
 
     partida = jogador.partida_atual
@@ -236,11 +238,12 @@ def _substituir_por_ia(lobby, jogador):
     """
     Converte um desconectado em bot (Fase 11), quando o master ativou a opção:
     preserva dados/turno e deixa a partida seguir. Só vale se ainda houver outro
-    humano ativo — senão a sala seguiria só com bots.
+    humano ativo — senão a sala seguiria só com bots. Quem ainda não entrou numa
+    partida (espera) só é substituído quando a partida começa (`iniciar_partida`
+    resolve os caídos antes de montar a mesa) — o expurgo da espera remove, não
+    substitui (ver `_purgar_desconectados`).
     """
     if not lobby.config.get('substituir_desconectado_por_ia'):
-        return False
-    if jogador.partida_atual is None:
         return False
     tem_humano_ativo = any(not j.is_ia and j is not jogador and j.desconectado_em is None
                            for j in lobby.jogadores)
@@ -267,7 +270,10 @@ def _purgar_desconectados(lobby):
         if jogador.desconectado_em is None:
             continue
         if (agora - jogador.desconectado_em).total_seconds() >= GRACE_RECONEXAO_SEGUNDOS:
-            if _substituir_por_ia(lobby, jogador):
+            # Fase 30: só quem já estava numa partida vira IA aqui. Quem caiu na
+            # ESPERA é removido (a substituição de um caído da espera acontece no
+            # `iniciar_partida`, que resolve os caídos antes de montar a mesa).
+            if jogador.partida_atual is not None and _substituir_por_ia(lobby, jogador):
                 mudou = True
                 continue
             _remover_jogador_da_sala(lobby, jogador)
@@ -277,6 +283,31 @@ def _purgar_desconectados(lobby):
     if mudou:
         lobby.definir_master()
         ia.processar(lobby)
+    return mudou
+
+
+def _resolver_caidos_para_partida(lobby):
+    """
+    Fase 30: antes de iniciar, resolve quem caiu na ESPERA e ainda está na janela
+    de graça — vira IA (se a opção do master estiver ligada, houver outro humano
+    ativo e o jogador já tiver apelido) ou é removido. NUNCA entra na partida
+    como fantasma (rolagem/turnos ficariam presos esperando um socket que não
+    existe) nem como bot sem nome (travaria `pode_iniciar` em `sem_apelido`
+    para sempre). O retorno via `retomar_identidade` continua devolvendo o
+    controle a quem vira bot. Devolve True se algo mudou.
+    """
+    mudou = False
+    for jogador in list(lobby.jogadores):
+        if jogador.desconectado_em is None:
+            continue
+        if jogador.username and _substituir_por_ia(lobby, jogador):
+            mudou = True
+            continue
+        _remover_jogador_da_sala(lobby, jogador)
+        mudou = True
+    if mudou:
+        lobby.definir_master()
+        atualizar_lista_usuarios(lobby)
     return mudou
 
 
@@ -574,13 +605,20 @@ def retomar_identidade(dados=None):
         # jogador já saiu/expirou a janela de graça). O placeholder continua
         # valendo como identidade nova — avisa o front para persistir a chave
         # dele (senão a chave stale ficaria para sempre no sessionStorage).
+        # Fase 30: o `motivo` diz se a vaga foi perdida por inatividade nesta
+        # sala (registrada em `vagas_recentes`) ou se a sessão é de outro lugar.
         # Fase D2: quem veio com `tem_chave=1` não recebeu snapshot no connect
         # (adiado justamente para a retomada), então o placeholder precisa dele
         # agora que virou a identidade definitiva.
         placeholder = lobby.buscar_jogador_pelo_client_id(client_id)
         if placeholder is not None:
             enviar_snapshot_sala(lobby, placeholder)
-        emit('retomar_negado', to=client_id)
+        vaga = lobby.buscar_vaga_recente(chave)
+        if vaga is not None:
+            motivo = {'chave': 'msg.vaga_perdida_inatividade'}
+        else:
+            motivo = {'chave': 'msg.retomar_outra_sala'}
+        emit('retomar_negado', {'motivo': motivo}, to=client_id)
         return
     if alvo.client_id == client_id:
         return
@@ -642,22 +680,25 @@ def handle_disconnect():
                 # Fase 15: espectador não é jogador — sai na hora, sem janela de graça.
                 if jogador in lobby.espectadores:
                     lobby.espectadores.remove(jogador)
-                elif jogador.partida_atual is not None:
-                    # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
-                    # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
-                    # voltar via chave_secreta (retomar_identidade limpa o marcador, Fase D).
+                else:
+                    # Fase 9: janela de reconexão (grace). Quem cai fica marcado
+                    # (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode voltar
+                    # via chave_secreta (retomar_identidade limpa o marcador, Fase D).
+                    # Fase 30: vale também para quem cai na ESPERA — antes, um blip
+                    # de conexão (tab em segundo plano, reciclagem da função na
+                    # Vercel) removia o jogador na hora e ele voltava com apelido e
+                    # prontidão perdidos. Com a graça, o retorno restaura tudo; o
+                    # expurgo pós-graça fica com o `verificar_desconectados`/GC.
                     # Fase 23: a janela vale mesmo sem outro HUMANO ativo — antes, numa
                     # partida só com IAs o último humano era removido na hora e a sala
-                    # inteira apagada junto; um blip de conexão (tab em segundo plano,
-                    # reciclagem da função na Vercel) perdia a partida inteira. Sem outro
-                    # humano o expurgo fica a cargo de um GC posterior (novo humano no
-                    # connect, `verificar_desconectados`, ou o TTL do store).
+                    # inteira apagada junto; um blip de conexão perdia a partida
+                    # inteira. Sem outro humano o expurgo fica a cargo de um GC
+                    # posterior (novo humano no connect, `verificar_desconectados`,
+                    # ou o TTL do store).
                     jogador.desconectado_em = datetime.now()
                     emit('jogador_desconectado',
                          {'nome': jogador.username or '', 'grace': GRACE_RECONEXAO_SEGUNDOS},
                          to=lobby.sala_room())
-                else:
-                    _remover_jogador_da_sala(lobby, jogador)
 
                 if lobby.contar_jogadores() > 0:
                     lobby.definir_master()
@@ -710,6 +751,14 @@ def iniciar_partida(dados, lobby, jogador):
             lobby.definir_config({'dados_qtd': int(dados.get('dados_qtd', 1))})
         except (ValueError, TypeError):
             pass
+    # Fase 30: gate de status ANTES do resolver — um `iniciar_partida` repetido
+    # (clique duplo, segundo tab, snapshot atrasado) com a sala já em `jogando`
+    # não pode converter/remover jogadores que estão na janela de reconexão.
+    if lobby.status != 'espera':
+        return
+    # Fase 30: quem caiu na espera (janela de graça) não entra na mesa como
+    # fantasma — vira IA (opção ligada) ou é removido antes da validação.
+    _resolver_caidos_para_partida(lobby)
     pode, motivo = lobby.pode_iniciar()
     if not pode:
         emit('iniciar_negado', {'motivo': motivo}, to=jogador.client_id)
@@ -868,6 +917,9 @@ def expulsar_jogador(dados, lobby, jogador):
         lobby.espectadores.remove(alvo)
     else:
         _remover_jogador_da_sala(lobby, alvo)
+        # Fase 30: expulso não é "vaga perdida por inatividade" — se voltar com a
+        # chave antiga, o `retomar_negado` não deve acusar inatividade.
+        lobby.vagas_recentes.pop(alvo.chave_secreta, None)
     if not alvo.is_ia:
         desregistrar_cliente(alvo_id, lobby.sala_id)
         leave_room(lobby.sala_room(), sid=alvo_id)
@@ -875,6 +927,28 @@ def expulsar_jogador(dados, lobby, jogador):
     lobby.definir_master()
     emit('jogador_expulso', {'nome': nome}, to=lobby.sala_room())
     ia.processar(lobby)
+    atualizar_lista_usuarios(lobby)
+
+
+@socketio.on('sair_da_sala')
+@evento_mutavel
+@autenticar(extrair_chave=None)
+def sair_da_sala(dados, lobby, jogador):
+    """
+    Fase 30: o ESPECTADOR escolhe sair da sala e voltar ao menu. Só vale para
+    quem não está jogando (espectador); jogadores ativos continuam usando a
+    janela de reconexão (`handle_disconnect`/graça). Limpa o índice sid e a
+    room; o `saiu_da_sala` faz o front limpar a chave e navegar para a home.
+    Se o espectador era o último humano, o GC fecha a sala como no disconnect.
+    """
+    if jogador not in lobby.espectadores:
+        return
+    lobby.espectadores.remove(jogador)
+    desregistrar_cliente(jogador.client_id, lobby.sala_id)
+    leave_room(lobby.sala_room(), sid=jogador.client_id)
+    emit('saiu_da_sala', {'sala': lobby.sala_id}, to=jogador.client_id)
+    if _gc_sala(lobby):
+        return
     atualizar_lista_usuarios(lobby)
 
 
