@@ -317,10 +317,11 @@ def atualizar_lista_usuarios(lobby):
         "pode_iniciar": pode_iniciar,
         "motivo": motivo,
     }, to=lobby.sala_room())
-    salvar_sala(lobby)
     # Fase 8: índice leve de resumos p/ a busca (evita reidratar os lobbies).
-    # Stamp do sinal de vida: resumos velhos são escondidos da busca (serverless).
+    # Stamp do sinal de vida antes de persistir: resumos velhos são escondidos da
+    # busca (serverless), e o próprio blob do Lobby guarda o instante renovado.
     lobby.marcar_visto()
+    salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 

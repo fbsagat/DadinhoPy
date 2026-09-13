@@ -1265,9 +1265,13 @@ class Rodada:
         todos_dados = self.todos_os_dados
         ultimo_turno = self.turnos[-1]
         if self.com_coringa:
-            for i, dado in enumerate(todos_dados):
-                if dado == 1:
-                    todos_dados[i] = ultimo_turno.dado_face
+            # Contagem com coringa: os 1 valem como a face apostada. Trabalha
+            # sobre uma cópia para não corromper o registro dos dados da rodada
+            # (`todos_os_dados` é persistido e representa os dados reais).
+            todos_dados = [
+                ultimo_turno.dado_face if dado == 1 else dado
+                for dado in todos_dados
+            ]
         quantidade = todos_dados.count(ultimo_turno.dado_face)
         faces_dado_nomes = {
             1: "ases" if ultimo_turno.dado_qtd > 1 else "ás",

@@ -26,6 +26,13 @@ NOMES_NIVEIS = {
     4: 'Mestre',
 }
 
+# Teto de segurança por chamada de `processar`: um jogo inteiro só entre bots
+# pode exigir centenas de ações (rolagens, apostas, conferências e vitórias), e
+# como `avancou` só é True quando há progresso real, o laço termina sozinho
+# quando o jogo acaba. O teto antigo (50) era baixo demais e estacionava jogos
+# longos quando o último humano já tinha sido eliminado.
+LIMITE_ACOES_PROCESSAR = 10000
+
 # Apelidos dos bots: sorteados a cada criação, misturando designações
 # robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
 # A unicidade fica a cargo de Lobby.verificar_apelido.
@@ -314,7 +321,7 @@ def processar(lobby):
     """
     if lobby is None:
         return False
-    limite = max(50, len(lobby.jogadores) * 8)
+    limite = max(LIMITE_ACOES_PROCESSAR, len(lobby.jogadores) * 8)
     mudou = False
     for _ in range(limite):
         pagina = lobby.pagina

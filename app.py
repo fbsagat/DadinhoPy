@@ -352,8 +352,16 @@ def handle_connect():
             if jogador is not None:
                 # Retomando a mesma identidade: religa o sid novo ao mesmo Jogador
                 # e encerra a janela de reconexão (Fase 9).
+                # Fase 11: se o humano tinha sido substituído por um bot
+                # (`substituir_desconectado_por_ia`), retomar a identidade devolve
+                # o controle a ele; bots nativos (client_id `ia:...`) não são
+                # afetados (nunca reconectam por chave).
+                era_bot_nativo = str(jogador.client_id).startswith('ia:')
                 jogador.client_id = client_id
                 jogador.desconectado_em = None
+                if jogador.is_ia and not era_bot_nativo:
+                    jogador.is_ia = False
+                    jogador.ia_nivel = None
             else:
                 # Ninguém reconectando nesta conexão: GC unificado antes de
                 # entrar. Fecha a sala órfã (só bots / sem humano conectado) e
@@ -499,9 +507,10 @@ def iniciar_partida(dados, lobby, jogador):
     partida = lobby.construir_partida(dados_qtd=int(lobby.config.get('dados_qtd', 1)), seed_info=seed_info)
     partida.construir_rodada()
     ia.processar(lobby)
-    salvar_sala(lobby)
     # Fase 8: status virou 'jogando' — atualiza o resumo da busca de partidas.
+    # Marca o sinal de vida antes de persistir para o blob guardar o instante.
     lobby.marcar_visto()
+    salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 
@@ -665,10 +674,13 @@ def heartbeat(dados, lobby, jogador):
     """
     Renova o sinal de vida do resumo da sala na busca (Fase 17). Sem isso, uma
     instância serverless que morre sem disparar disconnect deixa o resumo
-    congelado e a sala fantasma aparecia como ativa por até o TTL do store. Não
-    altera o jogo: só marca `visto_em` e reescreve o resumo leve.
+    congelado e a sala fantasma aparecia como ativa por até o TTL do store.
+    Também destrava a fila das IAs quando não resta evento humano (ex.: só
+    sobraram bots), chamando `ia.processar` como os demais handlers mutáveis.
     """
     lobby.marcar_visto()
+    if ia.processar(lobby):
+        salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
 
 
