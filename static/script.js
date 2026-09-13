@@ -51,7 +51,7 @@ function agendar_heartbeat() {
     const intervalo = indiceAtual === 0 ? INTERVALO_HEARTBEAT_ESPERA : INTERVALO_HEARTBEAT_PARTIDA;
     setTimeout(function () {
         if (socket.connected && chave_secreta) {
-            socket.emit('heartbeat', { chave: chave_secreta });
+            socket.emit('heartbeat', { chave: chave_secreta, pagina: indiceAtual });
         }
         agendar_heartbeat();
     }, intervalo);
@@ -511,7 +511,11 @@ socket.on("update_user_list", (data) => {
 
         const iniciar_jogo = document.getElementById('iniciar_jogo');
         if (iniciar_jogo) {
-            iniciar_jogo.disabled = !data.pode_iniciar; // Ativa o botão de iniciar partida
+            // Fase E: o botão fica ativo para o master na espera mesmo com a
+            // lista defasada entre instâncias (Vercel) — o servidor valida
+            // `pode_iniciar` fresco no `iniciar_partida` (devolve
+            // `iniciar_negado` com o motivo se ainda não dá).
+            iniciar_jogo.disabled = !(data.status === 'espera' && data.users.length >= 2);
             iniciar_jogo.style.display = sou_master ? 'block' : 'none';
         }
     }

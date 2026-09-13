@@ -817,6 +817,15 @@ def heartbeat(dados=None):
     broadcast do host; aqui o servidor devolve o snapshot atual do lobby (lido
     do store compartilhado) direcionado ao cliente que bateu.
 
+    Fase E: além da lista da espera, o heartbeat re-sincroniza MUDANÇAS DE
+    PÁGINA. O cliente informa a página atual (`pagina`); se ela divergir da
+    autoritativa (ex.: o master iniciou a partida e o `mudar_pagina` ficou na
+    instância dele), o servidor devolve o snapshot completo da tela atual
+    (`enviar_snapshot_sala`) — senão o jogador da outra instância fica preso na
+    sala de espera para sempre. A leitura é fresca do store (ignorando o cache)
+    quando há indício de defasagem: página divergente, ou re-sync do master na
+    espera (a lista dele é quem libera o "iniciar partida").
+
     Fase C: ao contrário dos demais handlers, este NÃO passa por `autenticar` —
     lê pelo índice em processo (`sala_do_cliente`) e usa o cache tolerante a
     defasagem (`store.carregar_sala_leve`), então cada batida não custa um GET +
@@ -825,6 +834,7 @@ def heartbeat(dados=None):
     com leitura fresca, para não mover duas vezes o mesmo turno entre instâncias.
     O `visto_em` tem piso de 60s para o resumo não ser reescrito a cada batida.
     """
+    dados = dados if isinstance(dados, dict) else {}
     client_id = request.sid
     sala_id = sala_do_cliente(client_id)
     if sala_id is None:
@@ -832,10 +842,28 @@ def heartbeat(dados=None):
     lobby, veio_do_cache = store.carregar_sala_leve(sala_id)
     if lobby is None or lobby.buscar_jogador_pelo_client_id(client_id) is None:
         return
+    jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+    pagina_cliente = int(dados.get('pagina', 0) or 0)
+    pagina_sala = lobby.pagina or 0
+    # Re-sync entre instâncias (Fases 18/19/E): a lista da espera e o snapshot
+    # da página corrente vêm do store compartilhado para quem bateu, cobrindo o
+    # gap dos broadcasts que ficam presos na instância de origem.
+    if pagina_cliente != pagina_sala or lobby.status == 'espera':
+        if pagina_cliente != pagina_sala or (lobby.status == 'espera' and jogador.master):
+            lobby = store.carregar_sala(sala_id)
+            veio_do_cache = False
+            if lobby is None:
+                return
+            jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+            if jogador is None:
+                return
+            pagina_sala = lobby.pagina or 0
+        if lobby.status == 'espera':
+            emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
+        if pagina_cliente != pagina_sala:
+            enviar_snapshot_sala(lobby, jogador)
     if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
         lobby.marcar_visto()
-    if lobby.status == 'espera':
-        emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
     if not veio_do_cache and ia.processar(lobby):
         salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())

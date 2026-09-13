@@ -950,10 +950,12 @@ def teste_heartbeat_renova_resumo():
 
 
 def teste_heartbeat_resincroniza_lobby():
-    # Fase 18/19: as rooms/emits do Socket.IO vivem por instância; quem entrou/
-    # ficou pronto numa instância diferente não alcança o broadcast do host. O
-    # heartbeat na sala de espera deve devolver o snapshot atual do lobby (lido
-    # do store compartilhado) direcionado a cada cliente, cobrindo o gap.
+    # Fase 18/19/E: as rooms/emits do Socket.IO vivem por instância; quem
+    # entrou/ficou pronto numa instância diferente não alcança o broadcast do
+    # host. O heartbeat na sala de espera devolve o snapshot atual do lobby
+    # (lido do store compartilhado) direcionado a cada cliente; quando o master
+    # inicia a partida e o `mudar_pagina` fica na instância dele, o heartbeat
+    # também empurra o cliente atrasado para a página autoritativa.
     _limpar()
     c1, cs1, _ = _conectar()
     c1.emit("apelido", {"apelido_msg": "Ana"})
@@ -973,13 +975,24 @@ def teste_heartbeat_resincroniza_lobby():
         f"host deve ver a prontidão da outra instância: {payload.get('prontos')}"
     assert payload.get("status") == "espera"
 
-    # Fora da sala de espera (partida em andamento) o heartbeat não re-sincroniza.
+    # Fase E: partida iniciada, o cliente ainda na página 0 (atrasado, preso
+    # noutra instância) é empurrado para a página 1 pelo heartbeat.
     c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
     c1.get_received()
-    c1.emit("heartbeat", {"chave": cs1["chave_secreta"]})
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"], "pagina": 0})
     eventos = c1.get_received()
     assert all(e["name"] != "update_user_list" for e in eventos), \
         "heartbeat em partida não deve re-emitir a lista da espera"
+    mudancas = [e for e in eventos if e["name"] == "mudar_pagina"]
+    assert mudancas and mudancas[-1]["args"][0]["pag_numero"] == 1, \
+        "heartbeat deve empurrar o cliente atrasado para a página 1"
+
+    # Já na página certa, o heartbeat não precisa re-emitir mudar_pagina.
+    c1.get_received()
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"], "pagina": 1})
+    eventos = c1.get_received()
+    assert all(e["name"] != "mudar_pagina" for e in eventos), \
+        "heartbeat na página certa não deve re-emitir mudar_pagina"
     c1.disconnect()
     c2.disconnect()
     _limpar()
