@@ -217,16 +217,35 @@ def _purgar_desconectados(lobby):
     return mudou
 
 
+def _tem_humano_recente(lobby):
+    """
+    True se a sala tem um humano CONECTADO ou dentro da janela de reconexão
+    (desconectado_em marcado e ainda não expirado). Bots não contam. É a base do
+    GC de sala (Fase 23): o último humano de uma partida só com IAs que cai por
+    um blip (tab em segundo plano, reciclagem da função na Vercel) tem a janela
+    de graça para voltar — antes, a sala morria junto na hora do disconnect.
+    """
+    agora = datetime.now()
+    for jogador in lobby.jogadores:
+        if jogador.is_ia:
+            continue
+        if jogador.desconectado_em is None:
+            return True
+        if (agora - jogador.desconectado_em).total_seconds() < GRACE_RECONEXAO_SEGUNDOS:
+            return True
+    return any(not e.is_ia for e in lobby.espectadores)
+
+
 def _gc_sala(lobby):
     """
     GC unificado de sala: expurga a janela de reconexão (Fase 9/11) e fecha a
-    sala quando não resta humano conectado (Fase 15). Todo caminho que toca o
-    estado passa por aqui, para que nenhum fluxo deixe uma sala sem humano
-    persistida (só bots, todos na janela de graça, instância morta sem
-    disconnect). Devolve True se a sala foi fechada.
+    sala quando não resta humano conectado NEM na janela de reconexão (Fase
+    15/23). Todo caminho que toca o estado passa por aqui, para que nenhum fluxo
+    deixe uma sala sem humano persistida (só bots, todos na janela de graça
+    expirada, instância morta sem disconnect). Devolve True se a sala foi fechada.
     """
     mudou = _purgar_desconectados(lobby)
-    if not lobby.tem_humano_conectado():
+    if not _tem_humano_recente(lobby):
         remover_sala(lobby.sala_id)
         esquecer_sala(lobby.sala_id)
         return True
@@ -529,31 +548,26 @@ def handle_disconnect():
             # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
             # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
             # voltar via chave_secreta (retomar_identidade limpa o marcador, Fase D).
-            # Fase 15: só faz sentido esperar se restar outro HUMANO ativo — um
-            # bot não justifica segurar a sala (senão ela ficaria órfã). Um
-            # espectador humano conectado também mantém a sala viva, então conta
-            # para a janela de graça (e agenda o expurgo via `verificar_desconectados`).
-            outros_ativos = sum(
-                1 for j in lobby.jogadores
-                if j is not jogador and not j.is_ia and j.desconectado_em is None
-            ) + sum(1 for e in lobby.espectadores if not e.is_ia)
-            if outros_ativos < 1:
-                _remover_jogador_da_sala(lobby, jogador)
-            else:
-                jogador.desconectado_em = datetime.now()
-                emit('jogador_desconectado',
-                     {'nome': jogador.username or '', 'grace': GRACE_RECONEXAO_SEGUNDOS},
-                     to=lobby.sala_room())
+            # Fase 23: a janela vale mesmo sem outro HUMANO ativo — antes, numa
+            # partida só com IAs o último humano era removido na hora e a sala
+            # inteira apagada junto; um blip de conexão (tab em segundo plano,
+            # reciclagem da função na Vercel) perdia a partida inteira. Sem outro
+            # humano o expurgo fica a cargo de um GC posterior (novo humano no
+            # connect, `verificar_desconectados`, ou o TTL do store).
+            jogador.desconectado_em = datetime.now()
+            emit('jogador_desconectado',
+                 {'nome': jogador.username or '', 'grace': GRACE_RECONEXAO_SEGUNDOS},
+                 to=lobby.sala_room())
         else:
             _remover_jogador_da_sala(lobby, jogador)
 
         if lobby.contar_jogadores() > 0:
             lobby.definir_master()
-        # Fase 11/15: sala sem nenhum humano CONECTADO (jogadores na janela de
-        # graça e bots não contam) é removida. Sem ninguém conectado não há
-        # evento futuro para o expurgo/GC do serverless, então fechar aqui evita
-        # salas vazias presas no store.
-        if lobby.tem_humano_conectado():
+        # Fase 11/15/23: a sala só é fechada quando não resta humano conectado
+        # NEM na janela de reconexão — o último humano de uma partida de IAs pode
+        # voltar. Sem ninguém conectado/na janela não há evento futuro para o
+        # expurgo do serverless, então fechar aqui evita salas vazias no store.
+        if _tem_humano_recente(lobby):
             # S6: atualizar_lista_usuarios já persiste a sala (e o resumo da busca).
             atualizar_lista_usuarios(lobby)
         else:

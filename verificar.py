@@ -1725,6 +1725,52 @@ def teste_retomar_negado_chave_stale():
     _ok("retomar_negado (chave stale)")
 
 
+def teste_ultimo_humano_sala_de_ias_ganha_grace():
+    """
+    Fase 23: o último humano de uma partida só com IAs ganha a janela de
+    reconexão mesmo sem outro humano ativo. Antes, o disconnect o removia na
+    hora e apagava a sala junto — um blip (tab em segundo plano, reciclagem da
+    função na Vercel) perdia a partida inteira. Com a graça, o jogador volta via
+    `retomar_identidade` e a partida segue.
+    """
+    _limpar()
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 60
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.pagina == 1
+        ana_chave = next(j.chave_secreta for j in lobby.jogadores if j.username == "Ana")
+        ana_sid = next(j.client_id for j in lobby.jogadores if j.username == "Ana")
+
+        # Queda do único humano no meio da partida (só o bot sobra).
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby is not None, "a sala não pode ser apagada na hora (Fase 23)"
+        ana = next(j for j in lobby.jogadores if j.username == "Ana")
+        assert ana.desconectado_em is not None, "o último humano deve entrar na janela de graça"
+        assert ana.client_id == ana_sid
+
+        # Volta dentro da janela: retoma a identidade e a partida segue.
+        c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c1b.emit("retomar_identidade", {"chave": ana_chave})
+        lobby = modulo_store.carregar_sala(SALA)
+        anas = [j for j in lobby.jogadores if j.username == "Ana"]
+        assert len(anas) == 1, "não pode duplicar o jogador retomado"
+        assert anas[0].desconectado_em is None, "retomada deve encerrar a janela de graça"
+        assert anas[0].client_id != ana_sid, "o sid novo deve ser religado à identidade"
+        assert lobby.pagina == 1, "a partida em andamento deve ser preservada"
+        assert any(j.is_ia for j in lobby.jogadores), "o bot da partida deve seguir na mesa"
+        c1b.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("último humano de sala só de IAs ganha a janela de reconexão (Fase 23)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -1790,10 +1836,14 @@ def verificar_integracao():
         ("retomar-identidade", teste_retomar_identidade_por_evento),
         ("retomar-negado", teste_retomar_negado_chave_stale),
     ]
+    testes_fase23 = [
+        ("ultimo-humano-ia", teste_ultimo_humano_sala_de_ias_ganha_grace),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
-                           + testes_expulsao + testes_autojogar + testes_fase_d):
+                           + testes_expulsao + testes_autojogar + testes_fase_d
+                           + testes_fase23):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

@@ -265,13 +265,78 @@ socket.on('sala_criada', function (data) {
 function copiar_link_sala() {
     const url = new URL(window.location.href);
     url.searchParams.set('sala', sala_atual);
-    navigator.clipboard.writeText(url.toString());
+    const texto = url.toString();
+    const promessa = (navigator.clipboard && navigator.clipboard.writeText)
+        ? navigator.clipboard.writeText(texto)
+        : Promise.reject();
+    promessa.then(function () {
+        mostrar_alerta(t('msg.link_copiado'), 'sucesso');
+    }).catch(function () {
+        // Fallback para contextos sem Clipboard API (ex.: HTTP não seguro).
+        const area = document.createElement('textarea');
+        area.value = texto;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        let copiou = false;
+        try {
+            copiou = document.execCommand('copy');
+        } catch (erro) {
+            copiou = false;
+        }
+        document.body.removeChild(area);
+        mostrar_alerta(t('msg.link_copiado'), copiou ? 'sucesso' : 'aviso');
+    });
 }
 
 // --- Busca de partidas (tela client-side) ---
+// Facilidade: os filtros da busca são lembrados entre sessões (localStorage).
+const CHAVE_FILTROS_BUSCA = 'dadinho_busca';
+
+function restaurar_filtros_busca() {
+    let salvo = null;
+    try {
+        salvo = JSON.parse(localStorage.getItem(CHAVE_FILTROS_BUSCA) || 'null');
+    } catch (erro) {
+        salvo = null;
+    }
+    if (!salvo) {
+        return;
+    }
+    const mapeamento = {
+        busca: 'filtro_busca',
+        status: 'filtro_status',
+        com_coringa: 'filtro_coringa',
+        ordenar: 'filtro_ordenar',
+    };
+    Object.keys(mapeamento).forEach(function (campo) {
+        const el = document.getElementById(mapeamento[campo]);
+        if (el && salvo[campo] !== undefined && salvo[campo] !== null) {
+            el.value = String(salvo[campo]);
+        }
+    });
+    const vaga = document.getElementById('filtro_vaga');
+    if (vaga && salvo.com_vaga !== undefined) {
+        vaga.checked = !!salvo.com_vaga;
+    }
+}
+
+function salvar_filtros_busca(filtros) {
+    try {
+        localStorage.setItem(CHAVE_FILTROS_BUSCA, JSON.stringify(filtros));
+    } catch (erro) {
+        // sem persistência: filtros valem só para esta sessão.
+    }
+}
+
 function abrir_busca() {
     document.getElementById('tela_jogadores').style.display = 'none';
     document.getElementById('tela_busca').style.display = 'block';
+    const input_busca = document.getElementById('filtro_busca');
+    if (input_busca) {
+        input_busca.focus();
+    }
     buscar_partidas();
 }
 
@@ -288,8 +353,11 @@ function buscar_partidas() {
         ordenar: document.getElementById('filtro_ordenar').value,
         com_vaga: document.getElementById('filtro_vaga').checked,
     };
+    salvar_filtros_busca(filtros);
     socket.emit('listar_partidas', { filtros: filtros, sala_atual: sala_atual });
 }
+
+restaurar_filtros_busca();
 
 function entrar_partida(codigo) {
     tocar_som_variante('pegar_dados', [1, 2]);
@@ -373,7 +441,9 @@ socket.on('iniciar_negado', function (data) {
     mostrar_alerta(t('msg.iniciar_negado', { motivo: texto }), 'aviso');
 });
 
-const apelidoSalvo = sessionStorage.getItem('dadinho_apelido');
+// Facilidade: o apelido é lembrado entre sessões (localStorage) e entre abas
+// da mesma sessão (sessionStorage, fallback para sessões antigas).
+const apelidoSalvo = localStorage.getItem('dadinho_apelido') || sessionStorage.getItem('dadinho_apelido');
 if (apelidoSalvo) {
     const apelidoInput = document.getElementById('apelido');
     if (apelidoInput) {
@@ -435,6 +505,9 @@ socket.on("update_user_list", (data) => {
 
     // Fase F: selo de verificação de integridade (provably fair) na espera.
     renderizar_badge_fair(data.config);
+
+    // Facilidade: master numa sala recém-criada herda a configuração salva.
+    aplicar_config_salva(data.config);
 
     // Verificação ativa na sala de espera: guarda o compromisso do servidor e
     // envia o nonce/compromisso deste cliente (provably fair).
@@ -608,6 +681,82 @@ function enviar_config() {
         tempo_max_jogada: document.getElementById('config_tempo').value,
     };
     socket.emit('configurar_partida', { chave: chave_secreta, config: config });
+    salvar_config_local();
+}
+
+// --- Facilidade: lembra a configuração da partida entre sessões ---
+// A configuração padrão espelha `Lobby.config_padrao` (modelos.py). Quando o
+// master entra numa sala recém-criada (config ainda é a padrão), a preferência
+// salva é aplicada e enviada de uma vez — não precisa reconfigurar toda vez.
+const CONFIG_PADRAO_LOCAL = {
+    dados_qtd: 1,
+    max_jogadores: 6,
+    com_coringa: true,
+    publica: true,
+    substituir_desconectado_por_ia: false,
+    ia_nivel_padrao: 2,
+    verificacao_ativa: false,
+    tempo_max_jogada: 30,
+};
+
+function config_igual_padrao(config) {
+    if (!config) {
+        return false;
+    }
+    return Object.keys(CONFIG_PADRAO_LOCAL).every(function (k) {
+        return String(config[k]) === String(CONFIG_PADRAO_LOCAL[k]);
+    });
+}
+
+function carregar_config_local() {
+    try {
+        return JSON.parse(localStorage.getItem('dadinho_config') || 'null');
+    } catch (erro) {
+        return null;
+    }
+}
+
+function salvar_config_local() {
+    const config = {
+        nome: document.getElementById('config_nome').value.trim(),
+        dados_qtd: document.getElementById('config_dados').value,
+        max_jogadores: document.getElementById('config_max').value,
+        com_coringa: document.getElementById('config_coringa').checked,
+        publica: document.getElementById('config_publica').checked,
+        substituir_desconectado_por_ia: document.getElementById('config_substituir_ia').checked,
+        verificacao_ativa: document.getElementById('config_verificacao').checked,
+        tempo_max_jogada: document.getElementById('config_tempo').value,
+        ia_nivel_padrao: document.getElementById('ia_nivel').value,
+        // A quantidade de IAs é só do cliente (controle do painel), não vai ao servidor.
+        ia_quantidade: document.getElementById('ia_quantidade').value,
+    };
+    try {
+        localStorage.setItem('dadinho_config', JSON.stringify(config));
+    } catch (erro) {
+        // sem persistência: configuração vale só para esta sessão.
+    }
+}
+
+// Aplica a configuração salva uma única vez por conexão, quando a sala ainda
+// está com a configuração padrão (recém-criada). Evita sobrescrever uma sala
+// que já foi personalizada ou reemitir a cada snapshot.
+let _config_local_aplicada = false;
+
+function aplicar_config_salva(config) {
+    if (!sou_master || _config_local_aplicada) {
+        return;
+    }
+    const salvo = carregar_config_local();
+    if (!salvo || !config_igual_padrao(config)) {
+        return;
+    }
+    _config_local_aplicada = true;
+    aplicar_config(salvo);
+    const ia_qtd = document.getElementById('ia_quantidade');
+    if (ia_qtd && salvo.ia_quantidade) {
+        ia_qtd.value = String(salvo.ia_quantidade);
+    }
+    enviar_config();
 }
 
 // --- Jogadores IA (Fase 11) ---
@@ -1473,8 +1622,8 @@ socket.on('espectador', function (data) {
 
 })
 
-// Lógica para enviar a aposta
-document.getElementById('apostar').addEventListener('click', () => {
+// Lógica para enviar a aposta (chamada pelo botão e pela tecla Enter).
+function apostar() {
     parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const quantidade = document.getElementById('quantidade').value;
 
@@ -1490,10 +1639,12 @@ document.getElementById('apostar').addEventListener('click', () => {
     } else {
         mostrar_alerta(t('msg.selecione_dado'), 'aviso');
     }
-});
+}
 
-// Lógica para enviar a desconfiança
-document.getElementById('desconfiar').addEventListener('click', () => {
+document.getElementById('apostar').addEventListener('click', apostar);
+
+// Lógica para enviar a desconfiança (chamada pelo botão e pela tecla Enter).
+function desconfiar() {
     parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const data = {
         chave: chave_secreta,
@@ -1501,11 +1652,15 @@ document.getElementById('desconfiar').addEventListener('click', () => {
     };
     // Enviar para o backend
     socket.emit('desconfiar', { dados: data });
-});
+}
+
+document.getElementById('desconfiar').addEventListener('click', desconfiar);
 
 // Funções após conectar
 let retomar_enviado = false;
 socket.on("connect_start", function (data) {
+    // Facilidade: nova conexão, a config salva pode ser reaplicada numa sala nova.
+    _config_local_aplicada = false;
     // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
     // para não apagar a identidade de uma sala anterior.
     // Fase D: guarda a chave no sessionStorage só quando não há uma sessão
@@ -1661,7 +1816,8 @@ function enviar_apelido() {
     const botaapelido = document.getElementById('botapel');
     let apelido = textInput.value.trim();
     if (apelido) {
-        sessionStorage.setItem('dadinho_apelido', apelido); // Mantém o apelido entre trocas de sala (recarregar página)
+        localStorage.setItem('dadinho_apelido', apelido); // Lembra entre sessões
+        sessionStorage.setItem('dadinho_apelido', apelido); // Mantém entre trocas de sala
         socket.emit('apelido', { apelido_msg: textInput.value });
         textInput.disabled = true; // Desativa o input
         botaapelido.disabled = true; // Desativa o input
@@ -1895,10 +2051,41 @@ if (overlay_tutorial) {
     });
 }
 
+// Facilidade (teclado): Enter confirma a ação do contexto e Esc fecha o que
+// estiver aberto (alerta, tutorial, busca, dica). O Enter em um input dispara a
+// ação correspondente; em modais, confirma/fecha.
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         fechar_alerta();
         fechar_tutorial();
+        fechar_busca();
+        fechar_dica();
+        return;
+    }
+    if (event.key !== 'Enter') {
+        return;
+    }
+    if (alerta_overlay && alerta_overlay.style.display === 'flex') {
+        fechar_alerta(true);
+        return;
+    }
+    if (overlay_tutorial && overlay_tutorial.style.display === 'flex') {
+        fechar_tutorial();
+        return;
+    }
+    const alvo = event.target;
+    if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'SELECT')) {
+        const acoes = {
+            apelido: enviar_apelido,
+            config_nome: enviar_config,
+            filtro_busca: buscar_partidas,
+            quantidade: apostar,
+        };
+        const acao = acoes[alvo.id];
+        if (acao) {
+            event.preventDefault();
+            acao();
+        }
     }
 });
 
@@ -2600,15 +2787,6 @@ function vencedor_final() {
 document.getElementById('comemorar').addEventListener('click', () => {
     socket.emit('foguetear_click', { chave: chave_secreta });
 });
-
-function verificar_enter(event, button) {
-    if (event.key !== 'Enter') {
-        return;
-    }
-    if (button === 'button') {
-        enviar_apelido();
-    }
-}
 
 // Seleciona os elementos
 const inputQuantidade = document.getElementById("quantidade");
