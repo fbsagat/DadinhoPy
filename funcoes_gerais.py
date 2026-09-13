@@ -150,8 +150,16 @@ def buscar_lobby_pelo_client_id(client_id):
 def remover_sala(sala_id):
     """
     Remove uma sala vazia do store (GC de salas sem ninguém), junto do resumo
-    dela da busca de partidas.
+    dela na busca, do índice em processo e do índice distribuído de sids —
+    nenhum cliente pode continuar apontando para uma sala morta.
     """
+    with _clientes_guard:
+        clientes = list(_clientes_por_sala.pop(sala_id, ()))
+        for client_id in clientes:
+            if _sala_por_cliente.get(client_id) == sala_id:
+                _sala_por_cliente.pop(client_id, None)
+    for client_id in clientes:
+        store.desregistrar_sid(client_id)
     store.remover_sala(sala_id)
     store.remover_resumo(sala_id)
 
@@ -327,8 +335,13 @@ def listar_resumos_partidas(filtros, sala_atual=None):
         sala = resumo.get('sala', '')
         if sala == sala_atual:
             continue
-        # Sala órfã (sem ninguém): não aparece na busca (o GC fecha no disconnect).
-        if int(resumo.get('jogadores') or 0) < 1:
+        # Sala órfã (sem humano conectado) não aparece na busca: cobre sala só
+        # com bots e humanos todos na janela de reconexão. Resumos antigos, sem
+        # o campo, caem no total de jogadores.
+        humanos = resumo.get('humanos')
+        if humanos is None:
+            humanos = resumo.get('jogadores') or 0
+        if int(humanos or 0) < 1:
             continue
         if not resumo.get('publica'):
             continue

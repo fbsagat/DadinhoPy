@@ -754,6 +754,52 @@ def teste_sala_so_com_bot_e_removida():
     _ok("sala só com bot é removida (B3)")
 
 
+def teste_gc_unificado_sala_bot_sem_humano():
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.resumo_partida()["humanos"] == 1, "resumo deve contar o humano conectado"
+    # Simula uma instância serverless que morreu sem disconnect: o humano some
+    # da sala e sobra só o bot persistido (nenhum humano conectado).
+    lobby.jogadores = [j for j in lobby.jogadores if j.is_ia]
+    modulo_store.salvar_sala(lobby)
+    c1.disconnect()
+    assert modulo_store.carregar_sala(SALA) is not None, "pré-condição: sala só com bot persistida"
+
+    # O próximo connect no mesmo código passa pelo GC unificado: fecha o fantasma
+    # e recria a sala do zero, com o novo humano como master (sem bots antigos).
+    c2, cs2, _ = _conectar()
+    novo = modulo_store.carregar_sala(SALA)
+    assert novo is not None
+    assert len(novo.jogadores) == 1 and not novo.jogadores[0].is_ia, \
+        "GC deve recriar a sala sem os bots antigos"
+    assert novo.jogadores[0].master, "o novo humano vira master da sala recriada"
+    c2.disconnect()
+    _limpar()
+    _ok("GC unificado fecha/reabre sala só com bot (sem humano conectado)")
+
+
+def teste_busca_esconde_sala_sem_humano():
+    resumos = [
+        ("b0t", {"sala": "b0t", "publica": True, "jogadores": 2, "humanos": 0}),
+        ("hum4", {"sala": "hum4", "publica": True, "jogadores": 2, "humanos": 1}),
+        ("l3g4", {"sala": "l3g4", "publica": True, "jogadores": 2}),
+    ]
+    for sala_id, resumo in resumos:
+        modulo_store.salvar_resumo(sala_id, dict(resumo))
+    try:
+        salas = {r.get("sala") for r in funcoes_gerais.listar_resumos_partidas({})}
+        assert "b0t" not in salas, "sala sem humano conectado não pode aparecer na busca"
+        assert "hum4" in salas, "sala com humano conectado deve aparecer"
+        assert "l3g4" in salas, "resumo antigo sem 'humanos' cai no total de jogadores"
+    finally:
+        for sala_id, _ in resumos:
+            modulo_store.remover_resumo(sala_id)
+    _ok("busca esconde sala sem humano conectado")
+
+
 def teste_sala_orfa_e_fechada():
     _limpar()
     c1, cs1, _ = _conectar()
@@ -1049,6 +1095,8 @@ def verificar_integracao():
         ("B1-gate", teste_gate_pagina_confirmacoes),
         ("B2-espectador", teste_espectador_nao_e_jogador),
         ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
+        ("GC-bot-persistido", teste_gc_unificado_sala_bot_sem_humano),
+        ("busca-humanos", teste_busca_esconde_sala_sem_humano),
         ("B4-orfa-fechada", teste_sala_orfa_e_fechada),
         ("sala-padrao", teste_sala_padrao_cria_nova),
     ]

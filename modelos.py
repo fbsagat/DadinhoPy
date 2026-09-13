@@ -687,6 +687,7 @@ class Lobby:
             'nome': self.nome,
             'status': self.status,
             'jogadores': len(self.jogadores),
+            'humanos': self.humanos_conectados(),
             'prontos': self.contar_prontos(),
             'max_jogadores': int(self.config.get('max_jogadores', 6)),
             'dados_qtd': int(self.config.get('dados_qtd', 1)),
@@ -794,6 +795,18 @@ class Lobby:
         """True se ainda há ao menos um humano (jogador ou espectador) na sala."""
         return (any(not j.is_ia for j in self.jogadores)
                 or any(not j.is_ia for j in self.espectadores))
+
+    def humanos_conectados(self):
+        """
+        Quantidade de humanos conectados: jogadores fora da janela de reconexão
+        (desconectado_em) mais espectadores (que saem na hora). Bots não contam.
+        """
+        return (sum(1 for j in self.jogadores if not j.is_ia and j.desconectado_em is None)
+                + sum(1 for e in self.espectadores if not e.is_ia))
+
+    def tem_humano_conectado(self):
+        """True se resta ao menos um humano conectado (base do GC de sala órfã)."""
+        return self.humanos_conectados() > 0
 
     def adicionar_jogador(self, jogador):
         """

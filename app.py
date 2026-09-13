@@ -98,20 +98,16 @@ def achar_jogador(client_id):
     if sala_id is not None:
         lobby = store.carregar_sala(sala_id)
         if lobby is not None:
-            if _purgar_desconectados(lobby):
-                if _fechar_sala_se_orfa(lobby):
-                    return None, None
-                atualizar_lista_usuarios(lobby)
+            if _gc_sala(lobby):
+                return None, None
             jogador = lobby.buscar_jogador_pelo_client_id(client_id)
             if jogador is not None:
                 return lobby, jogador
     lobby = buscar_lobby_pelo_client_id(client_id)
     if lobby is None:
         return None, None
-    if _purgar_desconectados(lobby):
-        if _fechar_sala_se_orfa(lobby):
-            return None, None
-        atualizar_lista_usuarios(lobby)
+    if _gc_sala(lobby):
+        return None, None
     return lobby, lobby.buscar_jogador_pelo_client_id(client_id)
 
 
@@ -206,28 +202,22 @@ def _purgar_desconectados(lobby):
     return mudou
 
 
-def _sala_sem_humano_ativo(lobby):
+def _gc_sala(lobby):
     """
-    True se a sala não tem mais nenhum humano ativo (conectado). Bots e
-    jogadores na janela de reconexão (desconectado_em) não mantêm a sala viva:
-    sem ninguém conectado não há evento futuro para expurgar/GC no serverless,
-    então a sala precisa ser fechada aqui.
+    GC unificado de sala: expurga a janela de reconexão (Fase 9/11) e fecha a
+    sala quando não resta humano conectado (Fase 15). Todo caminho que toca o
+    estado passa por aqui, para que nenhum fluxo deixe uma sala sem humano
+    persistida (só bots, todos na janela de graça, instância morta sem
+    disconnect). Devolve True se a sala foi fechada.
     """
-    if any(not j.is_ia and j.desconectado_em is None for j in lobby.jogadores):
-        return False
-    return not any(not e.is_ia for e in lobby.espectadores)
-
-
-def _fechar_sala_se_orfa(lobby):
-    """
-    Remove a sala do store quando não resta humano ativo (evita salas vazias
-    persistidas, que apareciam na busca). Devolve True se a sala foi fechada.
-    """
-    if not _sala_sem_humano_ativo(lobby):
-        return False
-    remover_sala(lobby.sala_id)
-    esquecer_sala(lobby.sala_id)
-    return True
+    mudou = _purgar_desconectados(lobby)
+    if not lobby.tem_humano_conectado():
+        remover_sala(lobby.sala_id)
+        esquecer_sala(lobby.sala_id)
+        return True
+    if mudou:
+        atualizar_lista_usuarios(lobby)
+    return False
 
 
 def evento_mutavel(func):
@@ -364,25 +354,32 @@ def handle_connect():
                 # e encerra a janela de reconexão (Fase 9).
                 jogador.client_id = client_id
                 jogador.desconectado_em = None
-            elif lobby.status == 'jogando':
-                # Fase 15: entrou no meio da partida (pela busca) — vira
-                # espectador, sem ocupar vaga nem contar como jogador.
-                if len(lobby.espectadores) >= MAX_ESPECTADORES:
-                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                    leave_room(lobby.sala_room(), sid=client_id)
-                    return
-                jogador = Jogador(client_id=client_id, master=False)
-                jogador.lobby_atual = lobby
-                lobby.espectadores.append(jogador)
             else:
-                # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
-                if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
-                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                    leave_room(lobby.sala_room(), sid=client_id)
-                    return
-                master = False if lobby.verificar_jogador_master() else True
-                jogador = Jogador(client_id=client_id, master=master)
-                lobby.adicionar_jogador(jogador)
+                # Ninguém reconectando nesta conexão: GC unificado antes de
+                # entrar. Fecha a sala órfã (só bots / sem humano conectado) e
+                # recria ela do zero, em vez de reaproveitar um fantasma; sala
+                # recém-criada (vazia) fica como está.
+                if (lobby.jogadores or lobby.espectadores) and _gc_sala(lobby):
+                    lobby = obter_sala(sala_id)
+                if lobby.status == 'jogando':
+                    # Fase 15: entrou no meio da partida (pela busca) — vira
+                    # espectador, sem ocupar vaga nem contar como jogador.
+                    if len(lobby.espectadores) >= MAX_ESPECTADORES:
+                        emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                        leave_room(lobby.sala_room(), sid=client_id)
+                        return
+                    jogador = Jogador(client_id=client_id, master=False)
+                    jogador.lobby_atual = lobby
+                    lobby.espectadores.append(jogador)
+                else:
+                    # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
+                    if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
+                        emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                        leave_room(lobby.sala_room(), sid=client_id)
+                        return
+                    master = False if lobby.verificar_jogador_master() else True
+                    jogador = Jogador(client_id=client_id, master=master)
+                    lobby.adicionar_jogador(jogador)
 
         registrar_cliente(client_id, sala_id)
 
@@ -449,11 +446,11 @@ def handle_disconnect():
 
         if lobby.contar_jogadores() > 0:
             lobby.definir_master()
-        # Fase 11/15: sala sem nenhum humano ATIVO (jogadores desconectados na
-        # janela de graça e bots não contam) é removida. Sem ninguém conectado
-        # não há evento futuro para o expurgo/GC do serverless, então fechar
-        # aqui evita salas vazias presas no store.
-        if not _sala_sem_humano_ativo(lobby):
+        # Fase 11/15: sala sem nenhum humano CONECTADO (jogadores na janela de
+        # graça e bots não contam) é removida. Sem ninguém conectado não há
+        # evento futuro para o expurgo/GC do serverless, então fechar aqui evita
+        # salas vazias presas no store.
+        if lobby.tem_humano_conectado():
             # S6: atualizar_lista_usuarios já persiste a sala (e o resumo da busca).
             atualizar_lista_usuarios(lobby)
         else:
@@ -655,12 +652,9 @@ def verificar_desconectados(dados, lobby, jogador):
     Os clientes agendam este evento após receberem 'jogador_desconectado'
     (Fase 9): garante que alguém expurgue, após a janela de graça, quem caiu no
     meio da partida e não voltou — sem depender de timer no servidor.
-    achar_jogador já faz o expurgo; aqui só persistimos se algo saiu.
+    achar_jogador já faz o GC unificado; aqui só o disparamos de novo.
     """
-    if _purgar_desconectados(lobby):
-        if _fechar_sala_se_orfa(lobby):
-            return
-        atualizar_lista_usuarios(lobby)
+    _gc_sala(lobby)
 
 
 @socketio.on('jogar_dados')
