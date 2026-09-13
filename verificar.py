@@ -1433,7 +1433,7 @@ def teste_revelar_seed_fora_do_cooldown():
 
 def teste_upstash_indice_resumos():
     arm = modulo_store.ArmazenamentoUpstash("http://fake", "tok")
-    estado = {"dados": {}, "indice": set()}
+    estado = {"dados": {}, "indice": set(), "travas": {}}
 
     def fake_pipeline(comandos):
         for cmd in comandos:
@@ -1450,6 +1450,20 @@ def teste_upstash_indice_resumos():
 
     def fake_comando(*args):
         op = args[0]
+        if op == "SET":
+            # Fase 24: o lock distribuído adquire com SET NX/EX — resposta "OK"
+            # só quando a chave está livre (sem isso todo handler mutável
+            # abortaria em silêncio num ambiente com o lock ligado).
+            if estado["travas"].get(args[1]) is None:
+                estado["travas"][args[1]] = args[2]
+                return {"result": "OK"}
+            return {"result": None}
+        if op == "DELEX":
+            # Compare-and-del: apaga só se o valor ainda for o token informado.
+            if estado["travas"].get(args[1]) == args[3]:
+                del estado["travas"][args[1]]
+                return {"result": 1}
+            return {"result": 0}
         if op == "SMEMBERS":
             return {"result": list(estado["indice"])}
         if op == "MGET":
@@ -1481,6 +1495,117 @@ def teste_upstash_indice_resumos():
     assert arm.listar_resumos() == []
     assert "s2" not in estado["indice"], "remover_resumo deve desindexar"
     _ok("índice de resumos da Upstash")
+
+
+def teste_trava_distribuida():
+    """
+    Fase 24: lock distribuído por sala via Upstash REST — SET NX/EX para
+    adquirir e DELEX IFEQ para liberar. Simula duas instâncias compartilhando
+    o mesmo Redis (estado fake comum): exclusão mútua, release com token
+    errado é no-op, lease expira sozinho e contenda levanta TravaIndisponivel.
+    """
+    relogio = {"agora": 1_000_000.0}
+    estado = {"travas": {}}
+
+    def fake_comando(*args):
+        op = args[0]
+        if op == "SET":
+            chave, valor = args[1], args[2]
+            atual = estado["travas"].get(chave)
+            if atual is not None and atual[1] > relogio["agora"]:
+                return {"result": None}
+            restante = args[3:]
+            ttl = int(restante[restante.index("EX") + 1]) if "EX" in restante else 0
+            estado["travas"][chave] = (valor, relogio["agora"] + ttl)
+            return {"result": "OK"}
+        if op == "DELEX":
+            atual = estado["travas"].get(args[1])
+            if atual is not None and atual[1] > relogio["agora"] and atual[0] == args[3]:
+                del estado["travas"][args[1]]
+                return {"result": 1}
+            return {"result": 0}
+        if op == "GET":
+            atual = estado["travas"].get(args[1])
+            if atual is not None and atual[1] <= relogio["agora"]:
+                del estado["travas"][args[1]]
+                return {"result": None}
+            return {"result": atual[0] if atual else None}
+        return {"result": None}
+
+    def instancia():
+        arm = modulo_store.ArmazenamentoUpstash("http://fake", "tok")
+        arm._comando = fake_comando
+        return arm
+
+    chave = modulo_store.PREFIXO_TRAVA + "s1"
+    a, b = instancia(), instancia()
+
+    # Release com token errado não apaga (DELEX IFEQ é compare-and-del).
+    assert a._comando("SET", chave, "tokA", "NX", "EX", 120)["result"] == "OK"
+    assert b._comando("DELEX", chave, "IFEQ", "tokErrado")["result"] == 0
+    assert a._comando("GET", chave)["result"] == "tokA", "token errado não pode apagar"
+    assert b._comando("DELEX", chave, "IFEQ", "tokA")["result"] == 1
+    assert a._comando("GET", chave)["result"] is None, "release correto deve liberar"
+
+    # Lease expira sozinho: após a janela, outra instância adquire.
+    assert a._comando("SET", chave, "tokB", "NX", "EX", 120)["result"] == "OK"
+    relogio["agora"] += 200
+    assert b._comando("SET", chave, "tokC", "NX", "EX", 120)["result"] == "OK", \
+        "lease expirado deve liberar para outra instância"
+
+    # Exclusão mútua via o context manager + contenda -> TravaIndisponivel.
+    original = modulo_store.armazenamento
+    tts, espera = modulo_store.TRAVA_TENTATIVAS, modulo_store.TRAVA_ESPERA_BASE
+    modulo_store.TRAVA_TENTATIVAS = 2
+    modulo_store.TRAVA_ESPERA_BASE = 0.01
+    try:
+        modulo_store.armazenamento = a
+        with modulo_store.trancar_sala_distribuida("s2"):
+            assert estado["travas"].get(modulo_store.PREFIXO_TRAVA + "s2") is not None, \
+                "acquire deve gravar o token do lock"
+            # A instância B (outro processo) não adquire enquanto A segura.
+            modulo_store.armazenamento = b
+            try:
+                with modulo_store.trancar_sala_distribuida("s2"):
+                    raise AssertionError("segunda instância não pode adquirir lock ocupado")
+            except modulo_store.TravaIndisponivel:
+                pass
+        # Saiu do `with`: token liberado — uma instância C adquire normalmente.
+        modulo_store.armazenamento = instancia()
+        with modulo_store.trancar_sala_distribuida("s2"):
+            pass
+    finally:
+        modulo_store.TRAVA_TENTATIVAS = tts
+        modulo_store.TRAVA_ESPERA_BASE = espera
+        modulo_store.armazenamento = original
+    _ok("lock distribuído (SET NX/EX + DELEX IFEQ, exclusão mútua, TTL e contenda)")
+
+
+def teste_mq_wiring():
+    """
+    Fase 25: o manager é opt-in por env DADINHO_MESSAGE_QUEUE. Com a env, o app
+    usa GerenciadorRedisSeguro (canal "dadinho") e o boot não trava mesmo com URL
+    inalcançável (a thread de listener re-tenta em background). Sem a env, o
+    wiring mantém o GerenciadorThreadSeguro (regressão zero).
+    """
+    codigo = (
+        "import os;"
+        "os.environ['DADINHO_STORE']='memoria';"
+        "os.environ['VERCEL']='1';"
+        "os.environ['DADINHO_MESSAGE_QUEUE']='rediss://a:@fake:6379/0';"
+        "import app;"
+        "m=app.socketio.server.manager;"
+        "assert type(m).__name__=='GerenciadorRedisSeguro', type(m).__name__;"
+        "assert m.channel=='dadinho', m.channel;"
+        "print('MQ_OK')"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo], cwd=RAIZ,
+        capture_output=True, text=True, timeout=60,
+    )
+    _checar("message queue wiring (opt-in por env)",
+            resultado.returncode == 0 and "MQ_OK" in resultado.stdout,
+            (resultado.stderr or resultado.stdout).strip()[-500:])
 
 
 def teste_resumo_dedup():
@@ -1949,6 +2074,7 @@ def verificar_integracao():
         ("B8-cooldown", teste_cooldown_expurga_antigos),
         ("poda-partidas", teste_poda_partidas),
         ("upstash-indice", teste_upstash_indice_resumos),
+        ("trava-distribuida", teste_trava_distribuida),
         ("resumo-dedup", teste_resumo_dedup),
     ]
     testes_correcoes = [
@@ -1981,11 +2107,14 @@ def verificar_integracao():
     testes_fase23 = [
         ("ultimo-humano-ia", teste_ultimo_humano_sala_de_ias_ganha_grace),
     ]
+    testes_fase25 = [
+        ("mq-wiring", teste_mq_wiring),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
-                           + testes_fase23):
+                           + testes_fase23 + testes_fase25):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

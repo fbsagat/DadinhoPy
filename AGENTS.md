@@ -3,7 +3,7 @@
 "Dadinho" — jogo de blefe de dados multiplayer em tempo real no navegador. Backend Flask-SocketIO em Python, uma página HTML + um JS frontend.
 
 **Leia antes de mudar comportamento de jogo:** a spec está em `Dadinho idéia.txt` (telas, regras, fluxo; reference `@regras`).
-**Referência de arquitetura, fluxo/eventos e operação:** `docs/arquitetura.md`, `docs/fluxo.md`, `docs/verificacao.md` (reference `@docs`). Habilidades (`evento-dadinho`, `i18n-dadinho`, `verificar-deploy`) e revisores (`revisor-dadinho`, `rastrear-evento`) estão em `.opencode/`.
+**Referência de arquitetura, fluxo/eventos e operação:** `docs/arquitetura.md`, `docs/fluxo.md`, `docs/verificacao.md` (reference `@docs`). Planos de melhoria: `docs/plano-cross-instance.md` (Fases 24–26: lock distribuído + message queue entre instâncias). Habilidades (`evento-dadinho`, `i18n-dadinho`, `verificar-deploy`) e revisores (`revisor-dadinho`, `rastrear-evento`) estão em `.opencode/`.
 
 ## Constraints para código novo
 
@@ -35,6 +35,5 @@
 
 ## Pontos de atenção recorrentes
 
-- **Serverless/cross-instance:** rooms/emits vivem por instância — salas de espera dependem do re-sync do heartbeat (espera SEMPRE fresco do store; partida via `carregar_sala_leve`). Não introduzir estado X no caminho que precise de broadcast entre instâncias sem tratar o re-sync.
-- **Config (`opencode.json`)** e skills/agents não são recarregados a quente — depois de editar `.opencode/`/`opencode.json`, reiniciar o opencode.
+- **Serverless/cross-instance:** rooms/emits vivem por instância — salas de espera dependem do re-sync do heartbeat (espera SEMPRE fresco do store; partida via `carregar_sala_leve`). Não introduzir estado X no caminho que precise de broadcast entre instâncias sem tratar o re-sync. Fase 25: `DADINHO_MESSAGE_QUEUE` (URL `rediss://` Upstash) liga o `GerenciadorRedisSeguro` (pub/sub ~ emits entre instâncias); sem a env, manager local. Config (`opencode.json`) e skills/agents não são recarregados a quente — depois de editar `.opencode/`/`opencode.json`, reiniciar o opencode.
 - Novos textos/keys: ver skill `i18n-dadinho`; novos eventos: skill `evento-dadinho`; verificação/deploy: skill `verificar-deploy`.

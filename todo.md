@@ -17,6 +17,9 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 14** — i18n (5 idiomas + fallback EN). ✅ concluída
 - **Fases 15–22** — espectadores, GC unificado, heartbeat/visto_em, home sem sala, expulsão, personalidade dos bots, jogada automática e status de confirmação. ✅ concluídas (resumo no fim do arquivo)
 - **Fases A–G** — revisão de segurança e custo (botão Ok, erro de rede no store, custo do heartbeat, chave fora da query, XSS defensivo, selo provably fair, docs). ✅ concluídas (resumo no fim do arquivo)
+- **Fase 24** — Lock distribuído por sala (Upstash REST) para consistência entre instâncias. ✅ concluída
+- **Fase 25** — Message queue (`socketio.RedisManager`) para emits em tempo real entre instâncias. ✅ concluída
+- **Fase 26** — Otimizações pós-métricas (`ignore_queue`, detector CAS). 📄 `docs/plano-cross-instance.md` (opcional)
 
 ---
 
@@ -280,3 +283,27 @@ Implementadas nesta revisão (refs em `AGENTS.md`):
 - **Fase E2** — Re-sync da sala de espera SEMPRE lê o estado fresco do store a cada batida (não só o master, e não via o cache da Fase C): o jogador não-master recebia a lista do cache defasado e o início da partida só era detectado quando o cache expirava — na Vercel o host não via quem entra/fica pronto e o jogador não avançava de tela. Regressão guardada em `verificar.py` (`heartbeat-espera-fresco`).
 
 Verificação: `python verificar.py` (inclui `teste_retomar_identidade_por_evento`) e `python simular_ia.py`.
+
+## Fases 24–26 — tempo real entre instâncias
+
+Plano completo em `docs/plano-cross-instance.md` (decisões, mudanças por arquivo, critérios de aceite). Resumo:
+
+- **Fase 24** — Lock distribuído por sala: `store.trancar_sala_distribuida` (SET `dadinho:lock:<id>` NX EX + release `DELEX IFEQ`, **no-op em memória**), aninhado ao lock local em `evento_mutavel`/`handle_connect`/`handle_disconnect`; exceção `TravaIndisponivel` → aborto silencioso; fake de `_comando`/`_pipeline` em `verificar.py` atualizado + teste do lock. Pré-requisito de consistência para a Fase 25. ✅ concluída
+- **Fase 25** — Message queue: dep `redis` pinada; `GerenciadorRedisSeguro(socketio.RedisManager)` com o RLock das 5 correções; wiring em `app.py:82-93` por env `DADINHO_MESSAGE_QUEUE` (URL `rediss://`, `channel="dadinho"`); sem env, mantém `GerenciadorThreadSeguro`. Emits não mudam; cliente intocado. ✅ concluída
+- **Fase 26** (opcional, após métricas) — `ignore_queue` em emits `to=<sid>`; detector CAS/version-token como alerta.
+
+### Fase 24 — detalhe da implementação
+
+- **`store.py`** — constantes `PREFIXO_TRAVA`/`TRAVA_TTL`(120s)/`TRAVA_TENTATIVAS`(10)/`TRAVA_ESPERA_BASE`(0.05s, backoff dobro cap 0.2s); `TravaIndisponivel(Exception)`; `trancar_sala_distribuida(sala_id)` via `@contextlib.contextmanager` — adquire com `SET NX EX` (token `secrets.token_hex(8)`, lease 120s), libera com `DELEX IFEQ` no `finally` (nunca derruba a trava re-adquirida por outra instância após o lease expirar), no-op se o store for memória.
+- **`app.py`** — `evento_mutavel` aninha o lock distribuído **por dentro** do lock local (LIFO, sem inversão → sem deadlock) e soma `store.TravaIndisponivel` ao `except` (política de aborto silencioso da Fase B). `handle_connect`/`handle_disconnect` aninham o mesmo com `try/except TravaIndisponivel: return` (connect: cliente reconecta com backoff; disconnect: limpeza fica para o GC/heartbeat, como num blip de rede).
+- **`verificar.py`** — fake do índice de resumos agora simula o lock (SET NX/EX → "OK"; DELEX IFEQ → compara e remove); novo `teste_trava_distribuida` (duas instâncias REST fake no mesmo Redis): exclusão mútua, release com token errado é no-op, lease expira sozinho e contenda levanta `TravaIndisponivel`.
+
+Verificação (local, `.venv`): `python verificar.py` 100% verde (inclui `trava-distribuida`); dev local (`memoria`) com regressão zero (lock no-op). Produção: validar com 2 navegadores/instâncias, seguindo `docs/verificacao.md`. Custo: +2 comandos Upstash por evento mutável (SET NX + DELEX).
+
+### Fase 25 — detalhe da implementação
+
+- **`requirements.txt`** — linha nova pinada `redis==8.1.0` (resolvida pelo pip e instalada na `.venv`).
+- **`app.py`** — `import socketio as pacote_socketio`; nova classe `GerenciadorRedisSeguro(pacote_socketio.RedisManager)` replicando o RLock das 5 correções (`connect`, `basic_enter_room`, `basic_leave_room`, `basic_disconnect`, `basic_close_room`) — a hierarquia `PubSubManager(Manager)` é preservada, então o `_handle_emit` da thread de listener segue chamando `Manager.emit` e as correções de corrida continuam valendo. Wiring por env `DADINHO_MESSAGE_QUEUE` (opt-in): com a env, `GerenciadorRedisSeguro(url_mq, channel="dadinho", redis_options={"ssl_cert_reqs": "required"} se rediss://)`; sem a env, mantém `GerenciadorThreadSeguro`. `RedisManager.initialize()` em `threading` não exige monkey-patch (só eventlet/gevent), então o listener roda em `threading.Thread` sem levantar.
+- **`verificar.py`** — novo `teste_mq_wiring` (subprocess com `DADINHO_MESSAGE_QUEUE=rediss://` fake: manager é `GerenciadorRedisSeguro`, canal `dadinho`, boot não trava com URL inalcançável); rodado junto à integração.
+
+Verificação (local, `.venv`): `python verificar.py` 100% verde (inclui `mq-wiring`); sem a env, regressão zero (`GerenciadorThreadSeguro` e todos os testes intocados). Com a env: `ia.processar` segue sem timer e `simular_ia.py` intocado. Produção: validar com 2 navegadores em instâncias diferentes vendo rolagem/aposta/conferência ao vivo, e monitorar comandos/conexões no painel Upstash (critérios de `docs/plano-cross-instance.md`).

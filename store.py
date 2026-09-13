@@ -22,10 +22,15 @@ se a função serverless morrer sem disparar o GC do disconnect — antes a sala
 - dadinho:sid:<client_id> -> sala_id do jogador (TTL; índice p/ achar_jogador
                              sem varrer o store)
 - dadinho:lobby_seq      -> contador INCR p/ numerar lobbies novos (B8)
+- dadinho:lock:<id>      -> token de um lock distribuído por sala (Fase 24;
+                             SET NX EX no adquirir + DELEX IFEQ no liberar,
+                             TTL curto de lease)
 """
 
+import contextlib
 import json
 import os
+import secrets
 import threading
 import time
 import urllib.error
@@ -63,6 +68,64 @@ def esquecer_sala(sala_id):
     """
     with _travas_guard:
         _travas_salas.pop(sala_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Lock distribuído por sala (Fase 24).
+#
+# O `trancar_sala` acima é por processo; entre instâncias serverless duas
+# mutações concorrentes do mesmo Lobby podem se sobrescrever no Upstash.
+# Este lock fecha essa janela: SET NX EX adquire (lease) e DELEX IFEQ libera
+# (só apaga se o valor ainda for o nosso token — nunca derruba a trava de
+# outra instância cujo lease expirou e foi re-adquirido). No-op em memória:
+# dev local e os testes de verificar.py não mudam e não pagam comandos.
+# ---------------------------------------------------------------------------
+PREFIXO_TRAVA = "dadinho:lock:"
+TRAVA_TTL = 120          # lease: handlers são de segundos; degrade documentado se estourar.
+TRAVA_TENTATIVAS = 10
+TRAVA_ESPERA_BASE = 0.05
+
+
+class TravaIndisponivel(Exception):
+    """Lock distribuído não adquirido (contenda ou falha de rede) — aborto silencioso."""
+
+
+@contextlib.contextmanager
+def trancar_sala_distribuida(sala_id):
+    """
+    Serializa o read-modify-write do Lobby ENTRE instâncias (a `trancar_sala`
+    local só cobre o processo). Aninhado por fora da mutação e por dentro do
+    lock de processo; o `with` libera em LIFO, sem inversão → sem deadlock.
+
+    Adquirir: SET dadinho:lock:<sala_id> <token> NX EX <ttl> → {"result": "OK"}
+    Liberar: DELEX dadinho:lock:<sala_id> IFEQ <token> (compare-and-del, único
+    comando REST). Na memória, vira um yield puro.
+    """
+    if not isinstance(armazenamento, ArmazenamentoUpstash):
+        yield
+        return
+    token = secrets.token_hex(8)
+    chave = _chave_trava(sala_id)
+    adquiriu = False
+    for tentativa in range(TRAVA_TENTATIVAS):
+        if tentativa:
+            time.sleep(min(TRAVA_ESPERA_BASE * (2 ** (tentativa - 1)), 0.2))
+        resposta = armazenamento._comando("SET", chave, token, "NX", "EX", TRAVA_TTL)
+        if (resposta or {}).get("result") == "OK":
+            adquiriu = True
+            break
+    if not adquiriu:
+        raise TravaIndisponivel(sala_id)
+    try:
+        yield
+    finally:
+        # Compara-e-apaga: se o lease expirou no meio e outra instância
+        # re-adquiriu, este DELEX IFEQ não derruba a trava dela.
+        armazenamento._comando("DELEX", chave, "IFEQ", token)
+
+
+def _chave_trava(sala_id):
+    return f"{PREFIXO_TRAVA}{sala_id}"
 
 
 # ---------------------------------------------------------------------------

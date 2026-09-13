@@ -8,12 +8,13 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem,
                             emitir_dispatcher_turno)
 from modelos import Jogador
-from store import trancar_sala, esquecer_sala
+from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
 from socketio.manager import Manager as GerenciadorSocketIOBase
 import functools
 import http.client
 import os
+import socketio as pacote_socketio
 import store
 import ia
 import tema
@@ -69,6 +70,39 @@ class GerenciadorThreadSeguro(GerenciadorSocketIOBase):
             return super().basic_close_room(room, namespace)
 
 
+class GerenciadorRedisSeguro(pacote_socketio.RedisManager):
+    """
+    Fase 25: mesma correção de corrida do GerenciadorThreadSeguro aplicada ao
+    RedisManager (pub/sub). O PubSubManager herda do Manager, então as 5
+    mutações do registro de rooms continuam sendo serializadas pelo RLock —
+    agora também entre o handler do request e a thread de listener da fila.
+    """
+
+    def __init__(self, url, channel="dadinho", redis_options=None):
+        super().__init__(url=url, channel=channel, redis_options=redis_options)
+        self._trava_registro = threading.RLock()
+
+    def connect(self, eio_sid, namespace):
+        with self._trava_registro:
+            return super().connect(eio_sid, namespace)
+
+    def basic_enter_room(self, sid, namespace, room, eio_sid=None):
+        with self._trava_registro:
+            return super().basic_enter_room(sid, namespace, room, eio_sid=eio_sid)
+
+    def basic_leave_room(self, sid, namespace, room):
+        with self._trava_registro:
+            return super().basic_leave_room(sid, namespace, room)
+
+    def basic_disconnect(self, sid, namespace, **kwargs):
+        with self._trava_registro:
+            return super().basic_disconnect(sid, namespace, **kwargs)
+
+    def basic_close_room(self, room, namespace):
+        with self._trava_registro:
+            return super().basic_close_room(room, namespace)
+
+
 # Transporte e armazenamento ajustáveis por ambiente (ver Fase 2 do todo.md).
 async_mode = os.environ.get("DADINHO_ASYNC_MODE", "threading").strip() or "threading"
 # A Vercel passou a suportar WebSocket nativamente (beta, jun/2026). O WS fixa a
@@ -79,10 +113,20 @@ async_mode = os.environ.get("DADINHO_ASYNC_MODE", "threading").strip() or "threa
 padrao_permitir_websocket = "true"
 permitir_websocket = os.environ.get("DADINHO_PERMITIR_WEBSOCKET", padrao_permitir_websocket).strip().lower() \
     not in ("0", "false", "nao", "no")
+# Fase 25: message queue opt-in por env. Com DADINHO_MESSAGE_QUEUE (URL
+# rediss:// do Upstash) os emits alcançam clientes de qualquer instância via
+# pub/sub; sem a env, mantém o GerenciadorThreadSeguro atual (regressão zero).
+url_mq = os.environ.get("DADINHO_MESSAGE_QUEUE", "").strip()
+if url_mq:
+    opcoes_redis = {"ssl_cert_reqs": "required"} if url_mq.startswith("rediss://") else {}
+    gerenciador = GerenciadorRedisSeguro(url_mq, channel="dadinho",
+                                         redis_options=opcoes_redis)
+else:
+    gerenciador = GerenciadorThreadSeguro()
 socketio = SocketIO(
     app,
     async_mode=async_mode,
-    client_manager=GerenciadorThreadSeguro(),
+    client_manager=gerenciador,
     allow_upgrades=permitir_websocket,
     ping_interval=15,
     ping_timeout=20,
@@ -271,6 +315,8 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
       de confirmação — conferência/vitória são idempotentes e espaçados pelo
       fluxo do jogo, e um drop silencioso pelo cooldown travaria a partida);
     - A4: lock por sala no processo, cobrindo todo o read-modify-write;
+    - Fase 24: lock distribuído por sala (Upstash) por dentro do local —
+      serializa a mutação ENTRE instâncias (pré-requisito da message queue);
     - V3: payload malformado aborta silenciosamente (nunca exceção no evento).
     """
     def decorator(func):
@@ -284,8 +330,10 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                 if sala_id is None:
                     return func(*args, **kwargs)
                 with trancar_sala(sala_id):
-                    return func(*args, **kwargs)
+                    with trancar_sala_distribuida(sala_id):
+                        return func(*args, **kwargs)
             except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError,
+                    store.TravaIndisponivel,
                     # Fase B: falhas de rede/IO do store distribuído (Upstash) também
                     # abortam silenciosamente — sem elas, um blip de rede estoura o
                     # handler, loga traceback e perde o estado do read-modify-write.
@@ -403,65 +451,72 @@ def handle_connect():
              to=client_id)
         return
     with trancar_sala(sala_id):
-        lobby = obter_sala(sala_id)
-        join_room(lobby.sala_room(), sid=client_id)
+        try:
+            with trancar_sala_distribuida(sala_id):
+                lobby = obter_sala(sala_id)
+                join_room(lobby.sala_room(), sid=client_id)
 
-        jogador = lobby.buscar_jogador_pelo_client_id(client_id)
-        # Fase D2 (refresh): quem conecta com `tem_chave=1` (chave guardada no
-        # sessionStorage) está prestes a retomar a identidade pela primeira
-        # mensagem (`retomar_identidade`). NO SNAPSHOT imediato do placeholder:
-        # ele piscaria como ESPECTADOR (a partida está em andamento) e, na tela
-        # de conferência (3), o evento `espectador` esconderia o botão "Ok" sem
-        # que o snapshot real o reexibisse — a rodada travava em "Aguardando
-        # você...". O snapshot sai na retomada (ou, se a chave for stale, no
-        # `retomar_negado`).
-        deferir_snapshot = jogador is None and request.args.get('tem_chave', '') == '1'
-        if jogador is None:
-            # Fase D: a `chave_secreta` não trafega mais na query string do
-            # handshake (vazava em logs de acesso/histórico). Aqui cria-se um
-            # Jogador "placeholder"; a identidade real é retomada logo depois
-            # pelo primeiro evento (`retomar_identidade`), quando o cliente
-            # envia a chave guardada no sessionStorage. `tem_chave` é apenas um
-            # sinal booleano (não-secreto) para o servidor não barrar quem pode
-            # estar retomando identidade (sala cheia/GC) — o placeholder é
-            # transitório.
-            tem_chave = request.args.get('tem_chave', '') == '1'
-            if not tem_chave:
-                if (lobby.jogadores or lobby.espectadores) and _gc_sala(lobby):
-                    lobby = obter_sala(sala_id)
-            if not tem_chave and lobby.status == 'jogando':
-                # Fase 15: entrou no meio da partida (pela busca) — vira
-                # espectador, sem ocupar vaga nem contar como jogador.
-                if len(lobby.espectadores) >= MAX_ESPECTADORES:
-                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                    leave_room(lobby.sala_room(), sid=client_id)
-                    return
-            elif not tem_chave and lobby.status != 'jogando':
-                # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
-                if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
-                    emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
-                    leave_room(lobby.sala_room(), sid=client_id)
-                    return
-            master = False if lobby.verificar_jogador_master() else True
-            jogador = Jogador(client_id=client_id, master=master)
-            jogador.lobby_atual = lobby
-            if lobby.status == 'jogando':
-                lobby.espectadores.append(jogador)
-            else:
-                lobby.adicionar_jogador(jogador)
+                jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+                # Fase D2 (refresh): quem conecta com `tem_chave=1` (chave guardada no
+                # sessionStorage) está prestes a retomar a identidade pela primeira
+                # mensagem (`retomar_identidade`). NO SNAPSHOT imediato do placeholder:
+                # ele piscaria como ESPECTADOR (a partida está em andamento) e, na tela
+                # de conferência (3), o evento `espectador` esconderia o botão "Ok" sem
+                # que o snapshot real o reexibisse — a rodada travava em "Aguardando
+                # você...". O snapshot sai na retomada (ou, se a chave for stale, no
+                # `retomar_negado`).
+                deferir_snapshot = jogador is None and request.args.get('tem_chave', '') == '1'
+                if jogador is None:
+                    # Fase D: a `chave_secreta` não trafega mais na query string do
+                    # handshake (vazava em logs de acesso/histórico). Aqui cria-se um
+                    # Jogador "placeholder"; a identidade real é retomada logo depois
+                    # pelo primeiro evento (`retomar_identidade`), quando o cliente
+                    # envia a chave guardada no sessionStorage. `tem_chave` é apenas um
+                    # sinal booleano (não-secreto) para o servidor não barrar quem pode
+                    # estar retomando identidade (sala cheia/GC) — o placeholder é
+                    # transitório.
+                    tem_chave = request.args.get('tem_chave', '') == '1'
+                    if not tem_chave:
+                        if (lobby.jogadores or lobby.espectadores) and _gc_sala(lobby):
+                            lobby = obter_sala(sala_id)
+                    if not tem_chave and lobby.status == 'jogando':
+                        # Fase 15: entrou no meio da partida (pela busca) — vira
+                        # espectador, sem ocupar vaga nem contar como jogador.
+                        if len(lobby.espectadores) >= MAX_ESPECTADORES:
+                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                            leave_room(lobby.sala_room(), sid=client_id)
+                            return
+                    elif not tem_chave and lobby.status != 'jogando':
+                        # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
+                        if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
+                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                            leave_room(lobby.sala_room(), sid=client_id)
+                            return
+                    master = False if lobby.verificar_jogador_master() else True
+                    jogador = Jogador(client_id=client_id, master=master)
+                    jogador.lobby_atual = lobby
+                    if lobby.status == 'jogando':
+                        lobby.espectadores.append(jogador)
+                    else:
+                        lobby.adicionar_jogador(jogador)
 
-        registrar_cliente(client_id, sala_id)
+                registrar_cliente(client_id, sala_id)
 
-        emit("connect_start",
-             {"is_master": jogador.master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id,
-              'username': jogador.username})
-        atualizar_lista_usuarios(lobby)
-        if not deferir_snapshot:
-            enviar_snapshot_sala(lobby, jogador)
-        # Fase 11: se a partida parou na vez de uma IA (ex.: troca de instância),
-        # o connect destrava o fluxo.
-        if ia.processar(lobby):
-            salvar_sala(lobby)
+                emit("connect_start",
+                     {"is_master": jogador.master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id,
+                      'username': jogador.username})
+                atualizar_lista_usuarios(lobby)
+                if not deferir_snapshot:
+                    enviar_snapshot_sala(lobby, jogador)
+                # Fase 11: se a partida parou na vez de uma IA (ex.: troca de instância),
+                # o connect destrava o fluxo.
+                if ia.processar(lobby):
+                    salvar_sala(lobby)
+        except store.TravaIndisponivel:
+            # Lock distribuído ocupado/indisponível: aborta o connect. O cliente
+            # reconecta com backoff e o heartbeat re-sincroniza da mesma forma que
+            # hoje em dia com um blip de rede.
+            return
 
 
 @socketio.on('retomar_identidade')
@@ -549,47 +604,54 @@ def handle_disconnect():
         return
     sala_esvaziou = False
     with trancar_sala(sala_id):
-        lobby = store.carregar_sala(sala_id)
-        desregistrar_cliente(client_id, sala_id)
-        if lobby is None:
-            return
-        jogador = lobby.buscar_jogador_pelo_client_id(client_id)
-        if jogador is None:
-            return
-        leave_room(lobby.sala_room(), sid=client_id)
+        try:
+            with trancar_sala_distribuida(sala_id):
+                lobby = store.carregar_sala(sala_id)
+                desregistrar_cliente(client_id, sala_id)
+                if lobby is None:
+                    return
+                jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+                if jogador is None:
+                    return
+                leave_room(lobby.sala_room(), sid=client_id)
 
-        # Fase 15: espectador não é jogador — sai na hora, sem janela de graça.
-        if jogador in lobby.espectadores:
-            lobby.espectadores.remove(jogador)
-        elif jogador.partida_atual is not None:
-            # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
-            # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
-            # voltar via chave_secreta (retomar_identidade limpa o marcador, Fase D).
-            # Fase 23: a janela vale mesmo sem outro HUMANO ativo — antes, numa
-            # partida só com IAs o último humano era removido na hora e a sala
-            # inteira apagada junto; um blip de conexão (tab em segundo plano,
-            # reciclagem da função na Vercel) perdia a partida inteira. Sem outro
-            # humano o expurgo fica a cargo de um GC posterior (novo humano no
-            # connect, `verificar_desconectados`, ou o TTL do store).
-            jogador.desconectado_em = datetime.now()
-            emit('jogador_desconectado',
-                 {'nome': jogador.username or '', 'grace': GRACE_RECONEXAO_SEGUNDOS},
-                 to=lobby.sala_room())
-        else:
-            _remover_jogador_da_sala(lobby, jogador)
+                # Fase 15: espectador não é jogador — sai na hora, sem janela de graça.
+                if jogador in lobby.espectadores:
+                    lobby.espectadores.remove(jogador)
+                elif jogador.partida_atual is not None:
+                    # Fase 9: janela de reconexão (grace). Quem cai no meio de uma partida
+                    # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
+                    # voltar via chave_secreta (retomar_identidade limpa o marcador, Fase D).
+                    # Fase 23: a janela vale mesmo sem outro HUMANO ativo — antes, numa
+                    # partida só com IAs o último humano era removido na hora e a sala
+                    # inteira apagada junto; um blip de conexão (tab em segundo plano,
+                    # reciclagem da função na Vercel) perdia a partida inteira. Sem outro
+                    # humano o expurgo fica a cargo de um GC posterior (novo humano no
+                    # connect, `verificar_desconectados`, ou o TTL do store).
+                    jogador.desconectado_em = datetime.now()
+                    emit('jogador_desconectado',
+                         {'nome': jogador.username or '', 'grace': GRACE_RECONEXAO_SEGUNDOS},
+                         to=lobby.sala_room())
+                else:
+                    _remover_jogador_da_sala(lobby, jogador)
 
-        if lobby.contar_jogadores() > 0:
-            lobby.definir_master()
-        # Fase 11/15/23: a sala só é fechada quando não resta humano conectado
-        # NEM na janela de reconexão — o último humano de uma partida de IAs pode
-        # voltar. Sem ninguém conectado/na janela não há evento futuro para o
-        # expurgo do serverless, então fechar aqui evita salas vazias no store.
-        if _tem_humano_recente(lobby):
-            # S6: atualizar_lista_usuarios já persiste a sala (e o resumo da busca).
-            atualizar_lista_usuarios(lobby)
-        else:
-            remover_sala(lobby.sala_id)
-            sala_esvaziou = True
+                if lobby.contar_jogadores() > 0:
+                    lobby.definir_master()
+                # Fase 11/15/23: a sala só é fechada quando não resta humano conectado
+                # NEM na janela de reconexão — o último humano de uma partida de IAs pode
+                # voltar. Sem ninguém conectado/na janela não há evento futuro para o
+                # expurgo do serverless, então fechar aqui evita salas vazias no store.
+                if _tem_humano_recente(lobby):
+                    # S6: atualizar_lista_usuarios já persiste a sala (e o resumo da busca).
+                    atualizar_lista_usuarios(lobby)
+                else:
+                    remover_sala(lobby.sala_id)
+                    sala_esvaziou = True
+        except store.TravaIndisponivel:
+            # Lock distribuído indisponível no disconnect: aborta silenciosamente —
+            # o ID do jogador continua indexado (TTL limpa) e a limpeza segue na
+            # próxima batida ou no GC, mesmo comportamento de hoje com blip de rede.
+            return
     # Depois de soltar o lock (evita corrida com um connect novo da mesma sala).
     if sala_esvaziou:
         esquecer_sala(sala_id)

@@ -8,7 +8,7 @@
     },
     "docs": {
       "path": "docs",
-      "description": "Referências do projeto: docs/arquitetura.md, docs/fluxo.md (mapa de eventos) e docs/verificacao.md (verificação e deploy)."
+      "description": "Referências do projeto: docs/arquitetura.md, docs/fluxo.md (mapa de eventos), docs/verificacao.md (verificação e deploy) e docs/plano-cross-instance.md (Fases 24–26: lock distribuído + message queue)."
     }
   }
 }
