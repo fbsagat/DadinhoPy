@@ -497,14 +497,20 @@ def handle_connect():
                     if not tem_chave:
                         if (lobby.jogadores or lobby.espectadores) and _gc_sala(lobby):
                             lobby = obter_sala(sala_id)
-                    if not tem_chave and lobby.status == 'jogando':
+                    # Fase 29 (H3): o cap vale para o placeholder também. Antes,
+                    # `tem_chave=1` (apenas um sinal booleano de possível retomada)
+                    # pulava as checagens de limite e criava jogador/espectador sem
+                    # respeitar `max_jogadores`/`MAX_ESPECTADORES` (e sem GC). A
+                    # retomada da chave só reaproveita se a sala ainda comportar;
+                    # senão `sala_cheia`.
+                    if lobby.status == 'jogando':
                         # Fase 15: entrou no meio da partida (pela busca) — vira
                         # espectador, sem ocupar vaga nem contar como jogador.
                         if len(lobby.espectadores) >= MAX_ESPECTADORES:
                             emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
                             leave_room(lobby.sala_room(), sid=client_id)
                             return
-                    elif not tem_chave and lobby.status != 'jogando':
+                    else:
                         # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
                         if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
                             emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)

@@ -1272,6 +1272,13 @@ class Rodada:
             emit('jogada_invalida', {'txtchave': 'msg.jogada.fora_intervalo'},
                  to=jogador.client_id)
             return
+        # Fase 29 (H2): aposta acima do total teórico de dados na mesa é impossível
+        # de responder (o desafiado não consegue subir) — clampeia no máximo. A
+        # regra do coringa (dobro para sair dos ases) fica "à parte" e segue sendo
+        # validada no turno normalmente.
+        total_dados = len(self.todos_os_dados) or sum(j.dados_qtd for j in self.jogadores)
+        if total_dados and dado_qtd > total_dados:
+            dado_qtd = total_dados
         turno = Turno(da_rodada=self, jogador=jogador, dado=dado, dado_qtd=dado_qtd, turno_numero=turno_numero)
         self.turnos.append(turno)
         jogador.turno_atual = turno

@@ -1746,6 +1746,91 @@ def teste_h4_lock_nao_reconfigura_na_secao_critica():
     _ok("H4 (lock não é reconfigurado dentro da seção crítica)")
 
 
+# --- Fase 29: regras de jogo (aposta irrespondível e cap do placeholder) -----
+def teste_h2_aposta_irrespondivel_clampeada():
+    # Fase 29 (H2): aposta acima do total teórico de dados da mesa é impossível
+    # de responder (o desafiado não consegue subir) — o servidor clampeia no
+    # máximo em vez de aceitar uma jogada que trava o turno.
+    _limpar()
+    clis, lobby = _conectar_trio(1)  # 3 jogadores, 1 dado cada = 3 dados na mesa
+    partida = lobby.partidas[-1]
+    rodada = partida.rodadas[-1]
+    vez = rodada.vez_atual
+    total = sum(j.dados_qtd for j in partida.jogadores)
+    assert total == 3
+    cli_vez, chave_vez = clis[vez.username]
+    cli_vez.emit("apostar", {"dados": {"chave": chave_vez, "dado": 6, "quantidade": 100}})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert len(rodada.turnos) == 1, "aposta clampeada deve ser aceita (turno criado)"
+    assert rodada.turnos[0].dado_qtd == total, \
+        f"quantidade deve ser clampeada no total: {rodada.turnos[0].dado_qtd} != {total}"
+    assert rodada.turnos[0].dado_face == 6, "a face da aposta deve ser preservada"
+
+    # Aposta no máximo não pode subir — o próximo é forçado a desconfiar e a
+    # conferência fecha normalmente (o fluxo não trava).
+    proximo = rodada.vez_atual
+    assert proximo is not vez, "a vez deve ter avançado para o próximo"
+    clis[proximo.username][0].emit(
+        "desconfiar", {"dados": {"chave": clis[proximo.username][1]}})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 3, f"conferência deve fechar após desconfiar, página={lobby.pagina}"
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("H2 (aposta acima do total é clampeada no máximo)")
+
+
+def teste_h3_cap_placeholder_nao_burla_limite():
+    # Fase 29 (H3): `tem_chave=1` é só um sinal booleano — não pode burlar o
+    # limite da sala. O cap vale para o placeholder também.
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"max_jogadores": 3}})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c3, cs3, _ = _conectar()
+    c3.emit("apelido", {"apelido_msg": "Caio"})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 3, "pré-condição: sala de espera cheia (3/3)"
+
+    c4 = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    eventos = c4.get_received()
+    assert _achar_evento(eventos, "sala_cheia") is not None, \
+        "tem_chave=1 não pode criar placeholder em sala de espera cheia"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 3, "placeholder não pode estourar max_jogadores"
+    assert not lobby.espectadores, "placeholder não pode vazar para espectadores na espera"
+    c4.disconnect()
+    _desconectar_todos({"Ana": (c1, cs1), "Bia": (c2, cs2), "Caio": (c3, cs3)})
+    _limpar()
+
+    # Partida em andamento: MAX_ESPECTADORES também vale para tem_chave=1.
+    clis, lobby = _conectar_trio(1)
+    limite = modulo_app.MAX_ESPECTADORES
+    extras = []
+    for _ in range(limite):
+        c = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c.get_received()
+        extras.append(c)
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.espectadores) == limite, \
+        f"placeholders até o cap: {len(lobby.espectadores)} != {limite}"
+    c_extra = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    eventos = c_extra.get_received()
+    assert _achar_evento(eventos, "sala_cheia") is not None, \
+        "espectador acima de MAX_ESPECTADORES deve levar sala_cheia"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.espectadores) == limite, "não pode estourar MAX_ESPECTADORES"
+    c_extra.disconnect()
+    for c in extras:
+        c.disconnect()
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("H3 (cap vale para o placeholder com tem_chave=1)")
+
+
 # --- Expulsão de jogador (Fase 19) -----------------------------------------
 def teste_expulsar_bot():
     _limpar()
@@ -2222,11 +2307,15 @@ def verificar_integracao():
     testes_fase25 = [
         ("mq-wiring", teste_mq_wiring),
     ]
+    testes_fase29 = [
+        ("H2-aposta-max", teste_h2_aposta_irrespondivel_clampeada),
+        ("H3-cap-placeholder", teste_h3_cap_placeholder_nao_burla_limite),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
-                           + testes_fase23 + testes_fase25):
+                           + testes_fase23 + testes_fase25 + testes_fase29):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

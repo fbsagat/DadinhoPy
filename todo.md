@@ -22,7 +22,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 26** — Otimizações pós-métricas (`ignore_queue`, detector CAS). 📄 `docs/plano-cross-instance.md` (opcional)
 - **Fase 27** — Infra: ambiente, segredos e deploy (`.env.example`, fallback do store, `maxDuration`, cache de estáticos). ✅ concluída
 - **Fase 28** — Infra: robustez do store e locks (blob corrompido, `Partida` vazia, `esquecer_sala`). ✅ concluída
-- **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ⬜ pendente
+- **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ✅ concluída
 - **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ⬜ pendente
 - **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ⬜ pendente
 
@@ -343,14 +343,14 @@ Objetivo: estado corrompido não vira 500 e o lock por sala não tem janela de c
 
 Verificação (local, `.venv`): `python verificar.py` — novos testes `H1-blob-corrompido` (blob inválido e árvore inválida devolvem `None`), `H1b-partida-vazia` (construtor com lista vazia sem `IndexError`, seed sem `ZeroDivisionError`, `de_dict` com jogador fantasma) e `H4-lock-secao-critica` (thread A dentro do `with` enquanto a sala esvazia → thread B **não** adquire lock distinto antes de A sair, e a trava some após o último holder); regressão zero nas Fases 6/7/15-25. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
 
-## Fase 29 — Correções de regra de jogo
+## Fase 29 — Correções de regra de jogo ✅ concluída
 
 Objetivo: fechar a aposta irrespondível e o bypass do limite de jogadores pelo placeholder.
 
-- [ ] **H2 — Aposta irrespondível** (`modelos.py:1246-1269`): `construir_turno` valida `dado` 1–6 e `quantidade >= 1`, mas não limita `quantidade` ao total teórico de dados na mesa — apostar acima da soma de dados torna o desafiado incapaz de subir a aposta (vitória garantida). Clamp flat-out no máximo (soma dos dados vivos, coringa à parte).
-- [ ] **H3 — Cap de jogadores burlado por `tem_chave=1`** (`app.py:478-494`): as checagens `MAX_ESPECTADORES`/`max_jogadores` só rodam com `not tem_chave`; um connect com `tem_chave=1` cria placeholder sem respeitar o limite da sala (e sem GC). Aplicar o cap ao placeholder também — a retomada da chave só reaproveita se a sala ainda comportar; senão `sala_cheia`.
+- [x] **H2 — Aposta irrespondível** (`modelos.py:1246-1269`): `construir_turno` valida `dado` 1–6 e `quantidade >= 1`, mas não limitava `quantidade` ao total teórico de dados na mesa — apostar acima da soma tornava o desafiado incapaz de subir a aposta. Agora o servidor **clampeia** `dado_qtd` no total de dados vivos (`len(rodada.todos_os_dados)` com fallback na soma dos `dados_qtd`), mantendo a face; a regra do coringa (dobro para sair dos ases) fica à parte e segue na validação normal do turno. A IA não é afetada (`gerar_apostas_validas` já gera `quantidade` em `1..total`).
+- [x] **H3 — Cap de jogadores burlado por `tem_chave=1`** (`app.py:478-494`): as checagens `MAX_ESPECTADORES`/`max_jogadores` só rodavam com `not tem_chave`; um connect com `tem_chave=1` (sinal booleano de possível retomada) criava placeholder sem respeitar o limite da sala (e sem GC). O cap agora vale para o placeholder também: sala `jogando` → cap em `MAX_ESPECTADORES`; sala de espera → cap em `max_jogadores`; senão `sala_cheia` (o cliente sai da room e o placeholder não é registrado). A retomada da chave só reaproveita se a sala ainda comportar.
 
-Verificação (local, `.venv`): integração `flask_socketio.test_client` — aposta acima do total é rejeitada/clampeada; N connects com `tem_chave=1` numa sala lotada não estouram `max_jogadores`/`MAX_ESPECTADORES`.
+Verificação (local, `.venv`): `python verificar.py` — novos testes `H2-aposta-max` (aposta "100" com 3 dados vira 3 e o turno é criado; o próximo é forçado a desconfiar e a conferência fecha) e `H3-cap-placeholder` (4º connect com `tem_chave=1` numa espera 3/3 leva `sala_cheia`; 21º espectador com `tem_chave=1` estoura `MAX_ESPECTADORES` e leva `sala_cheia`); regressão zero nas demais fases. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
 
 ## Fase 30 — Frontend: fila de alertas e seleção de dado
 
