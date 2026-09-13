@@ -54,6 +54,11 @@
         <div id="narrador_pensando" class="narrador-pensando" style="display: none;"></div>
     </div>
 
+    <!-- Fase 21: contador regressivo da jogada automática (mostrado ao jogador
+         da vez / na rolagem). O tempo vem do servidor via `tempo_max`. -->
+    <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
+        style="z-index: 60; display: none; font-size: 1.1rem;"></div>
+
     <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 24vh;">
         <img id="titulo_img" src="../static/imagens/titulo.png" alt="titulo_dadinho" width="670px" height="400px"
             style="display: block; width: 34%; height: auto;">
@@ -66,27 +71,35 @@
         <!-- TELA JOGADORES INICIO (0) / Sala de Espera -->
         <div id="tela_jogadores" class="tela_jogadores container-fluid text-center">
 
-            <div class="mb-2">
-                <small class="text-light d-block mb-2"><span data-i18n="ui.sala.atual">Sala atual:</span> <span
-                        id="sala_atual" class="badge text-bg-info">#padrao</span>
-                </small>
-                <small id="status_conexao" class="text-success d-block mb-2"></small>
+            <!-- Fase 18: home sem sala — não cria partida automaticamente. O
+                 jogador escolhe criar uma sala ou buscar partidas existentes. -->
+            <div id="painel_home" class="mb-4" style="display: none;">
+                <p class="text-light mb-3 fs-5" data-i18n="ui.sala.home"></p>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
-                    <input type="text" id="input_sala" class="form-control text-center" style="width: 160px;"
-                        maxlength="24" data-i18n-placeholder="ui.sala.codigo_placeholder" placeholder="Código da sala"
-                        onkeydown="verificar_enter(event, 'sala')">
-                    <button id="bot_sala_entrar" class="btn btn-outline-info" data-i18n="ui.sala.entrar"
-                        onclick="entrar_sala()">Entrar</button>
-                    <button id="bot_sala_criar" class="btn btn-info" data-i18n="ui.sala.criar" onclick="criar_sala()">Criar
+                    <button class="btn btn-info btn-lg" data-i18n="ui.sala.criar" onclick="criar_sala()">Criar
                         sala</button>
-                    <button id="bot_buscar_partidas" class="btn btn-outline-light" data-i18n="ui.sala.buscar"
+                    <button class="btn btn-outline-light btn-lg" data-i18n="ui.sala.buscar"
                         onclick="abrir_busca()">🔍 Buscar partidas</button>
-                    <button class="btn btn-outline-light" data-i18n="ui.sala.copiar" onclick="copiar_link_sala()">Copiar
-                        link</button>
                 </div>
             </div>
 
-            <div class="mb-3">
+            <div id="painel_sala">
+                <div class="mb-2">
+                    <small class="text-light d-block mb-2"><span data-i18n="ui.sala.atual">Sala atual:</span> <span
+                            id="sala_atual" class="badge text-bg-info">#padrao</span>
+                    </small>
+                    <small id="status_conexao" class="text-success d-block mb-2"></small>
+                    <div class="d-flex justify-content-center gap-2 flex-wrap">
+                        <button id="bot_sala_criar" class="btn btn-info" data-i18n="ui.sala.criar"
+                            onclick="criar_sala()">Criar sala</button>
+                        <button id="bot_buscar_partidas" class="btn btn-outline-light" data-i18n="ui.sala.buscar"
+                            onclick="abrir_busca()">🔍 Buscar partidas</button>
+                        <button class="btn btn-outline-light" data-i18n="ui.sala.copiar"
+                            onclick="copiar_link_sala()">Copiar link</button>
+                    </div>
+                </div>
+
+                <div class="mb-3">
                 <h3 id="nome_partida" class="text-info mb-1" data-i18n="ui.partida.titulo">Partida</h3>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
                     <span id="status_partida" class="badge text-bg-secondary"
@@ -183,6 +196,19 @@
                                 <label class="form-check-label" for="config_verificacao"
                                     data-i18n="ui.config.verificacao">Verificar dados (provably fair)</label>
                             </div>
+                            <div class="row g-2 mb-2 mt-1">
+                                <div class="col-12">
+                                    <label class="form-label small d-block" for="config_tempo"
+                                        data-i18n="ui.config.tempo">Tempo máximo de jogada</label>
+                                    <select id="config_tempo" class="form-select form-select-sm text-center mx-auto">
+                                        <option value="0" data-i18n="ui.config.tempo.desligado">Desligado</option>
+                                        <option value="15">15s</option>
+                                        <option value="30" selected>30s</option>
+                                        <option value="60">60s</option>
+                                        <option value="120">120s</option>
+                                    </select>
+                                </div>
+                            </div>
                             <small class="text-muted d-block mt-2" data-i18n="ui.config.nota">Somente o master edita as
                                 configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
                         </div>
@@ -228,6 +254,7 @@
                 </div>
             </div>
 
+            </div>
         </div>
         <!-- TELA JOGADORES FIM -->
 
@@ -440,6 +467,8 @@
             <button id="bot_confe_fim" class="btn btn-primary mt-2" data-i18n="ui.ok" onclick="conferencia_final()"
                 style="width: 80px; display: block;">Ok</button>
         </div>
+        <div id="status_conferencia" class="mt-2 fs-6 text-white text-wrap mx-auto"
+            style="max-width: 40rem;"></div>
     </div>
     <!-- TELA CONFERENCIA FIM -->
     <!-- TELA VITORIA INICIO (4) -->
@@ -453,6 +482,7 @@
                 style="z-index: 10; display: none;">Comemorar!</button>
             <button id="bot_vencedor_fim" class="btn btn-primary mt-3" data-i18n="ui.ok" onclick="vencedor_final()"
                 style="width: 80px; display: block;">Ok</button>
+            <div id="status_vitoria" class="mt-2 fs-6 text-white text-wrap" style="max-width: 40rem;"></div>
         </div>
 
         <div id="painel_auditoria"
@@ -517,12 +547,12 @@
                                     maior</strong>.</li>
                         </ul>
                     </div>
-                    <div class="tutorial-regra">
+<div class="tutorial-regra">
                         <strong data-i18n="ui.tut.turnos.regra2.strong">Coringa (face 1):</strong>
                         <span data-i18n-html="ui.tut.turnos.regra2.p">quando ativo, o 1 vale como <strong>qualquer
                                 número</strong>.</span>
                         <ul class="mb-0">
-                            <li data-i18n="ui.tut.turnos.regra2.li1">Apostar coringa exige quantidade maior que o
+                            <li data-i18n-html="ui.tut.turnos.regra2.li1">Apostar coringa exige quantidade maior que o
                                 coringa atual.</li>
                             <li data-i18n-html="ui.tut.turnos.regra2.li2">Voltar de coringa para um número exige
                                 <strong>o dobro</strong> da quantidade.</li>
@@ -530,6 +560,8 @@
                                 é <strong>cancelado</strong> na rodada.</li>
                         </ul>
                     </div>
+                    <p class="mb-0 mt-2 small" data-i18n="ui.tut.turnos.tempo">⏱ Se você demorar na sua jogada, o jogo
+                        joga automaticamente por você (tempo definido pelo master na sala de espera).</p>
                 </section>
 
                 <section>
@@ -588,8 +620,13 @@
             <div id="alerta_icone" class="alerta-icone">⚠️</div>
             <h4 id="alerta_titulo" class="alerta-titulo" data-i18n="alerta.aviso">Atenção</h4>
             <p id="alerta_mensagem" class="alerta-mensagem"></p>
-            <button id="alerta_ok" class="btn btn-info" type="button" data-i18n="ui.alerta.ok"
-                onclick="fechar_alerta()">Ok</button>
+            <div class="alerta-botoes">
+                <button id="alerta_cancelar" class="btn btn-secondary" type="button"
+                    data-i18n="ui.alerta.cancelar" onclick="fechar_alerta(false)"
+                    style="display: none">Cancel</button>
+                <button id="alerta_ok" class="btn btn-info" type="button" data-i18n="ui.alerta.ok"
+                    onclick="fechar_alerta(true)">Ok</button>
+            </div>
         </div>
     </div>
     <!-- MODAL DE ALERTA FIM -->

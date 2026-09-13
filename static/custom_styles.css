@@ -296,7 +296,6 @@ canvas {
         font-size: 1rem;
     }
 
-    #input_sala,
     #apelido {
         width: 100% !important;
         max-width: 300px;
@@ -559,6 +558,13 @@ canvas {
     white-space: pre-line;
 }
 
+.alerta-botoes {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
 .alerta-modal .btn {
     min-width: 120px;
     margin-top: 4px;
@@ -580,6 +586,15 @@ canvas {
 
 .alerta-overlay[data-tipo="sucesso"] .alerta-titulo {
     color: #4ade80;
+}
+
+.alerta-overlay[data-tipo="confirmar"] .alerta-modal {
+    border-color: #ffc107;
+    box-shadow: 0 0 30px rgba(255, 193, 7, 0.5);
+}
+
+.alerta-overlay[data-tipo="confirmar"] .alerta-titulo {
+    color: #ffd54d;
 }
 
 /* ============================================================

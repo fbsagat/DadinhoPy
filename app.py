@@ -1,10 +1,11 @@
 from flask import Flask, Response, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
-                            atualizar_lista_usuarios, remover_sala, salvar_sala, validar_input,
-                            enviar_snapshot_sala, listar_resumos_partidas,
+                            atualizar_lista_usuarios, montar_payload_lista_usuarios, remover_sala,
+                            salvar_sala, validar_input, enviar_snapshot_sala, listar_resumos_partidas,
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
-                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO)
+                            gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO,
+                            emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem)
 from modelos import Jogador
 from store import trancar_sala, esquecer_sala
 from datetime import datetime
@@ -22,6 +23,10 @@ app.secret_key = os.environ.get("DADINHO_SECRET_KEY", "supersecretkey")
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
 COOLDOWN_ESCRITA = 0.5
 COOLDOWN_BUSCA = 2.0
+
+# Nível de IA usado na jogada automática de um humano atrasado (Fase 21): um
+# nível médio produz apostas razoáveis sem virar "assistente de jogo".
+AUTO_IA_NIVEL = 2
 
 
 class GerenciadorThreadSeguro(GerenciadorSocketIOBase):
@@ -153,6 +158,15 @@ def _remover_jogador_da_sala(lobby, jogador):
                 lobby.pagina = 2
                 mudar_pagina(2, sala=lobby.sala_id)
 
+    # Fase 22: a remoção muda quem ainda falta conferir/rolar — reapresenta o
+    # status (a partida pode ter avançado ou ter declarado um vencedor acima).
+    if lobby.pagina == 1:
+        emitir_status_rolagem(lobby)
+    elif lobby.pagina == 3:
+        emitir_status_conferencia(lobby)
+    elif lobby.pagina == 4:
+        emitir_status_vitoria(lobby)
+
 
 def _substituir_por_ia(lobby, jogador):
     """
@@ -170,6 +184,7 @@ def _substituir_por_ia(lobby, jogador):
         return False
     jogador.is_ia = True
     jogador.ia_nivel = int(lobby.config.get('ia_nivel_padrao', 2) or 2)
+    ia.sorteiar_personalidade(jogador)
     jogador.desconectado_em = None
     jogador.pronto = True
     emit('jogador_substituido_por_ia', {'nome': jogador.username or ''}, to=lobby.sala_room())
@@ -351,9 +366,12 @@ def handle_connect():
     client_id = request.sid
     sala_id = normalizar_sala(request.args.get('sala'))
     if sala_id == SALA_PADRAO:
-        codigo = gerar_codigo_sala()
-        if codigo:
-            emit('sala_criada', {'sala': codigo}, to=client_id)
+        # Fase 18: chegou sem código (ou com código inválido) — home, não cria
+        # sala automaticamente. O cliente fica conectado (o socket é necessário
+        # para `criar_sala` e `listar_partidas`), mas sem sala nem jogador até
+        # escolher criar uma sala ou entrar pela busca.
+        emit('connect_start', {'is_master': False, 'chave_secreta': '', 'sala': None},
+             to=client_id)
         return
     with trancar_sala(sala_id):
         lobby = obter_sala(sala_id)
@@ -559,7 +577,7 @@ def ficar_pronto(dados, lobby, jogador):
 
 
 @socketio.on('comprometer_seed')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar()
 def comprometer_seed(dados, lobby, jogador):
     """
@@ -567,6 +585,9 @@ def comprometer_seed(dados, lobby, jogador):
     envia apenas o compromisso SHA-256 do nonce dele (o nonce fica no cliente).
     O servidor publica o compromisso e, quando todos comprometeram, pede a
     revelação dos nonces.
+    `cooldown=None`: o commit é idempotente (o primeiro vale) e dispara em
+    rajada única no fluxo da espera — um drop silencioso pelo cooldown deixaria
+    o jogador de fora da seed (sem_reveal) sem como recuperar.
     """
     if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
         return
@@ -578,7 +599,7 @@ def comprometer_seed(dados, lobby, jogador):
 
 
 @socketio.on('revelar_seed')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar()
 def revelar_seed(dados, lobby, jogador):
     """
@@ -587,6 +608,11 @@ def revelar_seed(dados, lobby, jogador):
     revelação é transmitida à sala (pública) para que qualquer cliente recompute
     a seed e detecte substituição do nonce pelo servidor. A partida só libera
     quando todos revelam (ver `Lobby.pode_iniciar`).
+
+    `cooldown=None`: o `seed_revelar` chega logo após o compromisso (dentro da
+    janela do cooldown), e o cliente marca a revelação como enviada sem retry —
+    um drop silencioso deixaria `pode_iniciar` preso em "aguardando_revelacao"
+    para sempre, com todos prontos e o master sem conseguir iniciar.
     """
     if not lobby.config.get('verificacao_ativa') or lobby.status != 'espera':
         return
@@ -641,6 +667,39 @@ def remover_ia(dados, lobby, jogador):
         atualizar_lista_usuarios(lobby)
 
 
+@socketio.on('expulsar_jogador')
+@evento_mutavel
+@autenticar(exigir_master=True)
+def expulsar_jogador(dados, lobby, jogador):
+    """
+    O master expulsa um jogador (humano ou IA) da sala. Vale na sala de espera
+    e durante a partida: o expulso é removido do lobby (e da partida/rodada, se
+    estiver jogando) e, se for humano, perde a identidade na sala — sai da room,
+    perde o índice sid e recebe `expulso_da_sala` para voltar à home. A remoção
+    reusa o fluxo de desconexão (`_remover_jogador_da_sala`), então a vez, a
+    conferência e a vitória nunca ficam presas esperando o expulso.
+    """
+    alvo_id = dados.get('client_id', '')
+    if not isinstance(alvo_id, str) or not alvo_id:
+        return
+    alvo = lobby.buscar_jogador_pelo_client_id(alvo_id)
+    if alvo is None or alvo is jogador:
+        return
+    nome = alvo.username or 'Jogador'
+    if alvo in lobby.espectadores:
+        lobby.espectadores.remove(alvo)
+    else:
+        _remover_jogador_da_sala(lobby, alvo)
+    if not alvo.is_ia:
+        desregistrar_cliente(alvo_id, lobby.sala_id)
+        leave_room(lobby.sala_room(), sid=alvo_id)
+        emit('expulso_da_sala', {'sala': lobby.sala_id}, to=alvo_id)
+    lobby.definir_master()
+    emit('jogador_expulso', {'nome': nome}, to=lobby.sala_room())
+    ia.processar(lobby)
+    atualizar_lista_usuarios(lobby)
+
+
 @socketio.on('listar_partidas')
 @evento_leitura
 def listar_partidas(dados):
@@ -693,8 +752,19 @@ def heartbeat(dados, lobby, jogador):
     congelado e a sala fantasma aparecia como ativa por até o TTL do store.
     Também destrava a fila das IAs quando não resta evento humano (ex.: só
     sobraram bots), chamando `ia.processar` como os demais handlers mutáveis.
+
+    Fase 18/19 (Vercel): na sala de espera o heartbeat vira o canal de re-sync
+    entre instâncias. As rooms/emits do Socket.IO vivem em memória por instância,
+    então quem entrou/ficou pronto numa instância diferente não alcança o
+    broadcast do host; aqui o servidor devolve o snapshot atual do lobby (lido
+    do store compartilhado) direcionado ao cliente que bateu. O `visto_em` tem
+    um piso de 30s para o resumo não ser reescrito a cada batida curta (o
+    cliente acelera o heartbeat na espera) e estourar o free tier da Upstash.
     """
-    lobby.marcar_visto()
+    if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 30:
+        lobby.marcar_visto()
+    if lobby.status == 'espera':
+        emit("update_user_list", montar_payload_lista_usuarios(lobby), to=jogador.client_id)
     if ia.processar(lobby):
         salvar_sala(lobby)
     store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
@@ -714,6 +784,8 @@ def jogar_dados(dados, lobby, jogador):
     if jogador.joguei_dados:
         return
     jogador.joguei_dados = True
+    # Fase 22: mostra em tempo real quem já rolou e quem ainda falta.
+    emitir_status_rolagem(lobby)
     # Fase 10 (S4): escopo explícito — o resultado é só de quem rolou.
     emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
          to=jogador.client_id)
@@ -739,6 +811,93 @@ def joguei_dados(dados, lobby, jogador):
         lobby.pagina = 2
         mudar_pagina(2, sala=lobby.sala_id)
     ia.processar(lobby)
+    salvar_sala(lobby)
+
+
+@socketio.on('autojogar')
+@evento_mutavel(cooldown=None)
+@autenticar()
+def autojogar(dados, lobby, jogador):
+    """
+    Jogada automática por tempo máximo (Fase 21/22): o cliente inicia um contador
+    ao entrar na rolagem (página 1), quando recebe `meu_turno` (página 2) ou ao
+    abrir a conferência/vitória (páginas 3 e 4); ao expirar, dispara este evento
+    e o servidor joga pelo humano atrasado — rola os dados, decide uma
+    aposta/desconfiança válida com o motor da IA (`ia.decidir`/`ia.executar_acao`)
+    ou confirma o "Ok" da conferência/vitória, sem revelar dados de ninguém.
+
+    O servidor confere o tempo decorrido desde `rodada.inicio_rolagem_em`
+    (rolagem), `rodada.vez_em` (turno), `rodada.conferencia_em` (conferência) ou
+    `partida.vitoria_em` (vitória) antes de agir, então o evento não vira um
+    "auto-play instantâneo" que beneficiaria o jogador.
+
+    `cooldown=None`: o evento é idempotente (o servidor só age se for realmente
+    a vez do jogador e o tempo já tiver passado) e espaçado pelo fluxo — um drop
+    silencioso pelo cooldown deixaria a sala presa, que é o travamento que esta
+    funcionalidade existe para evitar.
+    """
+    tempo_max = int(lobby.config.get('tempo_max_jogada', 0) or 0)
+    if tempo_max <= 0:
+        return
+    agora = datetime.now()
+    if lobby.pagina == 1:
+        # Rolar os dados do atrasado (o avanço de página continua no fluxo do
+        # `joguei_dados`/`ia.processar`, como na jogada manual).
+        rodada = jogador.rodada_atual
+        if rodada is None or jogador not in rodada.jogadores or jogador.joguei_dados:
+            return
+        inicio = rodada.inicio_rolagem_em
+        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
+            return
+        jogador.joguei_dados = True
+        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+             to=jogador.client_id)
+        emitir_status_rolagem(lobby)
+        ia.processar(lobby)
+    elif lobby.pagina == 2:
+        rodada = jogador.rodada_atual
+        if rodada is None or rodada.vez_atual is not jogador:
+            return
+        vez_em = rodada.vez_em
+        if vez_em is not None and (agora - vez_em).total_seconds() < tempo_max:
+            return
+        acao = ia.decidir(jogador, rodada, AUTO_IA_NIVEL)
+        ia.executar_acao(jogador, rodada, acao)
+        ia.processar(lobby)
+    elif lobby.pagina == 3:
+        # Fase 22: auto-confirma o "Ok" da conferência para o humano atrasado
+        # (jogador away from keyboard não trava mais a tela). O fluxo de avanço
+        # da rodada fica com o `ia.processar`, como na confirmação manual.
+        rodada = jogador.rodada_atual
+        if rodada is None or jogador not in rodada.jogadores or jogador.confirmou_rodada:
+            return
+        inicio = rodada.conferencia_em
+        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
+            return
+        jogador.confirmou_rodada = True
+        rodada.conferiram += 1
+        emitir_status_conferencia(lobby)
+        if rodada.conferiram >= len(rodada.jogadores):
+            jogador.partida_atual.construir_rodada()
+        ia.processar(lobby)
+    elif lobby.pagina == 4:
+        # Fase 22: idem na tela de vitória — confirma o reset pelo atrasado.
+        partida = jogador.partida_atual
+        if jogador not in lobby.jogadores or jogador.confirmou_vencedor:
+            return
+        inicio = partida.vitoria_em if partida else None
+        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
+            return
+        jogador.confirmou_vencedor = True
+        lobby.conferiram_vencedor += 1
+        emitir_status_vitoria(lobby)
+        if lobby.conferiram_vencedor >= len(lobby.jogadores):
+            lobby.resetar_para_lobby()
+            atualizar_lista_usuarios(lobby)
+            mudar_pagina(0, sala=lobby.sala_id)
+        ia.processar(lobby)
+    else:
+        return
     salvar_sala(lobby)
 
 
@@ -805,6 +964,8 @@ def conferencia_final(dados, lobby, jogador):
     rodada = jogador.rodada_atual
     jogador.confirmou_rodada = True
     rodada.conferiram += 1
+    # Fase 22: mostra em tempo real quem já clicou no "Ok" e quem falta.
+    emitir_status_conferencia(lobby)
     # `>=` (não `==`): se um jogador foi removido da rodada no meio da conferência,
     # o contador pode já estar igual/maior que o total atual — travar o jogo aqui
     # deixaria a tela de conferência presa para sempre.
@@ -830,6 +991,8 @@ def vencedor_final(dados, lobby, jogador):
         return
     jogador.confirmou_vencedor = True
     lobby.conferiram_vencedor += 1
+    # Fase 22: mostra em tempo real quem já clicou no "Ok" e quem falta.
+    emitir_status_vitoria(lobby)
     # `>=` (não `==`): mesma ressalva da conferência — jogador removido no meio
     # não pode deixar o contador de vitória maior que o lobby e travar o reset.
     if lobby.conferiram_vencedor >= len(lobby.jogadores):

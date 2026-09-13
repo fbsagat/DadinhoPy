@@ -2,6 +2,9 @@ let indiceAtual = 0;
 let chave_secreta = '';
 let nome_jogador = '';
 let sala_atual = getParamSala();
+// Fase 18: sem código válido na URL o jogador fica na home — não cria sala
+// automaticamente. `modo_home` controla qual painel da tela 0 aparece.
+let modo_home = !sala_atual;
 let sou_master = false;
 // Contexto da aposta recebido em `meu_turno` para calibrar o mínimo do input.
 let contexto_min_aposta = null;
@@ -31,12 +34,24 @@ socket.connect();
 
 // Heartbeat de sala: renova o "visto_em" no servidor para a busca distinguir
 // salas vivas das órfãs do serverless (instância que morreu sem disconnect).
+// Na sala de espera o intervalo é curto: o servidor usa a batida como re-sync
+// do lobby entre instâncias (ver `heartbeat` no app.py) — quem entrou/ficou
+// pronto numa instância diferente não alcança o broadcast do host, então o
+// servidor devolve o snapshot atual do lobby para cada cliente que bate.
 // Só emite quando o socket está conectado e já temos a chave de uma sala.
-setInterval(function () {
-    if (socket.connected && chave_secreta) {
-        socket.emit('heartbeat', { chave: chave_secreta });
-    }
-}, 60000);
+const INTERVALO_HEARTBEAT_ESPERA = 5000;
+const INTERVALO_HEARTBEAT_PARTIDA = 60000;
+
+function agendar_heartbeat() {
+    const intervalo = indiceAtual === 0 ? INTERVALO_HEARTBEAT_ESPERA : INTERVALO_HEARTBEAT_PARTIDA;
+    setTimeout(function () {
+        if (socket.connected && chave_secreta) {
+            socket.emit('heartbeat', { chave: chave_secreta });
+        }
+        agendar_heartbeat();
+    }, intervalo);
+}
+agendar_heartbeat();
 
 // ---------------------------------------------------------------------------
 // Fila de animação + narrador.
@@ -204,8 +219,25 @@ socket.on('narracao', function (data) {
 
 function getParamSala() {
     const params = new URLSearchParams(window.location.search);
-    return (params.get('sala') || 'padrao').trim() || 'padrao';
+    const sala = (params.get('sala') || '').trim().toLowerCase();
+    // Mesmo charset validado pelo servidor em `normalizar_sala`; inválido vira
+    // home (sem sala) em vez de materializar a sala padrão.
+    return /^[a-z0-9\-_]{1,24}$/.test(sala) ? sala : '';
 }
+
+// Mostra a home (criar/buscar) quando não há sala, ou o painel da sala de
+// espera quando o jogador está numa sala.
+function aplicar_modo_home() {
+    const painel_home = document.getElementById('painel_home');
+    const painel_sala = document.getElementById('painel_sala');
+    if (painel_home) {
+        painel_home.style.display = modo_home ? 'block' : 'none';
+    }
+    if (painel_sala) {
+        painel_sala.style.display = modo_home ? 'none' : 'block';
+    }
+}
+aplicar_modo_home();
 
 function ir_para_sala(codigo) {
     const url = new URL(window.location.href);
@@ -224,16 +256,6 @@ socket.on('sala_criada', function (data) {
         ir_para_sala(data.sala);
     }
 });
-
-function entrar_sala() {
-    const input = document.getElementById('input_sala');
-    const codigo = input.value.trim();
-    if (!codigo) {
-        mostrar_alerta(t('msg.codigo_sala_vazio'), 'aviso');
-        return;
-    }
-    ir_para_sala(codigo);
-}
 
 function copiar_link_sala() {
     const url = new URL(window.location.href);
@@ -432,6 +454,19 @@ socket.on("update_user_list", (data) => {
             const pronto = data.prontos[index] === true ? '✅' : '⏳';
             userItem.textContent = `${user} ${master} ${pronto}`;
 
+            // Fase 19: o master pode expulsar qualquer jogador (humano ou IA),
+            // exceto ele mesmo. O client_id vem no payload `ids` (mesmo índice).
+            if (sou_master && user !== nome_jogador && data.ids && data.ids[index]) {
+                const botao_expulsar = document.createElement("button");
+                botao_expulsar.className = "btn btn-sm btn-outline-danger ms-2";
+                botao_expulsar.textContent = t('js.expulsar');
+                botao_expulsar.title = t('js.expulsar_titulo');
+                botao_expulsar.onclick = function () {
+                    expulsar_jogador(data.ids[index], user);
+                };
+                userItem.appendChild(botao_expulsar);
+            }
+
             const pontuacaoDiv = document.createElement("div");
             pontuacaoDiv.className = "col-md-6";
             pontuacaoDiv.id = `pontos_${user}`;
@@ -519,6 +554,10 @@ function aplicar_config(config) {
     if (config_verificacao) {
         config_verificacao.checked = config.verificacao_ativa === true;
     }
+    const config_tempo = document.getElementById('config_tempo');
+    if (config_tempo) {
+        config_tempo.value = String(config.tempo_max_jogada);
+    }
     const ia_nivel = document.getElementById('ia_nivel');
     if (ia_nivel && config.ia_nivel_padrao) {
         ia_nivel.value = String(config.ia_nivel_padrao);
@@ -539,6 +578,7 @@ function enviar_config() {
         substituir_desconectado_por_ia: document.getElementById('config_substituir_ia').checked,
         ia_nivel_padrao: document.getElementById('ia_nivel').value,
         verificacao_ativa: document.getElementById('config_verificacao').checked,
+        tempo_max_jogada: document.getElementById('config_tempo').value,
     };
     socket.emit('configurar_partida', { chave: chave_secreta, config: config });
 }
@@ -566,13 +606,46 @@ socket.on('jogador_substituido_por_ia', function (data) {
     }
 });
 
+// --- Expulsão de jogador (Fase 19) ---
+function expulsar_jogador(client_id, nome) {
+    if (!sou_master || !client_id) {
+        return;
+    }
+    mostrar_alerta(t('js.confirmar_expulsar', { nome: nome }), 'confirmar').then(function (confirmado) {
+        if (confirmado) {
+            socket.emit('expulsar_jogador', { chave: chave_secreta, client_id: client_id });
+        }
+    });
+}
+
+// Quem foi expulso volta para a home: limpa a identidade da sala e recarrega
+// sem o parâmetro ?sala (o servidor já o removeu da sala e da room).
+socket.on('expulso_da_sala', function () {
+    chave_secreta = '';
+    sessionStorage.removeItem('dadinho_chave');
+    mostrar_alerta(t('msg.expulso_da_sala'), 'erro').then(function () {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('sala');
+        url.searchParams.delete('chave_secreta');
+        window.location.href = url.toString();
+    });
+});
+
+// Aviso para quem ficou na sala: o master expulsou alguém.
+socket.on('jogador_expulso', function (data) {
+    const painel = document.getElementById('motivo_iniciar');
+    if (painel && data && data.nome) {
+        painel.textContent = t('msg.jogador_expulso', { nome: data.nome });
+    }
+});
+
 // Alterna a prontidão do jogador na sala de espera.
 function alternar_pronto() {
     socket.emit('ficar_pronto', { chave: chave_secreta });
 }
 
 // O master aplica as configurações ao alterar qualquer campo da sala de espera.
-['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'config_verificacao', 'ia_nivel'].forEach((id) => {
+['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'config_verificacao', 'ia_nivel', 'config_tempo'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
         el.addEventListener('change', enviar_config);
@@ -581,6 +654,19 @@ function alternar_pronto() {
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
+    // Fase 21: contador da jogada automática segue o ciclo de páginas.
+    // - Entrou na rolagem (1): mantém o contador (a rolagem acabou de ser
+    //   armada pelo `construtor_dados`).
+    // - Entrou nos turnos (2): se for a minha vez, (re)começa o contador.
+    // - Sair de uma tela de jogo: encerra o contador.
+    if (data.pag_numero === 2 && sou_da_vez) {
+        iniciar_timer_jogada(tempo_turno_max);
+    } else if (data.pag_numero === 1 || data.pag_numero === 3 || data.pag_numero === 4) {
+        // Manter o contador: na rolagem (1) ele é iniciado em `construtor_dados`;
+        // na conferência/vitória (3/4) em `cards_conferencia`/`vencedor_da_partida`.
+    } else {
+        parar_timer_jogada();
+    }
     tocar_som('virar_papel');
     const tela_busca = document.getElementById('tela_busca');
     if (tela_busca) {
@@ -800,6 +886,10 @@ socket.on('construtor_dados', function (data) {
 
         // Adicionando o container principal à tela
         tela_jogar_dados.appendChild(container)
+
+        // Fase 21: jogador ainda não rolou — começa o contador da jogada
+        // automática da rolagem (para quando o tempo máximo expirar).
+        iniciar_timer_jogada(data.tempo_max);
     } else {
         // Cria a div principal
         const container = document.createElement('div');
@@ -838,6 +928,13 @@ socket.on('construtor_dados', function (data) {
         // Adiciona o container ao body ou a outro container desejado
         tela_jogar_dados.appendChild(container);
     }
+
+    // Fase 22: status de quem já rolou os dados (preenchido pelo `rolagem_status`).
+    const status_rol = document.createElement('div');
+    status_rol.id = 'rolagem_status';
+    status_rol.className = 'mt-3 fs-6 text-white text-wrap mx-auto';
+    status_rol.style.maxWidth = '40rem';
+    tela_jogar_dados.appendChild(status_rol);
 })
 
 // Função para construir os cards (parte estática)
@@ -937,11 +1034,76 @@ socket.on('atualizar_turno', function (dados) {
     })
 });
 
+// ---------------------------------------------------------------------------
+// Jogada automática por tempo máximo (Fase 21).
+// O servidor informa o limite (`tempo_max` segundos) em `construtor_dados`
+// (rolagem) e `meu_turno` (aposta/desconfiança). O cliente conta regressivo e,
+// ao expirar, pede ao servidor para jogar pelo atrasado (`autojogar`) — o
+// servidor confere o tempo decorrido antes de agir, então isto é só o gatilho.
+// ---------------------------------------------------------------------------
+let timer_autojogar = null;
+let tempo_autojogar_seg = 0;
+let sou_da_vez = false;      // recebeu `meu_turno` (a vez atual é a minha)
+let tempo_turno_max = 0;     // limite do turno (vem no `meu_turno`)
+let tempo_conf_vit = 0;      // limite da conferência/vitória (vem no `cards_conferencia`/`vencedor_da_partida`, Fase 22)
+
+function atualizar_contador_jogada() {
+    const el = document.getElementById('contador_jogada');
+    if (!el) {
+        return;
+    }
+    if (tempo_autojogar_seg <= 0) {
+        el.style.display = 'none';
+        return;
+    }
+    el.textContent = t('js.autojogar_contagem', { n: tempo_autojogar_seg });
+    el.classList.toggle('text-bg-danger', tempo_autojogar_seg <= 10);
+    el.classList.toggle('text-bg-warning', tempo_autojogar_seg > 10);
+    el.style.display = 'inline-block';
+}
+
+function iniciar_timer_jogada(segundos) {
+    parar_timer_jogada();
+    tempo_autojogar_seg = Math.max(0, Math.floor(Number(segundos) || 0));
+    if (tempo_autojogar_seg <= 0) {
+        return;
+    }
+    atualizar_contador_jogada();
+    timer_autojogar = setInterval(function () {
+        tempo_autojogar_seg -= 1;
+        atualizar_contador_jogada();
+        if (tempo_autojogar_seg <= 0) {
+            parar_timer_jogada();
+            socket.emit('autojogar', { chave: chave_secreta });
+        }
+    }, 1000);
+}
+
+function parar_timer_jogada() {
+    if (timer_autojogar) {
+        clearInterval(timer_autojogar);
+        timer_autojogar = null;
+    }
+    const el = document.getElementById('contador_jogada');
+    if (el) {
+        el.style.display = 'none';
+    }
+}
+
 // Função individual para verificar o jogador da vez no turno e construir formatação dinâmina para ele
 socket.on('meu_turno', function (data) {
     let turno_num = data.turno_num;
     const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
+
+    // Fase 21: marca que é a minha vez e guarda o limite. O contador só começa
+    // de fato na página de turnos (2): na rolagem ele é substituído pelo
+    // contador da rolagem (`construtor_dados`/`mudar_pagina`).
+    sou_da_vez = true;
+    tempo_turno_max = Number(data.tempo_max) || 0;
+    if (indiceAtual === 2) {
+        iniciar_timer_jogada(tempo_turno_max);
+    }
 
     if (painel_jogada && painel_aguarde) {
         painel_jogada.style.display = "block"; // Mostra o painel de jogada
@@ -968,6 +1130,8 @@ socket.on('meu_turno', function (data) {
 socket.on('espera_turno', function (data) {
     const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
+    sou_da_vez = false; // Fase 21: não é mais a minha vez, zera o contador.
+    parar_timer_jogada();
     painel_jogada.style.display = "none"; // Oculta o painel de jogada
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
 })
@@ -1069,6 +1233,10 @@ socket.on('vencedor_da_partida', function (data) {
     const h1_vencedor = document.getElementById('h1_vencedor');
     h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: data.nome });
     iniciar_celebracao();
+    // Fase 22: contador da jogada automática da tela de vitória (auto-confirma
+    // o reset se o jogador ficar away from keyboard).
+    tempo_conf_vit = Number(data.tempo_max) || 0;
+    iniciar_timer_jogada(tempo_conf_vit);
 })
 
 socket.on('soltar_fogos', function () {
@@ -1182,6 +1350,67 @@ socket.on('cards_conferencia', function (data) {
         card.appendChild(cardInner);
         cardContainer.appendChild(card);
     });
+
+    // Fase 22: contador da jogada automática da conferência (auto-confirma o
+    // "Ok" se o jogador ficar away from keyboard).
+    tempo_conf_vit = Number(data.tempo_max) || 0;
+    iniciar_timer_jogada(tempo_conf_vit);
+})
+
+// Fase 22: status em tempo real de quem já clicou no "Ok" (ou já rolou), por
+// jogador, nas telas de rolagem (1), conferência (3) e vitória (4). O servidor
+// emite `confirmados`/`pendentes` com apelidos; o cliente monta as fichas.
+function renderizar_status_confirmacao(elId, data) {
+    const el = document.getElementById(elId);
+    if (!el) {
+        return;
+    }
+    const confirmados = Array.isArray(data.confirmados) ? data.confirmados : [];
+    const pendentes = Array.isArray(data.pendentes) ? data.pendentes : [];
+    const total = Number(data.total) || 0;
+    el.innerHTML = '';
+    if (total <= 0) {
+        return;
+    }
+
+    const chips = document.createElement('div');
+    chips.className = 'd-flex flex-wrap justify-content-center gap-1 mb-1';
+    confirmados.forEach(nome => {
+        const b = document.createElement('span');
+        b.className = 'badge text-bg-success';
+        b.textContent = `✓ ${nome}`;
+        chips.appendChild(b);
+    });
+    pendentes.forEach(nome => {
+        const b = document.createElement('span');
+        b.className = 'badge text-bg-secondary';
+        b.textContent = `⏳ ${nome}`;
+        chips.appendChild(b);
+    });
+
+    const msg = document.createElement('div');
+    if (pendentes.length === 0) {
+        msg.textContent = t('js.todos_confirmaram');
+    } else if (pendentes.includes(nome_jogador)) {
+        msg.textContent = t('js.aguardando_voce');
+    } else {
+        msg.textContent = t('js.aguardando_outros', { n: pendentes.length });
+    }
+
+    el.appendChild(chips);
+    el.appendChild(msg);
+}
+
+socket.on('rolagem_status', function (data) {
+    renderizar_status_confirmacao('rolagem_status', data);
+});
+
+socket.on('conferencia_status', function (data) {
+    renderizar_status_confirmacao('status_conferencia', data);
+});
+
+socket.on('vitoria_status', function (data) {
+    renderizar_status_confirmacao('status_vitoria', data);
 })
 
 // Ações a aplicar no jogador que virou espectador, broadcast=False
@@ -1204,6 +1433,7 @@ socket.on('espectador', function (data) {
 
 // Lógica para enviar a aposta
 document.getElementById('apostar').addEventListener('click', () => {
+    parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const quantidade = document.getElementById('quantidade').value;
 
     if (selectedImageValue && quantidade) {
@@ -1222,6 +1452,7 @@ document.getElementById('apostar').addEventListener('click', () => {
 
 // Lógica para enviar a desconfiança
 document.getElementById('desconfiar').addEventListener('click', () => {
+    parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const data = {
         chave: chave_secreta,
         acao: 'desconfiar'
@@ -1232,17 +1463,27 @@ document.getElementById('desconfiar').addEventListener('click', () => {
 
 // Funções após conectar
 socket.on("connect_start", function (data) {
-    chave_secreta = data.chave_secreta;
-    sessionStorage.setItem('dadinho_chave', chave_secreta);
-    sou_master = data.is_master === true;
-    if (data.sala) {
+    // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
+    // para não apagar a identidade de uma sala anterior.
+    if (data && data.chave_secreta) {
+        chave_secreta = data.chave_secreta;
+        sessionStorage.setItem('dadinho_chave', chave_secreta);
+    }
+    sou_master = !!(data && data.is_master);
+    if (data && data.sala) {
         sala_atual = data.sala;
+        modo_home = false;
         const badge = document.getElementById('sala_atual');
         if (badge) {
             badge.textContent = '#' + data.sala;
         }
+    } else {
+        // Home: sem sala definida o jogador escolhe criar ou buscar.
+        sala_atual = '';
+        modo_home = true;
     }
-    if (data.username) {
+    aplicar_modo_home();
+    if (data && data.username) {
         // Reconexão retomada: devolve o apelido pro jogador.
         nome_jogador = data.username;
         const apelidoInput = document.getElementById('apelido');
@@ -1252,8 +1493,12 @@ socket.on("connect_start", function (data) {
     }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
-    textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
-    botaapelido.disabled = false;
+    if (textInput) {
+        textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
+    }
+    if (botaapelido) {
+        botaapelido.disabled = false;
+    }
     aplicar_master();
 });
 
@@ -1279,6 +1524,7 @@ socket.on("update_username", function (data) {
 })
 
 socket.on("jogar_dados_resultado", function (data) {
+    parar_timer_jogada(); // Fase 21: já rolou (manual ou automático), zera o contador.
     const dados_lista = data.dados_jogador;
     const dados_qtd = dados_lista.length;
 
@@ -1438,7 +1684,7 @@ let dicas_ativadas = localStorage.getItem('dadinho_dicas') !== 'off';
 const dicas_por_pagina = {
     0: ['js.dica.0.0', 'js.dica.0.1', 'js.dica.0.2', 'js.dica.0.3'],
     1: ['js.dica.1.0', 'js.dica.1.1', 'js.dica.1.2'],
-    2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5'],
+    2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5', 'js.dica.2.6'],
     3: ['js.dica.3.0', 'js.dica.3.1', 'js.dica.3.2'],
     4: ['js.dica.4.0', 'js.dica.4.1'],
 };
@@ -1449,9 +1695,10 @@ const overlay_tutorial = document.getElementById('tutorial_overlay');
 const painel_dicas = document.getElementById('painel_dicas');
 const switch_tutorial = document.getElementById('tutorial_dicas_switch');
 
-// Modal de alerta reutilizável (substitui window.alert): evita o padrão do
-// navegador e mantém a identidade visual do app. Retorna uma Promise resolvida
-// quando o jogador fecha, permitindo encadear ações (ex.: redirecionar).
+// Modal de alerta reutilizável (substitui window.alert/confirm): evita o padrão
+// do navegador e mantém a identidade visual do app. Retorna uma Promise que
+// resolve com `true`/`false` quando o jogador fecha — com tipo `confirmar`, o
+// modal ganha os botões Confirmar/Cancelar para servir de confirmação.
 const alerta_overlay = document.getElementById('alerta_overlay');
 const alerta_icone = document.getElementById('alerta_icone');
 const alerta_titulo = document.getElementById('alerta_titulo');
@@ -1463,30 +1710,35 @@ const ALERTA_ESTILOS = {
     erro: { icone: '⛔', titulo: 'alerta.erro' },
     info: { icone: 'ℹ️', titulo: 'alerta.info' },
     sucesso: { icone: '✅', titulo: 'alerta.sucesso' },
+    confirmar: { icone: '❓', titulo: 'alerta.confirmar' },
 };
 
 function mostrar_alerta(mensagem, tipo) {
     const chave = ALERTA_ESTILOS[tipo] ? tipo : 'aviso';
     const estilo = ALERTA_ESTILOS[chave];
     if (!alerta_overlay) {
-        window.alert(mensagem);
-        return Promise.resolve();
+        return Promise.resolve(true);
     }
+    const confirmar = tipo === 'confirmar';
     alerta_icone.textContent = estilo.icone;
     alerta_titulo.textContent = t(estilo.titulo);
     alerta_mensagem.textContent = mensagem;
     alerta_overlay.dataset.tipo = chave;
+    const botao_cancelar = document.getElementById('alerta_cancelar');
+    if (botao_cancelar) {
+        botao_cancelar.style.display = confirmar ? '' : 'none';
+    }
     alerta_overlay.style.display = 'flex';
     return new Promise(function (resolve) {
         _alerta_resolver = resolve;
-        const botao = document.getElementById('alerta_ok');
+        const botao = confirmar && botao_cancelar ? botao_cancelar : document.getElementById('alerta_ok');
         if (botao) {
             botao.focus();
         }
     });
 }
 
-function fechar_alerta() {
+function fechar_alerta(resultado) {
     if (!alerta_overlay || alerta_overlay.style.display === 'none') {
         return;
     }
@@ -1494,14 +1746,14 @@ function fechar_alerta() {
     if (_alerta_resolver) {
         const resolver = _alerta_resolver;
         _alerta_resolver = null;
-        resolver();
+        resolver(!!resultado);
     }
 }
 
 if (alerta_overlay) {
     alerta_overlay.addEventListener('click', (event) => {
         if (event.target === alerta_overlay) {
-            fechar_alerta();
+            fechar_alerta(false);
         }
     });
 }
@@ -2236,21 +2488,36 @@ window.addEventListener('pointerdown', desbloquear_audio, { once: true });
 window.addEventListener('keydown', desbloquear_audio, { once: true });
 
 function jogar_dados() {
+    parar_timer_jogada(); // Fase 21: rolou manualmente, encerra o contador.
     socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
     const dadobt = document.getElementById('dadobotao');
     dadobt.disabled = true; // Desativa o input
 }
 
+// Fase 22: marca visualmente que o jogador já clicou no "Ok" (as fichas de
+// status e o próprio botão mostram o confirmado). Sem `disabled`: o servidor
+// deduplica pela flag `confirmou_*`, e travar o botão aqui deixaria o jogador
+// preso se o evento fosse perdido (cooldown, rede) — ele precisa poder tentar
+// de novo. O contador da jogada automática também segue como rede de segurança.
+function marcar_ok_clicado(botaoId) {
+    const botao = document.getElementById(botaoId);
+    if (!botao || botao.dataset.confirmado) {
+        return;
+    }
+    botao.dataset.confirmado = '1';
+    botao.textContent = t('js.ok_confirmado');
+    botao.classList.remove('btn-primary');
+    botao.classList.add('btn-success');
+}
+
 function conferencia_final() {
-    // Sem `disabled`: o servidor deduplica pela flag `confirmou_rodada`, e travar
-    // o botão aqui deixaria o jogador preso se o evento fosse perdido (cooldown,
-    // rede) — ele precisa poder tentar de novo.
+    marcar_ok_clicado('bot_confe_fim');
     socket.emit('conferencia_final', { chave: chave_secreta });
 }
 
 function vencedor_final() {
-    // Idem: a deduplicação é no servidor (`confirmou_vencedor`).
+    marcar_ok_clicado('bot_vencedor_fim');
     socket.emit('vencedor_final', { chave: chave_secreta });
 }
 
@@ -2264,8 +2531,6 @@ function verificar_enter(event, button) {
     }
     if (button === 'button') {
         enviar_apelido();
-    } else if (button === 'sala') {
-        entrar_sala();
     }
 }
 

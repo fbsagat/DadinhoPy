@@ -14,7 +14,7 @@ def sala_room(sala_id):
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 5
+VERSAO_ATUAL = 7
 
 
 def _migrar_v1_para_v2(dados):
@@ -53,12 +53,33 @@ def _migrar_v4_para_v5(dados):
     return dados
 
 
+def _migrar_v5_para_v6(dados):
+    """v5 -> v6 (Fase 20): personalidade dos bots (risco/agressividade)."""
+    for jogador in list(dados.get('jogadores', []) or []) + list(dados.get('espectadores', []) or []):
+        jogador.setdefault('ia_risco', 0.5)
+        jogador.setdefault('ia_agressividade', 0.5)
+    return dados
+
+
+def _migrar_v6_para_v7(dados):
+    """v6 -> v7 (Fase 21): tempo máximo de jogada configurável (jogada automática)."""
+    dados.setdefault('config', {}).setdefault('tempo_max_jogada', 30)
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
     3: _migrar_v3_para_v4,
     4: _migrar_v4_para_v5,
+    5: _migrar_v5_para_v6,
+    6: _migrar_v6_para_v7,
 }
+
+
+def somente_ias_na_partida(partida):
+    """True quando todos os jogadores ainda com dados na partida são bots."""
+    return bool(partida is not None and partida.jogadores) and all(j.is_ia for j in partida.jogadores)
 
 
 class Jogador:
@@ -91,6 +112,11 @@ class Jogador:
         # Bots não têm socket e nunca viram master.
         self.is_ia = False
         self.ia_nivel = None
+        # Personalidade do bot (Fase 20): predisposição a risco e agressividade
+        # nas apostas, ambas em 0-1. Sorteadas por bot na criação; nulas para
+        # humanos. Mexem na desconfiança, na altura das apostas e no ritmo.
+        self.ia_risco = 0.5
+        self.ia_agressividade = 0.5
         # Verificação de integridade (provably fair): o jogador publica só o
         # compromisso (hash) na sala de espera; o nonce é revelado depois, na
         # fase de revelação, e nunca fica com o servidor antes disso.
@@ -112,6 +138,10 @@ class Jogador:
         jogador.username = username
         jogador.is_ia = True
         jogador.ia_nivel = int(nivel)
+        # Cada bot ganha uma personalidade própria (0-1): ousadia e agressividade
+        # mudam desconfiança, altura das apostas e tempo de pensamento.
+        jogador.ia_risco = round(secrets.randbelow(101) / 100, 2)
+        jogador.ia_agressividade = round(secrets.randbelow(101) / 100, 2)
         jogador.pronto = True
         # Bots também contribuem com nonce (gerado pelo servidor) para a seed e
         # já vêm revelados (o servidor não precisa de fase de revelação p/ eles).
@@ -150,6 +180,8 @@ class Jogador:
             'desconectado_em': self.desconectado_em.isoformat() if self.desconectado_em else None,
             'is_ia': self.is_ia,
             'ia_nivel': self.ia_nivel,
+            'ia_risco': self.ia_risco,
+            'ia_agressividade': self.ia_agressividade,
             'compromisso_seed': self.compromisso_seed,
             'nonce_seed': self.nonce_seed,
             'revelado_seed': self.revelado_seed,
@@ -214,6 +246,9 @@ class Lobby:
             'ia_nivel_padrao': 2,
             # Verificação de integridade dos dados (provably fair): opt-in do master.
             'verificacao_ativa': False,
+            # Tempo máximo (segundos) por jogada; 0 desliga. Quando expira, o
+            # jogo joga pelo jogador atrasado (jogada automática, Fase 21).
+            'tempo_max_jogada': 30,
         }
 
     def sala_room(self):
@@ -225,6 +260,15 @@ class Lobby:
     def marcar_visto(self):
         """Registra o instante do último sinal de vida da sala (busca/heartbeat)."""
         self.visto_em = datetime.now()
+
+    def status_vitoria_dict(self):
+        """Quem já confirmou o "Ok" da vitória (página 4), por apelido (Fase 22)."""
+        jogadores = [j for j in self.jogadores if j.username]
+        return {
+            'confirmados': [j.username for j in jogadores if j.confirmou_vencedor],
+            'pendentes': [j.username for j in jogadores if not j.confirmou_vencedor],
+            'total': len(jogadores),
+        }
 
     def __repr__(self):
         return f"(LOBBY {self.lobby_num} com {len(self.jogadores)} jogadores)"
@@ -245,6 +289,9 @@ class Lobby:
                 'conferiram': rodada.conferiram,
                 'conferencia': rodada.conferencia,
                 'vez_atual_id': rodada.vez_atual.client_id if rodada.vez_atual else None,
+                'vez_em': rodada.vez_em.isoformat() if rodada.vez_em else None,
+                'inicio_rolagem_em': rodada.inicio_rolagem_em.isoformat() if rodada.inicio_rolagem_em else None,
+                'conferencia_em': rodada.conferencia_em.isoformat() if rodada.conferencia_em else None,
                 'perdedor_id': rodada.perdedor.client_id if rodada.perdedor else None,
                 'vencedor_id': rodada.vencedor.client_id if rodada.vencedor else None,
                 'turnos': [
@@ -264,6 +311,7 @@ class Lobby:
             'jogadores_ids': [jogador.client_id for jogador in partida.jogadores],
             'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
             'vencedor_final_id': partida.vencedor_final.client_id if partida.vencedor_final else None,
+            'vitoria_em': partida.vitoria_em.isoformat() if partida.vitoria_em else None,
             'seed_info': partida.seed_info,
             'seed_final': partida.seed_final,
             'rodadas': rodadas,
@@ -330,6 +378,8 @@ class Lobby:
         jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
         jogador.is_ia = bool(dados_jogador.get('is_ia', False))
         jogador.ia_nivel = dados_jogador.get('ia_nivel')
+        jogador.ia_risco = float(dados_jogador.get('ia_risco', 0.5) or 0.5)
+        jogador.ia_agressividade = float(dados_jogador.get('ia_agressividade', 0.5) or 0.5)
         jogador.compromisso_seed = dados_jogador.get('compromisso_seed')
         jogador.nonce_seed = dados_jogador.get('nonce_seed')
         jogador.revelado_seed = bool(dados_jogador.get('revelado_seed', False))
@@ -404,6 +454,8 @@ class Lobby:
             partida.seed_final = dados_partida.get('seed_final')
             partida.jogador_sorteado = jogadores.get(dados_partida.get('jogador_sorteado_id'))
             partida.vencedor_final = jogadores.get(dados_partida.get('vencedor_final_id'))
+            vitoria_em = dados_partida.get('vitoria_em')
+            partida.vitoria_em = datetime.fromisoformat(vitoria_em) if vitoria_em else None
             for dados_rodada in dados_partida.get('rodadas', []):
                 rodada = Rodada(partida=partida, jogadores=partida.jogadores,
                                 rodada_numero=dados_rodada.get('rodada_num', 1),
@@ -415,6 +467,12 @@ class Lobby:
                 rodada.coringa_atual_jogador = jogadores.get(dados_rodada.get('coringa_atual_jogador_id'))
                 rodada.conferiram = dados_rodada.get('conferiram', 0)
                 rodada.conferencia = dados_rodada.get('conferencia')
+                vez_em = dados_rodada.get('vez_em')
+                rodada.vez_em = datetime.fromisoformat(vez_em) if vez_em else None
+                inicio_rolagem = dados_rodada.get('inicio_rolagem_em')
+                rodada.inicio_rolagem_em = datetime.fromisoformat(inicio_rolagem) if inicio_rolagem else None
+                conferencia_em = dados_rodada.get('conferencia_em')
+                rodada.conferencia_em = datetime.fromisoformat(conferencia_em) if conferencia_em else None
                 rodada.perdedor = jogadores.get(dados_rodada.get('perdedor_id'))
                 rodada.vencedor = jogadores.get(dados_rodada.get('vencedor_id'))
                 for dados_turno in dados_rodada.get('turnos', []):
@@ -514,6 +572,15 @@ class Lobby:
                 valor = int(dados['ia_nivel_padrao'])
                 if 1 <= valor <= 4:
                     config['ia_nivel_padrao'] = valor
+                    aplicado = True
+        except (ValueError, TypeError):
+            pass
+        # Fase 21: tempo máximo de jogada em segundos (0 = desligado).
+        try:
+            if 'tempo_max_jogada' in dados:
+                valor = int(dados['tempo_max_jogada'])
+                if 0 <= valor <= 300:
+                    config['tempo_max_jogada'] = valor
                     aplicado = True
         except (ValueError, TypeError):
             pass
@@ -908,6 +975,9 @@ class Partida:
             self.jogador_sorteado = secrets.choice(self.jogadores)
         self.rodadas = []
         self.vencedor_final = None
+        # Quando a tela de vitória (4) foi aberta (Fase 22): referência de tempo
+        # do `autojogar` para auto-confirmar um humano atrasado no reset.
+        self.vitoria_em = None
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.jogadores]
@@ -945,6 +1015,8 @@ class Partida:
         else:
             # Caso ainda tenhas dois ou mais, continua tudo:
             turnos_lista = {}
+            # Fase 21: tempo máximo de jogada da sala (0 = sem jogada automática).
+            tempo_max_jogada = int(self.do_lobby.config.get('tempo_max_jogada', 0) or 0)
             # Prepara o front-end
             for jogador in self.jogadores:
                 turnos_lista[jogador.username] = [[0, 0]]
@@ -957,6 +1029,7 @@ class Partida:
             # cria a rodada.
             rodada = Rodada(partida=self, jogadores=self.jogadores, rodada_numero=rodada_numero,
                             vez_atual=vez_atual, com_coringa=self.com_coringa)
+            rodada.inicio_rolagem_em = datetime.now()
             self.rodadas.append(rodada)
             # Arruma o front pro jogador da vez na rodada.
             rodada.atualizar_front_pro_da_vez(jogador_atual=vez_atual)
@@ -976,7 +1049,8 @@ class Partida:
             dados_mesa = 0
 
             for jogador in self.jogadores:
-                emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': False},
+                emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': False,
+                                          'tempo_max': tempo_max_jogada},
                      to=jogador.client_id)
                 dados_mesa += jogador.dados_qtd
             if rodada_numero > 1:
@@ -989,6 +1063,9 @@ class Partida:
                                           primeira=(rodada_numero == 1)),
                  to=self.sala_room())
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
+            # Fase 22: status inicial da rolagem (todos pendentes) para o
+            # front acompanhar quem já rolou em tempo real.
+            emit('rolagem_status', rodada.status_rolagem_dict(), to=self.sala_room())
             self.do_lobby.pagina = 1
             return rodada
 
@@ -1055,11 +1132,18 @@ class Partida:
         """
         jogador.pontos += 1
         self.vencedor_final = jogador
+        self.vitoria_em = datetime.now()
         self.do_lobby.pagina = 4
         emit('narracao', narrador.narracao_vitoria(jogador), to=self.sala_room())
-        emit('vencedor_da_partida', {'nome': jogador.username}, to=self.sala_room())
+        emit('vencedor_da_partida',
+             {'nome': jogador.username,
+              # Fase 22: tempo máximo de confirmação (jogada automática) da vitória.
+              'tempo_max': int(self.do_lobby.config.get('tempo_max_jogada', 0) or 0)},
+             to=self.sala_room())
         emit('botao_vencedor_ativ', to=jogador.client_id)
         emit("mudar_pagina", {'pag_numero': 4}, to=self.sala_room())
+        # Fase 22: status inicial da vitória (ninguém confirmou o reset ainda).
+        emit('vitoria_status', self.do_lobby.status_vitoria_dict(), to=self.sala_room())
         nomes = [jogador.username for jogador in self.do_lobby.jogadores if jogador.username is not None]
         pontos = [jogador.pontos for jogador in self.do_lobby.jogadores if jogador.username is not None]
 
@@ -1118,6 +1202,15 @@ class Rodada:
         self.vez_atual = vez_atual
         self.perdedor = perdedor
         self.vencedor = vencedor
+        # Marcas de tempo da jogada automática (Fase 21): quando a vez atual
+        # começou (`vez_em`) e quando a rolagem da rodada começou
+        # (`inicio_rolagem_em`). O servidor confere o tempo decorrido antes de
+        # aceitar um `autojogar`; o cliente usa para o contador regressivo.
+        self.vez_em = None
+        self.inicio_rolagem_em = None
+        # Quando a tela de conferência (3) foi aberta (Fase 22): o `autojogar`
+        # usa como referência de tempo para auto-confirmar um humano atrasado.
+        self.conferencia_em = None
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]
@@ -1130,6 +1223,24 @@ class Rodada:
         Nome da room no Socket.IO da sala onde a rodada acontece.
         """
         return self.da_partida.sala_room()
+
+    def status_rolagem_dict(self):
+        """Quem já rolou os dados na rolagem (página 1), por apelido (Fase 22)."""
+        jogadores = [j for j in self.jogadores if j.username]
+        return {
+            'confirmados': [j.username for j in jogadores if j.joguei_dados],
+            'pendentes': [j.username for j in jogadores if not j.joguei_dados],
+            'total': len(jogadores),
+        }
+
+    def status_conferencia_dict(self):
+        """Quem já confirmou o "Ok" da conferência (página 3), por apelido (Fase 22)."""
+        jogadores = [j for j in self.jogadores if j.username]
+        return {
+            'confirmados': [j.username for j in jogadores if j.confirmou_rodada],
+            'pendentes': [j.username for j in jogadores if not j.confirmou_rodada],
+            'total': len(jogadores),
+        }
 
     def construir_turno(self, jogador, dados):
         """
@@ -1339,6 +1450,7 @@ class Rodada:
         # Mudar para a tela de conferência destacando o vencedor e o perdedor e descrevendo o acontecimento:
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         dados = [jogador.dados for jogador in self.da_partida.jogadores]
+        self.conferencia_em = datetime.now()
         self.conferencia = {
             'nomes': nomes, 'ganhador': vencedor, 'perdedor': perdedor, 'saiu_da_partida': saiu, 'dados': dados,
             'dado_apostado_face': ultimo_turno.dado_face,
@@ -1346,14 +1458,20 @@ class Rodada:
             'quantidade_real': quantidade,
             'verdadeira': quantidade >= ultimo_turno.dado_qtd,
             'com_coringa': self.com_coringa, 'texto': txt,
+            # Fase 22: tempo máximo de confirmação (jogada automática) desta tela.
+            'tempo_max': int(self.da_partida.do_lobby.config.get('tempo_max_jogada', 0) or 0),
         }
         self.da_partida.do_lobby.pagina = 3
-        pensou = narrador.tempo_pensamento(jogador.ia_nivel) if jogador.is_ia else 0
+        pensou = (narrador.tempo_pensamento(jogador.ia_nivel, jogador=jogador,
+                                            so_ias=somente_ias_na_partida(self.da_partida))
+                  if jogador.is_ia else 0)
         emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou,
                                                         aposta=ultimo_turno),
              to=self.sala_room())
         emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())
+        # Fase 22: status inicial da conferência (ninguém confirmou ainda).
+        emit('conferencia_status', self.status_conferencia_dict(), to=self.sala_room())
 
     def contexto_aposta(self):
         """
@@ -1373,10 +1491,12 @@ class Rodada:
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
         Esta função não faz nenhuma validação de jogador da vez, deve ser feita em 'app.py'.
         """
+        self.vez_em = datetime.now()
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              to=self.sala_room())
-        payload = {'username': jogador_atual.username}
+        payload = {'username': jogador_atual.username,
+                   'tempo_max': int(self.da_partida.do_lobby.config.get('tempo_max_jogada', 0) or 0)}
         payload.update(self.contexto_aposta())
         emit('meu_turno', payload, to=jogador_atual.client_id)
         for jogador in self.da_partida.jogadores:
@@ -1417,7 +1537,9 @@ class Turno:
         """Executa o turno no front end"""
         # Narração da jogada (vem antes do card para o cliente encaixar o
         # "tempo de pensamento" dos bots na fila de animação).
-        pensou = narrador.tempo_pensamento(self.do_jogador.ia_nivel) if self.do_jogador.is_ia else 0
+        pensou = (narrador.tempo_pensamento(self.do_jogador.ia_nivel, jogador=self.do_jogador,
+                                            so_ias=somente_ias_na_partida(self.da_rodada.da_partida))
+                  if self.do_jogador.is_ia else 0)
         anterior = self.obter_turno_anterior_na_partida()
         dados_mesa = sum(getattr(jogador, 'dados_qtd', 0) or 0 for jogador in self.da_rodada.jogadores)
         emit('narracao',

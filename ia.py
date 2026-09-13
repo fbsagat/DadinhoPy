@@ -82,6 +82,17 @@ def gerar_nome():
     return f"🤖 {apelido}"
 
 
+def sorteiar_personalidade(jogador):
+    """
+    Sorteia a personalidade de um bot (0-1 em cada eixo): predisposição a risco
+    e agressividade nas apostas. Usado também quando um humano desconectado é
+    substituído por IA (Fase 20).
+    """
+    jogador.ia_risco = round(secrets.randbelow(101) / 100, 2)
+    jogador.ia_agressividade = round(secrets.randbelow(101) / 100, 2)
+    return jogador
+
+
 # ---------------------------------------------------------------------------
 # Criação/remoção de bots na sala
 # ---------------------------------------------------------------------------
@@ -186,6 +197,9 @@ def decidir(jogador, rodada, nivel):
     - {'acao': 'desconfiar'}
 
     Níveis: 1 = aleatório; 2 = heurístico; 3 = probabilístico; 4 = estratégico.
+    Cada bot carrega uma personalidade (ia_risco/ia_agressividade, 0-1) que
+    desloca desconfiança, altura das apostas e impulsividade — e um pouco de
+    ruído mantém o mesmo bot imprevisível lance a lance.
     """
     try:
         nivel = int(nivel)
@@ -194,16 +208,24 @@ def decidir(jogador, rodada, nivel):
     if nivel not in NOMES_NIVEIS:
         nivel = 1
 
+    risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
+    agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     ultimo = rodada.turnos[-1] if rodada.turnos else None
 
     # Nível 1: sem raciocínio — aposta aleatória e desconfia por acaso.
     if nivel == 1:
-        if ultimo is not None and secrets.randbelow(100) < 10:
+        # Ousadia e agressividade mudam o apetite: cautelosos desconfiam mais,
+        # agressivos preferem atacar a apostar na defensiva.
+        chance_desconfiar = max(0, 6 + int(risco * 20) - int(agressividade * 8))
+        if ultimo is not None and secrets.randbelow(100) < chance_desconfiar:
             return {'acao': 'desconfiar'}
         apostas = gerar_apostas_validas(rodada)
         if not apostas:
             return _sem_aposta(ultimo)
-        face, quantidade = secrets.choice(apostas)
+        if agressividade > 0.7 and ultimo is not None and secrets.randbelow(100) < 30:
+            face, quantidade = _aposta_mais_alta(apostas)
+        else:
+            face, quantidade = secrets.choice(apostas)
         return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
     coringa = rodada.com_coringa
@@ -216,11 +238,15 @@ def decidir(jogador, rodada, nivel):
             ultimo.dado_face, ultimo.dado_qtd, suporte, desconhecidos, coringa
         )
 
-    limiar = _limiar_desconfianca(rodada, nivel, ultimo)
+    limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco, agressividade)
     desconfia = probabilidade is not None and probabilidade < limiar
     # Nível 2 é imperfeito: mesmo achando a aposta ruim, às vezes deixa passar.
     if nivel == 2 and desconfia and secrets.randbelow(100) < 35:
         desconfia = False
+    # Impulso de imprevisibilidade: às vezes desconfia sem ter a certeza do
+    # cálculo (ou se furta a desconfiar quando deveria). Ousados chamam mais.
+    if not desconfia and ultimo is not None and secrets.randbelow(100) < int(risco * 12):
+        desconfia = True
     if desconfia:
         return {'acao': 'desconfiar'}
 
@@ -237,33 +263,55 @@ def _sem_aposta(ultimo):
     return {'acao': 'apostar', 'dado': 1, 'quantidade': 1}
 
 
-def _limiar_desconfianca(rodada, nivel, ultimo):
+def _limiar_desconfianca(rodada, nivel, ultimo, risco=0.5, agressividade=0.5):
     """Probabilidade abaixo da qual a IA desconfia da última aposta."""
     if ultimo is None:
         return 0.0
     if nivel == 2:
-        return 0.30
-    if nivel == 3:
-        return 0.40
+        base = 0.30
+    elif nivel == 3:
+        base = 0.40
     # Nível 4: mais seletivo para desconfiar; sobe um pouco em disputas longas,
     # quando as apostas costumam ficar exageradas.
-    return min(0.55, 0.30 + min(0.10, len(rodada.turnos) * 0.02))
+    else:
+        base = min(0.55, 0.30 + min(0.10, len(rodada.turnos) * 0.02))
+    # Ousados/agressivos seguram a desconfiança e empurram o jogo; cautelosos
+    # puxam o freio cedo.
+    base *= max(0.05, 1.0 - 0.30 * risco - 0.15 * agressividade)
+    # Ruído: o mesmo bot não desconfia sempre na mesma probabilidade.
+    base *= 0.85 + 0.30 * (secrets.randbelow(101) / 100)
+    return base
 
 
 def _escolher_aposta(rodada, jogador, nivel):
     apostas = gerar_apostas_validas(rodada)
     if not apostas:
         return None
+    risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
+    agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     if nivel == 2:
-        return _menor_aposta(apostas)
+        return _aposta_heuristica(apostas, agressividade)
     if nivel == 3:
-        return _melhor_aposta(rodada, jogador, apostas)
-    return _aposta_de_pressao(rodada, jogador, apostas)
+        return _melhor_aposta(rodada, jogador, apostas, risco, agressividade)
+    return _aposta_de_pressao(rodada, jogador, apostas, risco, agressividade)
 
 
-def _menor_aposta(apostas):
-    """Aposta de menor quantidade (e menor face no empate)."""
-    return min(apostas, key=lambda aposta: (aposta[1], aposta[0]))
+def _aposta_heuristica(apostas, agressividade):
+    """
+    Nível 2: aposta baixa, mas agressivos sobem degraus na escala (quantidade
+    primeiro, face no empate) de vez em quando — e sempre com um toque de sorte.
+    """
+    ordenadas = sorted(apostas, key=lambda aposta: (aposta[1], aposta[0]))
+    if len(ordenadas) <= 1:
+        return ordenadas[0] if ordenadas else None
+    max_degraus = min(len(ordenadas) - 1, 1 + int(agressividade * 3))
+    degraus = secrets.randbelow(max_degraus + 1)
+    return ordenadas[degraus]
+
+
+def _aposta_mais_alta(apostas):
+    """Aposta de maior quantidade (e maior face no empate)."""
+    return max(apostas, key=lambda aposta: (aposta[1], aposta[0]))
 
 
 def _probabilidade_aposta(rodada, jogador, face, quantidade):
@@ -275,23 +323,36 @@ def _probabilidade_aposta(rodada, jogador, face, quantidade):
     return probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa)
 
 
-def _melhor_aposta(rodada, jogador, apostas):
-    """Aposta mais defensável (maior P), desempatando pela menor."""
-    return min(apostas, key=lambda aposta: (-_probabilidade_aposta(rodada, jogador, *aposta),
-                                            aposta[1], aposta[0]))
+def _melhor_aposta(rodada, jogador, apostas, risco=0.5, agressividade=0.5):
+    """
+    Entre as apostas mais defensáveis (maior P), escolhe uma com inclinação pela
+    quantidade conforme a personalidade: ousados/agressivos encaram candidatas
+    menos prováveis (maiores quantidades), cautelosos ficam no topo da certeza.
+    """
+    ordenadas = sorted(apostas, key=lambda aposta: (-_probabilidade_aposta(rodada, jogador, *aposta),
+                                                    aposta[1], aposta[0]))
+    if not ordenadas:
+        return None
+    # Quantas candidatas entram na disputa: cresce com ousadia e agressividade.
+    fatia = 1 + int((agressividade * 4 + risco * 3) * (0.5 + secrets.randbelow(101) / 100))
+    candidatas = ordenadas[:max(1, min(len(ordenadas), fatia))]
+    # Puxa para a maior quantidade dentro da fatia (mais ainda se agressivo).
+    return max(candidatas, key=lambda aposta: (aposta[1] * (0.5 + agressividade), aposta[0]))
 
 
-def _aposta_de_pressao(rodada, jogador, apostas):
+def _aposta_de_pressao(rodada, jogador, apostas, risco=0.5, agressividade=0.5):
     """
-    Nível 4: entre as apostas ainda seguras (P >= 0.60), escolhe a de maior
-    quantidade — pressiona o próximo sem apostar algo provavelmente falso.
-    Sem nenhuma segura, cai na mais defensável.
+    Nível 4: entre as apostas ainda seguras (P >= piso), escolhe a de maior
+    quantidade — pressiona o próximo sem apostar algo provavelmente falso. O piso
+    cai com a ousadia do bot (blefa mais); sem nenhuma segura, cai na mais
+    defensável, já com a personalidade na conta.
     """
+    piso = max(0.05, 0.60 - 0.30 * risco)
     seguras = [aposta for aposta in apostas
-               if _probabilidade_aposta(rodada, jogador, *aposta) >= 0.60]
+               if _probabilidade_aposta(rodada, jogador, *aposta) >= piso]
     if seguras:
         return max(seguras, key=lambda aposta: (aposta[1], aposta[0]))
-    return _melhor_aposta(rodada, jogador, apostas)
+    return _melhor_aposta(rodada, jogador, apostas, risco, agressividade)
 
 
 def executar_acao(jogador, rodada, acao):
@@ -356,6 +417,8 @@ def _processar_rolagem(lobby):
     for jogador in partida.jogadores:
         if jogador.is_ia:
             jogador.joguei_dados = True
+    # Fase 22: humanos acompanham em tempo real quem já rolou.
+    funcoes_gerais.emitir_status_rolagem(lobby)
     if rodada.verificar_se_todos_ja_jogaram_seus_dados():
         lobby.pagina = 2
         funcoes_gerais.mudar_pagina(2, sala=lobby.sala_id)
@@ -392,6 +455,9 @@ def _processar_conferencia(lobby):
         if jogador.is_ia and not jogador.confirmou_rodada:
             jogador.confirmou_rodada = True
             rodada.conferiram += 1
+    # Fase 22: humanos acompanham em tempo real quem já confirmou (as IAs
+    # confirmam na hora; sem isto o status ficaria desatualizado).
+    funcoes_gerais.emitir_status_conferencia(lobby)
     # Fecha mesmo sem nova confirmação agora: o contador já pode estar completo
     # (ex.: um humano caiu na conferência depois de as IAs confirmarem) e, sem
     # isto, a rodada ficaria presa para sempre na tela de conferência.
@@ -407,6 +473,8 @@ def _processar_vitoria(lobby):
         if jogador.is_ia and not jogador.confirmou_vencedor:
             jogador.confirmou_vencedor = True
             lobby.conferiram_vencedor += 1
+    # Fase 22: idem `_processar_conferencia` — status em tempo real.
+    funcoes_gerais.emitir_status_vitoria(lobby)
     # Idem `_processar_conferencia`: fecha mesmo sem nova confirmação, senão a
     # tela de vitória fica presa quando o contador já está completo.
     if lobby.conferiram_vencedor >= len(lobby.jogadores):

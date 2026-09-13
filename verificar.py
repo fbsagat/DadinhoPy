@@ -166,6 +166,10 @@ def verificar_roundtrip():
         jogador.username = nome
         jogador.pronto = True
         lobby.adicionar_jogador(jogador)
+    bot = modelos.Jogador.criar_ia(3, "🤖 Teste")
+    bot.ia_risco = 0.3
+    bot.ia_agressividade = 0.9
+    lobby.adicionar_jogador(bot)
     espectador = modelos.Jogador(client_id="spec1")
     espectador.username = "Eva"
     espectador.lobby_atual = lobby
@@ -174,10 +178,12 @@ def verificar_roundtrip():
     _checar("grava versão atual", dados.get("versao") == modelos.VERSAO_ATUAL, str(dados.get("versao")))
 
     copia = modelos.Lobby.de_dict(dados)
-    _checar("round-trip jogadores", [j.username for j in copia.jogadores] == ["Ana", "Bia"])
+    _checar("round-trip jogadores", [j.username for j in copia.jogadores] == ["Ana", "Bia", "🤖 Teste"])
     _checar("round-trip espectadores", [e.username for e in copia.espectadores] == ["Eva"])
     _checar("round-trip config", copia.config == lobby.config)
     _checar("round-trip numero de partida", copia.proxima_partida_num == lobby.proxima_partida_num)
+    _checar("round-trip personalidade IA",
+            [(j.ia_risco, j.ia_agressividade) for j in copia.jogadores if j.is_ia] == [(0.3, 0.9)])
 
     # v1 -> v3: campos da sala de espera e prontidão passam a existir.
     v1 = {"sala_id": "v1", "lobby_num": 1, "versao": 1,
@@ -214,6 +220,14 @@ def verificar_roundtrip():
     m4_dir = modelos._migrar_v4_para_v5({"versao": 4, "partidas": [{"partida_num": 7}]})
     _checar("migração v4 -> v5", m4_dir.get("proxima_partida_num") == 8,
             str(m4_dir.get("proxima_partida_num")))
+
+    # v5 -> v6: personalidade dos bots (risco/agressividade) passa a existir.
+    v5 = {"sala_id": "v5", "lobby_num": 1, "versao": 5,
+          "jogadores": [{"client_id": "w", "is_ia": True, "ia_nivel": 3}], "partidas": []}
+    m5 = modelos.Lobby.de_dict(dict(v5))
+    _checar("migração v5 -> v6",
+            m5.jogadores[0].ia_risco == 0.5 and m5.jogadores[0].ia_agressividade == 0.5,
+            f"{m5.jogadores[0].ia_risco}/{m5.jogadores[0].ia_agressividade}")
 
 
 # ---------------------------------------------------------------------------
@@ -935,6 +949,43 @@ def teste_heartbeat_renova_resumo():
     _ok("heartbeat renova o resumo da busca")
 
 
+def teste_heartbeat_resincroniza_lobby():
+    # Fase 18/19: as rooms/emits do Socket.IO vivem por instância; quem entrou/
+    # ficou pronto numa instância diferente não alcança o broadcast do host. O
+    # heartbeat na sala de espera deve devolver o snapshot atual do lobby (lido
+    # do store compartilhado) direcionado a cada cliente, cobrindo o gap.
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.get_received()  # descarta o broadcast local (que não existiria entre instâncias)
+
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"]})
+    eventos = c1.get_received()
+    atualizacoes = [e for e in eventos if e["name"] == "update_user_list"]
+    assert atualizacoes, "heartbeat na espera deve responder com update_user_list"
+    payload = atualizacoes[-1]["args"][0]
+    assert payload.get("users") == ["Ana", "Bia"], \
+        f"host deve ver o jogador da outra instância: {payload.get('users')}"
+    assert payload.get("prontos") == [False, True], \
+        f"host deve ver a prontidão da outra instância: {payload.get('prontos')}"
+    assert payload.get("status") == "espera"
+
+    # Fora da sala de espera (partida em andamento) o heartbeat não re-sincroniza.
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    c1.get_received()
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"]})
+    eventos = c1.get_received()
+    assert all(e["name"] != "update_user_list" for e in eventos), \
+        "heartbeat em partida não deve re-emitir a lista da espera"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("heartbeat re-sincroniza o lobby entre instâncias")
+
+
 def teste_sala_orfa_e_fechada():
     _limpar()
     c1, cs1, _ = _conectar()
@@ -967,37 +1018,45 @@ def teste_sala_orfa_e_fechada():
     _ok("sala órfã (sem humano ativo) é fechada")
 
 
-def teste_sala_padrao_cria_nova():
-    # Fase 16: a sala padrão compartilhada foi aposentada. Sem código (ou com
-    # `?sala=padrao`), o connect devolve um código novo em vez de lotar a padrão.
+def teste_sala_padrao_fica_na_home():
+    # Fase 18: sem código (ou com `?sala=padrao`/inválido), o connect NÃO cria
+    # sala automaticamente — o cliente fica na home e decide criar ou buscar.
     _limpar()
     modulo_store.remover_sala(funcoes_gerais.SALA_PADRAO)
     c1 = socketio.test_client(app, query_string="sala=padrao")
     eventos = c1.get_received()
-    criada = _achar_evento(eventos, "sala_criada")
-    assert criada and criada.get("sala"), "connect na sala padrão deve devolver um código novo"
-    assert criada["sala"] != funcoes_gerais.SALA_PADRAO
-    assert _achar_evento(eventos, "connect_start") is None, "não pode entrar na sala padrão"
+    assert _achar_evento(eventos, "sala_criada") is None, \
+        "home não pode criar sala automaticamente"
+    cs = _achar_evento(eventos, "connect_start")
+    assert cs is not None, "home deve receber connect_start"
+    assert not cs.get("sala"), "home não pode estar em nenhuma sala"
     assert modulo_store.carregar_sala(funcoes_gerais.SALA_PADRAO) is None, \
         "a sala padrão não pode ser materializada"
     c1.disconnect()
 
-    # Código inválido também gera sala nova (normalizar_sala cai no sentinela).
+    # Código inválido também cai na home (normalizar_sala usa o sentinela).
     c2 = socketio.test_client(app, query_string="sala=invalida!")
-    criada2 = _achar_evento(c2.get_received(), "sala_criada")
-    assert criada2 and criada2.get("sala"), "sala inválida deve gerar código novo"
+    eventos2 = c2.get_received()
+    assert _achar_evento(eventos2, "sala_criada") is None
+    assert not _achar_evento(eventos2, "connect_start").get("sala")
     c2.disconnect()
 
-    # O código devolvido funciona como uma sala normal.
+    # "Criar sala" (evento) devolve um código novo que funciona como sala normal.
+    c3 = socketio.test_client(app, query_string="sala=padrao")
+    c3.get_received()  # descarta o connect_start da home
+    c3.emit("criar_sala")
+    criada = _achar_evento(c3.get_received(), "sala_criada")
+    assert criada and criada.get("sala"), "criar_sala deve devolver um código"
+    assert criada["sala"] != funcoes_gerais.SALA_PADRAO
     nova = criada["sala"]
-    c3 = socketio.test_client(app, query_string=f"sala={nova}")
-    eventos3 = c3.get_received()
-    assert _achar_evento(eventos3, "connect_start") is not None
+    c4 = socketio.test_client(app, query_string=f"sala={nova}")
+    eventos4 = c4.get_received()
+    assert _achar_evento(eventos4, "connect_start") is not None
     assert modulo_store.carregar_sala(nova) is not None
-    c3.disconnect()
+    c4.disconnect()
     modulo_store.remover_sala(nova)
     _limpar()
-    _ok("sala padrão cria sala nova (Fase 16)")
+    _ok("home não cria sala automaticamente (Fase 18)")
 
 
 def teste_aposta_fora_da_pagina():
@@ -1253,6 +1312,60 @@ def teste_commit_reveal():
     _ok("commit-reveal (nonce só na revelação)")
 
 
+def teste_revelar_seed_fora_do_cooldown():
+    """
+    O `revelar_seed` não pode ser derrubado pelo cooldown de escrita (0,5s).
+
+    No navegador, o cliente compromete e, quando o servidor emite `seed_revelar`
+    (assim que todos comprometeram), revela logo em seguida — tudo dentro da
+    janela do cooldown. O drop silencioso do `revelar_seed` deixava
+    `pode_iniciar` preso em "aguardando_revelacao" para sempre, com todos os
+    jogadores prontos e o master sem conseguir iniciar a partida. A revelação é
+    idempotente (valida contra o compromisso) e espaçada pelo fluxo do jogo,
+    então não passa pelo cooldown anti-spam.
+    """
+    import seed
+
+    _limpar()
+    modulo_app.tem_cooldown = funcoes_gerais.tem_cooldown
+    _sleep_real = time.sleep
+    try:
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        _sleep_real(0.6)
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        _sleep_real(0.6)
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"verificacao_ativa": True}})
+        _sleep_real(0.6)
+        c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+        _sleep_real(0.6)
+
+        n1, n2 = seed.gerar_nonce(), seed.gerar_nonce()
+        # Compromete sem pausa e revela assim que o servidor pedir (fluxo real):
+        # com cooldown ativo, um `revelar_seed` dropado aqui travaria o início.
+        c1.emit("comprometer_seed", {"chave": cs1["chave_secreta"], "compromisso": seed.compromisso(n1)})
+        c2.emit("comprometer_seed", {"chave": cs2["chave_secreta"], "compromisso": seed.compromisso(n2)})
+        for cliente, nonce in ((c1, n1), (c2, n2)):
+            for evento in cliente.get_received():
+                if evento["name"] == "seed_revelar":
+                    cliente.emit("revelar_seed", {"chave": cs1["chave_secreta"] if cliente is c1
+                                                  else cs2["chave_secreta"], "nonce": nonce})
+
+        lobby = modulo_store.carregar_sala(SALA)
+        assert not lobby.revelacoes_pendentes(), \
+            "revelação imediata após o commit não pode ser dropada pelo cooldown"
+        pode, _ = lobby.pode_iniciar()
+        assert pode, "com todos revelados e prontos, o master deve poder iniciar"
+        c1.disconnect()
+        c2.disconnect()
+    finally:
+        modulo_app.tem_cooldown = lambda *a, **k: False
+    _limpar()
+    _ok("revelar_seed não é dropado pelo cooldown")
+
+
 def teste_upstash_indice_resumos():
     arm = modulo_store.ArmazenamentoUpstash("http://fake", "tok")
     estado = {"dados": {}, "indice": set()}
@@ -1334,6 +1447,191 @@ def teste_resumo_dedup():
     _ok("dedup de resumo (economia de comandos)")
 
 
+# --- Expulsão de jogador (Fase 19) -----------------------------------------
+def teste_expulsar_bot():
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 2})
+    lobby = modulo_store.carregar_sala(SALA)
+    bots = [j for j in lobby.jogadores if j.is_ia]
+    assert len(bots) == 2, "pré-condição: dois bots na sala"
+    c1.emit("expulsar_jogador", {"chave": cs1["chave_secreta"], "client_id": bots[0].client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert not any(j.client_id == bots[0].client_id for j in lobby.jogadores), \
+        "bot expulso deve sair do lobby"
+    assert len([j for j in lobby.jogadores if j.is_ia]) == 1, "só o bot expulso deve sair"
+    assert lobby.retornar_master() is not False, "master humano continua master"
+    c1.disconnect()
+    _limpar()
+    _ok("expulsar IA (Fase 19)")
+
+
+def teste_expulsar_humano():
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    bia = next(j for j in lobby.jogadores if j.username == "Bia")
+    assert ana.master and not bia.master
+
+    # Não-master não pode expulsar.
+    c2.emit("expulsar_jogador", {"chave": cs2["chave_secreta"], "client_id": ana.client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 2, "não-master não pode expulsar"
+    # Master não pode se auto-expulsar.
+    c1.emit("expulsar_jogador", {"chave": cs1["chave_secreta"], "client_id": ana.client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 2, "master não pode se auto-expulsar"
+
+    c1.emit("expulsar_jogador", {"chave": cs1["chave_secreta"], "client_id": bia.client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert not any(j.client_id == bia.client_id for j in lobby.jogadores), \
+        "expulso deve sair do lobby"
+    assert funcoes_gerais.sala_do_cliente(bia.client_id) is None, \
+        "índice sid do expulso deve ser limpo"
+    eventos_expulso = c2.get_received()
+    assert _achar_evento(eventos_expulso, "expulso_da_sala") is not None, \
+        "expulso deve receber expulso_da_sala"
+    assert _achar_evento(eventos_expulso, "jogador_expulso") is None, \
+        "expulso não deve receber os eventos da room após sair"
+    eventos_room = c1.get_received()
+    assert _achar_evento(eventos_room, "jogador_expulso") is not None, \
+        "a room deve saber quem foi expulso"
+    assert lobby.jogadores[0].master, "o master continua na sala"
+    c1.disconnect()
+    _limpar()
+    _ok("expulsar humano (Fase 19)")
+
+
+def teste_expulsar_durante_partida():
+    _limpar()
+    clis, lobby = _conectar_trio(2)
+    partida = lobby.partidas[-1]
+    alvo = next(j for j in partida.jogadores if j.username != "Ana")
+    ana_cli, ana_chave = clis["Ana"]
+    ana_cli.emit("expulsar_jogador", {"chave": ana_chave, "client_id": alvo.client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    rodada = partida.rodadas[-1]
+    assert alvo.client_id not in [j.client_id for j in partida.jogadores], \
+        "expulso deve sair da partida"
+    assert alvo.client_id not in [j.client_id for j in lobby.jogadores], \
+        "expulso deve sair do lobby"
+    assert alvo.client_id not in [j.client_id for j in rodada.jogadores], \
+        "expulso deve sair da rodada (senão a conferência espera um fantasma)"
+    assert lobby.pagina == 2, "partida não pode travar após a expulsão"
+    assert rodada.vez_atual is not alvo, "vez não pode ficar no expulso"
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("expulsar durante a partida (Fase 19)")
+
+
+# --- Jogada automática por tempo máximo (Fase 21) ---------------------------
+def teste_autojogar():
+    from datetime import datetime, timedelta
+
+    def _envelhecer(rodada, campo, segundos):
+        setattr(rodada, campo, datetime.now() - timedelta(seconds=segundos))
+
+    def _iniciar(tempo):
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c2, cs2, _ = _conectar()
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"tempo_max_jogada": tempo}})
+        c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.pagina == 1, f"deve estar na rolagem, pagina={lobby.pagina}"
+        # Os payloads da rolagem e do turno anunciado devem trazer o tempo máximo.
+        ev1 = c1.get_received()
+        ev2 = c2.get_received()
+        constr = [e for e in ev1 if e["name"] == "construtor_dados"]
+        assert constr and constr[-1]["args"][0].get("tempo_max") == tempo, \
+            "construtor_dados deve trazer tempo_max"
+        mt = ([e for e in ev1 if e["name"] == "meu_turno"]
+              or [e for e in ev2 if e["name"] == "meu_turno"])
+        assert mt and mt[-1]["args"][0].get("tempo_max") == tempo, \
+            "meu_turno deve trazer tempo_max"
+        return c1, cs1["chave_secreta"], c2, cs2["chave_secreta"]
+
+    _limpar()
+    c1, k1, c2, k2 = _iniciar(30)
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+
+    # Autojogar imediato (tempo não passou) é ignorado.
+    c1.emit("autojogar", {"chave": k1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.joguei_dados is False, "auto-roll instantâneo não pode valer"
+
+    # Envelhece a rolagem: o autojogar rola os dados do atrasado.
+    _envelhecer(rodada, "inicio_rolagem_em", 999)
+    modulo_store.salvar_sala(lobby)
+    c1.emit("autojogar", {"chave": k1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.joguei_dados is True, "autojogar deve rolar os dados de Ana"
+    assert _achar_evento(c1.get_received(), "jogar_dados_resultado") is not None, \
+        "auto-roll deve emitir o resultado dos dados"
+    assert lobby.pagina == 1, "Bia ainda não rolou, deve seguir na rolagem"
+
+    # Bia também atrasa: o autojogar dela destrava a página 2.
+    c2.emit("autojogar", {"chave": k2})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, f"todos rolados deve ir para os turnos, pagina={lobby.pagina}"
+    rodada = lobby.partidas[-1].rodadas[-1]
+    vez = rodada.vez_atual
+    vez_cli = c1 if vez.username == "Ana" else c2
+    outro = c2 if vez.username == "Ana" else c1
+    chave_vez = k1 if vez.username == "Ana" else k2
+
+    # Autojogar imediato no turno é ignorado (tempo não passou).
+    vez_cli.emit("autojogar", {"chave": chave_vez})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert len(rodada.turnos) == 0, "auto-aposta instantânea não pode valer"
+
+    # Jogador fora da vez é ignorado mesmo com tempo passado.
+    _envelhecer(rodada, "vez_em", 999)
+    modulo_store.salvar_sala(lobby)
+    outro.emit("autojogar", {"chave": k1 if vez.username == "Bia" else k2})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert len(rodada.turnos) == 0, "quem não é o da vez não pode auto-jogar"
+
+    # Da vez, com tempo passado: auto-aposta válida e a vez avança.
+    vez_cli.emit("autojogar", {"chave": chave_vez})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert len(rodada.turnos) == 1, "auto-aposta deve criar um turno válido"
+    assert rodada.vez_atual is not vez, "a vez deve avançar após o auto-jogo"
+
+    # Config tempo=0 (desligado): autojogar é no-op mesmo com tempo passado.
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    c1, k1, c2, k2 = _iniciar(0)
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    _envelhecer(rodada, "inicio_rolagem_em", 999)
+    modulo_store.salvar_sala(lobby)
+    c1.emit("autojogar", {"chave": k1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.joguei_dados is False, "com tempo desligado o autojogar é no-op"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("jogada automática por tempo máximo (Fase 21)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -1363,8 +1661,9 @@ def verificar_integracao():
         ("GC-bot-persistido", teste_gc_unificado_sala_bot_sem_humano),
         ("busca-humanos", teste_busca_esconde_sala_sem_humano),
         ("heartbeat-resumo", teste_heartbeat_renova_resumo),
+        ("heartbeat-sync", teste_heartbeat_resincroniza_lobby),
         ("B4-orfa-fechada", teste_sala_orfa_e_fechada),
-        ("sala-padrao", teste_sala_padrao_cria_nova),
+        ("sala-padrao", teste_sala_padrao_fica_na_home),
     ]
     testes_hardening = [
         ("B6-resumo", teste_resumo_malformado_nao_quebra_busca),
@@ -1384,10 +1683,20 @@ def verificar_integracao():
     ]
     testes_seed = [
         ("commit-reveal", teste_commit_reveal),
+        ("reveal-cooldown", teste_revelar_seed_fora_do_cooldown),
+    ]
+    testes_expulsao = [
+        ("expulsar-bot", teste_expulsar_bot),
+        ("expulsar-humano", teste_expulsar_humano),
+        ("expulsar-partida", teste_expulsar_durante_partida),
+    ]
+    testes_autojogar = [
+        ("autojogar", teste_autojogar),
     ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
-                           + testes_hardening + testes_correcoes + testes_seed):
+                           + testes_hardening + testes_correcoes + testes_seed
+                           + testes_expulsao + testes_autojogar):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

@@ -20,12 +20,14 @@ import secrets
 
 
 # Faixa de tempo (ms) que um bot "pensa" antes de agir. Quanto mais inteligente
-# o nível, maior a pausa (dá a sensação de raciocínio mais elaborado).
+# o nível, maior a pausa (dá a sensação de raciocínio mais elaborado). O range
+# é propositalmente largo: a personalidade do bot e a situação da mesa
+# (só bots com dados) encolhem ou esticam esse tempo a cada lance.
 FAIXAS_PENSAMENTO = {
-    1: (250, 600),
-    2: (450, 1000),
-    3: (700, 1500),
-    4: (1000, 2100),
+    1: (400, 900),
+    2: (650, 1500),
+    3: (1000, 2200),
+    4: (1400, 3000),
 }
 
 NOMES_FACES = {
@@ -38,14 +40,26 @@ NOMES_FACES = {
 }
 
 
-def tempo_pensamento(nivel):
-    """Atraso (ms) de pensamento do bot; maior nos níveis mais inteligentes."""
+def tempo_pensamento(nivel, jogador=None, so_ias=False):
+    """
+    Atraso (ms) de pensamento do bot; maior nos níveis mais inteligentes.
+    A personalidade modula o ritmo: bots ousados/agressivos decidem mais rápido
+    (impulso), ponderados/cautelosos demoram mais — mais imprevisibilidade.
+    Quando só restam IAs com dados na partida (`so_ias`), o jogo acelera.
+    """
     try:
         nivel = int(nivel)
     except (TypeError, ValueError):
         nivel = 1
     faixa = FAIXAS_PENSAMENTO.get(nivel, FAIXAS_PENSAMENTO[1])
-    return secrets.randbelow(faixa[1] - faixa[0] + 1) + faixa[0]
+    atraso = secrets.randbelow(faixa[1] - faixa[0] + 1) + faixa[0]
+    if jogador is not None and getattr(jogador, 'is_ia', False):
+        risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
+        agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
+        atraso = int(atraso * (1.0 - 0.18 * risco - 0.12 * agressividade))
+    if so_ias:
+        atraso = int(atraso * 0.70)
+    return max(120, atraso)
 
 
 def nome_face(face, quantidade):

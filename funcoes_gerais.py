@@ -90,8 +90,8 @@ def tem_cooldown(client_id, segundos):
 def normalizar_sala(sala_id):
     """
     Normaliza e valida o id de sala vindo da URL/front-end. Inválidos caem no
-    sentinela SALA_PADRAO; o connect trata esse sentinela gerando uma sala nova
-    (a antiga sala padrão compartilhada enchia e bloqueava novos jogadores).
+    sentinela SALA_PADRAO; o connect trata esse sentinela deixando o cliente na
+    home (sem criar sala automaticamente), que escolhe criar ou buscar.
     """
     if not isinstance(sala_id, str):
         return SALA_PADRAO
@@ -178,6 +178,46 @@ def mudar_pagina(num, sala):
     emit("mudar_pagina", {'pag_numero': num}, to=sala_room(sala))
 
 
+def _rodada_atual(lobby):
+    """Última rodada da última partida do lobby, se existir."""
+    partida = lobby.partidas[-1] if lobby.partidas else None
+    if partida is None or not partida.rodadas:
+        return None
+    return partida.rodadas[-1]
+
+
+def status_rolagem(lobby):
+    """Quem já rolou os dados na rolagem (página 1), por apelido."""
+    rodada = _rodada_atual(lobby)
+    return rodada.status_rolagem_dict() if rodada else {'confirmados': [], 'pendentes': [], 'total': 0}
+
+
+def status_conferencia(lobby):
+    """Quem já confirmou o "Ok" na tela de conferência (página 3), por apelido."""
+    rodada = _rodada_atual(lobby)
+    return rodada.status_conferencia_dict() if rodada else {'confirmados': [], 'pendentes': [], 'total': 0}
+
+
+def status_vitoria(lobby):
+    """Quem já confirmou o "Ok" na tela de vitória (página 4), por apelido."""
+    return lobby.status_vitoria_dict()
+
+
+def emitir_status_rolagem(lobby):
+    """Re-emite o estado atual da rolagem (quem já rolou) para a room."""
+    emit('rolagem_status', status_rolagem(lobby), to=lobby.sala_room())
+
+
+def emitir_status_conferencia(lobby):
+    """Re-emite o estado atual das confirmações da conferência para a room."""
+    emit('conferencia_status', status_conferencia(lobby), to=lobby.sala_room())
+
+
+def emitir_status_vitoria(lobby):
+    """Re-emite o estado atual das confirmações da vitória para a room."""
+    emit('vitoria_status', status_vitoria(lobby), to=lobby.sala_room())
+
+
 def enviar_snapshot_sala(lobby, jogador):
     """
     Reconstrói o front-end de um jogador que acabou de conectar (tab novo, refresh
@@ -209,12 +249,14 @@ def enviar_snapshot_sala(lobby, jogador):
 
     if pagina == 1:
         if rodada is not None:
-            emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador},
+            emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador,
+                                      'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
                  to=jogador.client_id)
             if not espectador and jogador.joguei_dados and jogador.dados:
                 # Já rolou: repete o resultado pra reapresentar os dados na tela.
                 emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados},
                      to=jogador.client_id)
+            emitir_status_rolagem(lobby)
         return
 
     if pagina == 2:
@@ -260,7 +302,8 @@ def enviar_snapshot_sala(lobby, jogador):
                      to=jogador.client_id)
         if vez_atual is not None and not espectador:
             if vez_atual == jogador:
-                payload = {'username': jogador.username}
+                payload = {'username': jogador.username,
+                           'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)}
                 payload.update(rodada.contexto_aposta())
                 emit('meu_turno', payload, to=jogador.client_id)
             else:
@@ -270,11 +313,15 @@ def enviar_snapshot_sala(lobby, jogador):
     if pagina == 3:
         if rodada is not None and rodada.conferencia:
             emit('cards_conferencia', rodada.conferencia, to=jogador.client_id)
+        emitir_status_conferencia(lobby)
         return
 
     if pagina == 4:
         if partida.vencedor_final is not None:
-            emit('vencedor_da_partida', {'nome': partida.vencedor_final.username}, to=jogador.client_id)
+            emit('vencedor_da_partida',
+                 {'nome': partida.vencedor_final.username,
+                  'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
+                 to=jogador.client_id)
             nomes = [j.username for j in lobby.jogadores if j.username is not None]
             pontos = [j.pontos for j in lobby.jogadores if j.username is not None]
             emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id)
@@ -282,18 +329,26 @@ def enviar_snapshot_sala(lobby, jogador):
                 emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id)
             if not espectador and partida.vencedor_final == jogador:
                 emit('botao_vencedor_ativ', to=jogador.client_id)
+        emitir_status_vitoria(lobby)
 
 
-def atualizar_lista_usuarios(lobby):
+def montar_payload_lista_usuarios(lobby):
     """
-    Atualiza a lista de usuários na tela de entrada de jogadores da sala.
-    Também envia o estado da sala de espera: nome, status, configurações e prontidão.
+    Monta o payload de `update_user_list` (estado público da sala de espera),
+    com os efeitos colaterais leves: reafirma o master e retoma o fluxo de seed
+    (provably fair) se necessário. Reutilizado pelo broadcast normal
+    (`atualizar_lista_usuarios`) e pelo re-sync entre instâncias do heartbeat
+    (Fase 18/19): como as rooms do Socket.IO vivem por instância, o servidor
+    devolve este snapshot ao cliente que bateu, lido do store compartilhado.
     """
     lista = lobby.jogadores
     usernames = [jogador.username for jogador in lista if jogador.username is not None]
     pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
     masters = [jogador.master for jogador in lista if jogador.username is not None]
     prontos = [jogador.pronto for jogador in lista if jogador.username is not None]
+    # `ids` acompanha `usernames` (mesmos índices): permite o master expulsar um
+    # jogador pelo client_id (Fase 19), sem expor as chaves secretas.
+    ids = [jogador.client_id for jogador in lista if jogador.username is not None]
     o_master = lobby.retornar_master()
     if o_master:
         emit("master_def", {"is_master": True}, to=o_master.client_id)
@@ -310,18 +365,27 @@ def atualizar_lista_usuarios(lobby):
     # payload de config para o input do master não ser limpo a cada atualização.
     config_publica = dict(lobby.config)
     config_publica['nome'] = lobby.nome
-    emit("update_user_list", {
+    return {
         "users": usernames,
         "pontos": pontos,
         "masters": masters,
         "prontos": prontos,
+        "ids": ids,
         "nome": lobby.nome,
         "status": lobby.status,
         "config": config_publica,
         "seed": lobby.info_publica_seed(),
         "pode_iniciar": pode_iniciar,
         "motivo": motivo,
-    }, to=lobby.sala_room())
+    }
+
+
+def atualizar_lista_usuarios(lobby):
+    """
+    Atualiza a lista de usuários na tela de entrada de jogadores da sala.
+    Também envia o estado da sala de espera: nome, status, configurações e prontidão.
+    """
+    emit("update_user_list", montar_payload_lista_usuarios(lobby), to=lobby.sala_room())
     # Fase 8: índice leve de resumos p/ a busca (evita reidratar os lobbies).
     # Stamp do sinal de vida antes de persistir: resumos velhos são escondidos da
     # busca (serverless), e o próprio blob do Lobby guarda o instante renovado.
