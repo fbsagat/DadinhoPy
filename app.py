@@ -184,7 +184,6 @@ def _purgar_desconectados(lobby):
     """
     agora = datetime.now()
     mudou = False
-    removidos = False
     for jogador in list(lobby.jogadores):
         if jogador.desconectado_em is None:
             continue
@@ -193,11 +192,11 @@ def _purgar_desconectados(lobby):
                 mudou = True
                 continue
             _remover_jogador_da_sala(lobby, jogador)
-            removidos = True
             mudou = True
-    if removidos:
-        lobby.definir_master()
+    # Remoções e substituições podem ter derrubado o master (ex.: o master virou
+    # bot): repõe um master humano. É no-op se já houver um.
     if mudou:
+        lobby.definir_master()
         ia.processar(lobby)
     return mudou
 
@@ -215,6 +214,15 @@ def _gc_sala(lobby):
         remover_sala(lobby.sala_id)
         esquecer_sala(lobby.sala_id)
         return True
+    # Fase 15: partida sem nenhum jogador restante (todos saíram) mas ainda com
+    # espectador humano conectado ficaria presa em "jogando" para sempre — quem
+    # entra depois só vira espectador e ninguém reinicia. Volta à sala de espera
+    # promovendo os espectadores a jogadores (e elegendo um master).
+    if not lobby.jogadores and lobby.espectadores:
+        lobby.resetar_para_lobby()
+        lobby.definir_master()
+        mudar_pagina(0, sala=lobby.sala_id)
+        mudou = True
     if mudou:
         atualizar_lista_usuarios(lobby)
     return False
@@ -437,11 +445,13 @@ def handle_disconnect():
             # fica marcado (desconectado_em) por GRACE_RECONEXAO_SEGUNDOS e pode
             # voltar via chave_secreta (handle_connect limpa o marcador).
             # Fase 15: só faz sentido esperar se restar outro HUMANO ativo — um
-            # bot não justifica segurar a sala (senão ela ficaria órfã).
+            # bot não justifica segurar a sala (senão ela ficaria órfã). Um
+            # espectador humano conectado também mantém a sala viva, então conta
+            # para a janela de graça (e agenda o expurgo via `verificar_desconectados`).
             outros_ativos = sum(
                 1 for j in lobby.jogadores
                 if j is not jogador and not j.is_ia and j.desconectado_em is None
-            )
+            ) + sum(1 for e in lobby.espectadores if not e.is_ia)
             if outros_ativos < 1:
                 _remover_jogador_da_sala(lobby, jogador)
             else:
@@ -734,6 +744,11 @@ def aposta(dados, lobby, jogador):
     Função executada pelo jogador quando ele faz uma aposta, mas antes verifica se o jogador está em uma rodada e se
     ele é o da vez no turno.
     """
+    # Fase 15: só vale na tela de turnos (2). Sem o gate, um cliente atrasado
+    # (ou malicioso) poderia apostar durante a conferência/vitória e corromper
+    # a rodada (a vez continua sendo dele quando a desconfiança fecha).
+    if lobby.pagina != 2:
+        return
     internos = dados.get('dados')
     if not isinstance(internos, dict):
         return
@@ -754,6 +769,10 @@ def desconfiar(dados, lobby, jogador):
     Função executada pelo jogador quando ele desconfia de uma aposta, mas antes verifica se o jogador está em uma
     rodada e se ele é o da vez no turno.
     """
+    # Fase 15: idem `aposta` — desconfiar só na tela de turnos (2), senão um
+    # segundo desconfio durante a conferência re-emitiria/alteraria a rodada.
+    if lobby.pagina != 2:
+        return
     rodada = jogador.rodada_atual
     if rodada and rodada.vez_atual == jogador and len(rodada.turnos) > 0:
         rodada.desconfiar(jogador=jogador)

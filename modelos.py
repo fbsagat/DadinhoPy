@@ -784,24 +784,29 @@ class Lobby:
 
     def verificar_jogador_master(self):
         """
-        Verifica se algum jogador é master.
+        Verifica se algum jogador HUMANO é master. Bots não contam: um humano
+        substituído pela IA pode ter ficado com a flag `master` e, se contasse,
+        bloquearia para sempre a promoção de outro humano (sala sem master).
         """
         for jogador in self.jogadores:
-            if jogador.master:
+            if jogador.master and not jogador.is_ia:
                 return True
         return False
 
     def definir_master(self):
         """
-        Define um novo master caso precise. Bots nunca assumem o master.
+        Define um novo master caso precise. Bots nunca assumem o master (e um
+        bot que herdou a flag de um humano substituído é limpo aqui).
         """
         if self.verificar_jogador_master():
             return
-        else:
-            humanos = [jogador for jogador in self.jogadores if not jogador.is_ia]
-            humanos.sort(key=lambda jogador: jogador.entrou)
-            if humanos:
-                humanos[0].master = True
+        for jogador in self.jogadores:
+            if jogador.is_ia:
+                jogador.master = False
+        humanos = [jogador for jogador in self.jogadores if not jogador.is_ia]
+        humanos.sort(key=lambda jogador: jogador.entrou)
+        if humanos:
+            humanos[0].master = True
 
     def tem_humano(self):
         """True se ainda há ao menos um humano (jogador ou espectador) na sala."""
@@ -873,8 +878,9 @@ class Lobby:
             return len(self.jogadores)
 
     def retornar_master(self):
+        """Master humano da sala (bots nunca contam), ou False se não houver."""
         for jogador in self.jogadores:
-            if jogador.master:
+            if jogador.master and not jogador.is_ia:
                 return jogador
         return False
 
@@ -997,7 +1003,9 @@ class Partida:
             ultima_rodada = self.rodadas[-1]
             perdedor = getattr(ultima_rodada, 'perdedor', None)
             vencedor = getattr(ultima_rodada, 'vencedor', None)
-            if perdedor is not None:
+            # O perdedor pode já ter saído da partida (desconexão na conferência):
+            # nesse caso não perde outro dado nem precisa ser removido de novo.
+            if perdedor is not None and perdedor in self.jogadores:
                 # Tirar um dado do perdedor e tirar ele da partida se não restar nenhum dado para ele
                 perdedor.dados_qtd -= 1
                 if perdedor.dados_qtd == 0:
@@ -1009,18 +1017,30 @@ class Partida:
                     perdedor.turno_atual = None
                     self.jogadores.remove(perdedor)
                 if len(self.jogadores) < 2:
-                    return {'vez_atual': vencedor, 'rodada_numero': rodada_numero, 'final': True}
+                    return {'vez_atual': self.iniciante_valido(vencedor),
+                            'rodada_numero': rodada_numero, 'final': True}
                 if perdedor in self.jogadores:
                     return {'vez_atual': perdedor, 'rodada_numero': rodada_numero}
-                return {'vez_atual': vencedor, 'rodada_numero': rodada_numero}
-            # Sem registro de perdedor na rodada anterior: segue com o vencedor ou com um sorteado.
-            proximo = vencedor or self.jogador_sorteado
+                return {'vez_atual': self.iniciante_valido(vencedor), 'rodada_numero': rodada_numero}
+            # Sem perdedor em jogo (não houve, ou ele caiu na conferência): segue
+            # com o vencedor ou com um sorteado que ainda esteja na mesa.
+            proximo = self.iniciante_valido(vencedor if vencedor in self.jogadores else self.jogador_sorteado)
             if len(self.jogadores) < 2:
                 return {'vez_atual': proximo, 'rodada_numero': rodada_numero, 'final': True}
             return {'vez_atual': proximo, 'rodada_numero': rodada_numero}
         # Se for a primeira rodada, sortear.
         else:
             return {'vez_atual': self.jogador_sorteado, 'rodada_numero': rodada_numero}
+
+    def iniciante_valido(self, preferido):
+        """
+        Garante que o jogador escolhido para abrir a rodada ainda está na partida.
+        Um perdedor/vencedor que desconectou na conferência não pode voltar como
+        `vez_atual`; cai para o primeiro jogador ainda na mesa.
+        """
+        if preferido in self.jogadores:
+            return preferido
+        return self.jogadores[0] if self.jogadores else preferido
 
     def buscar_jogador_pelo_client_id(self, client_id):
         for jogador in self.jogadores:

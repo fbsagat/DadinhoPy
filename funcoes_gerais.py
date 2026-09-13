@@ -258,8 +258,8 @@ def enviar_snapshot_sala(lobby, jogador):
                       'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
                       'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
                      to=jogador.client_id)
-        if vez_atual is not None:
-            if not espectador and vez_atual == jogador:
+        if vez_atual is not None and not espectador:
+            if vez_atual == jogador:
                 payload = {'username': jogador.username}
                 payload.update(rodada.contexto_aposta())
                 emit('meu_turno', payload, to=jogador.client_id)
@@ -305,6 +305,11 @@ def atualizar_lista_usuarios(lobby):
         if lobby.compromissos_completos() and lobby.revelacoes_pendentes():
             emit("seed_revelar", {'sala': lobby.sala_id}, to=lobby.sala_room())
     pode_iniciar, motivo = lobby.pode_iniciar()
+    # `nome` vive no Lobby, não em `config`, mas o cliente o edita junto das
+    # demais configurações (`aplicar_config` lê `config.nome`). Vai mesclado no
+    # payload de config para o input do master não ser limpo a cada atualização.
+    config_publica = dict(lobby.config)
+    config_publica['nome'] = lobby.nome
     emit("update_user_list", {
         "users": usernames,
         "pontos": pontos,
@@ -312,7 +317,7 @@ def atualizar_lista_usuarios(lobby):
         "prontos": prontos,
         "nome": lobby.nome,
         "status": lobby.status,
-        "config": lobby.config,
+        "config": config_publica,
         "seed": lobby.info_publica_seed(),
         "pode_iniciar": pode_iniciar,
         "motivo": motivo,

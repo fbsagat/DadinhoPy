@@ -417,6 +417,34 @@ def teste_b1_b7_desconexao_conferencia():
     _ok("B1/B7 (desconexão na conferência)")
 
 
+def teste_conferencia_perdedor_desconectado():
+    # O perdedor da rodada cai ainda na conferência: ele já foi removido da
+    # partida, mas `rodada.perdedor` continua apontando para ele. Ao fechar a
+    # conferência, `verificar_partida_anterior` tentava remover de novo (e
+    # decrementar dos dados) um jogador que não está mais na partida — o que
+    # travaria a rodada seguinte.
+    _limpar()
+    clis, _ = _conectar_trio(1)
+    lobby = _rodada_ate_conferencia(clis)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    perdedor = rodada.perdedor
+    assert perdedor is not None
+    clis[perdedor.username][0].disconnect()
+    _purgar_grace(clis)
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.partidas[-1].jogadores) == 2, "perdedor caído deve sair da partida"
+
+    for c, chave in clis.values():
+        if c.is_connected():
+            c.emit("conferencia_final", {"chave": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1, "a rodada seguinte deve começar mesmo sem o perdedor"
+    assert len(lobby.partidas[-1].rodadas) == 2, "deve ter criado a rodada 2"
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("perdedor desconectado na conferência")
+
+
 def teste_b2_desconexao_vitoria():
     _limpar()
     clis, _ = _conectar_trio(1)
@@ -897,6 +925,136 @@ def teste_sala_padrao_cria_nova():
     _ok("sala padrão cria sala nova (Fase 16)")
 
 
+def teste_aposta_fora_da_pagina():
+    # Fase 15: apostar/desconfiar só valem na tela de turnos (2). Depois da
+    # desconfiança (página 3), a vez ainda é do desconfiador; sem o gate ele
+    # conseguiria criar um turno novo e corromper a rodada em conferência.
+    _limpar()
+    clis, _ = _conectar_trio(1)
+    lobby = _rodada_ate_conferencia(clis)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert lobby.pagina == 3
+    vez = rodada.vez_atual
+    ultimo = rodada.turnos[-1]
+    cli_vez, chave_vez = clis[vez.username]
+    turnos_antes = len(rodada.turnos)
+    # Aposta que seria legal (mesma face com quantidade maior): sem o gate,
+    # criaria um turno.
+    cli_vez.emit("apostar", {"dados": {"chave": chave_vez,
+                                       "dado": ultimo.dado_face, "quantidade": ultimo.dado_qtd + 1}})
+    cli_vez.emit("desconfiar", {"dados": {"chave": chave_vez}})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert lobby.pagina == 3, "aposta/desconfiança fora da página 2 devem ser ignoradas"
+    assert len(rodada.turnos) == turnos_antes, "não pode criar turno em conferência"
+    assert rodada.vez_atual is vez, "a vez não pode mudar em conferência"
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("gate de página de aposta/desconfiança")
+
+
+def teste_master_apos_substituicao_ia():
+    # Um master que cai e vira bot não pode segurar a flag `master` para sempre
+    # (senão nenhum humano consegue mais iniciar a próxima partida).
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"substituir_desconectado_por_ia": True}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.jogadores[0].username == "Ana" and lobby.jogadores[0].master
+
+    c1.disconnect()
+    c2.emit("verificar_desconectados")  # expurga a janela (grace = 0 no teste)
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    bia = next(j for j in lobby.jogadores if j.username == "Bia")
+    assert ana.is_ia, "master caído deve ser substituído por IA"
+    assert not ana.master, "bot não pode continuar master"
+    assert bia.master, "outro humano deve assumir o master"
+    assert lobby.verificar_jogador_master(), "deve haver um master humano"
+    assert lobby.retornar_master() is bia, "o master retornado não pode ser o bot"
+    c2.disconnect()
+    _limpar()
+    _ok("master não fica preso em bot substituído")
+
+
+def teste_espectador_segura_grace():
+    # Um espectador humano conectado mantém a sala viva: o jogador que cai
+    # deve ganhar a janela de reconexão (e não ser removido na hora).
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    c2, _, ev2 = _conectar()  # entra no meio: espectador humano
+    assert _achar_evento(ev2, "espectador") is not None
+
+    c1.disconnect()  # só resta o bot (jogador) e o espectador humano
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby is not None
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.desconectado_em is not None, "espectador humano deve segurar a janela de graça"
+    c2.disconnect()
+    _limpar()
+    _ok("espectador humano segura a janela de graça")
+
+
+def teste_sala_sem_jogadores_promove_espectador():
+    # Partida em andamento sem nenhum jogador restante, mas com um espectador
+    # humano: o GC deve devolver a sala à espera e promover o espectador, senão
+    # ela fica presa em "jogando" e ninguém mais consegue jogar.
+    import modelos
+    emit_original = funcoes_gerais.emit
+    funcoes_gerais.emit = lambda *a, **k: None  # fora de request não há room
+    try:
+        modulo_store.remover_sala(SALA)
+        lobby = modelos.Lobby(sala_id=SALA, lobby_numero=1)
+        lobby.pagina = 4
+        lobby.status = "jogando"
+        espectador = modelos.Jogador(client_id="esp")
+        espectador.username = "Esp"
+        lobby.espectadores.append(espectador)
+        modulo_store.salvar_sala(lobby)
+
+        fechou = modulo_app._gc_sala(lobby)
+        assert fechou is False, "sala com humano conectado não pode ser fechada"
+        recarregado = modulo_store.carregar_sala(SALA)
+        assert recarregado.status == "espera" and recarregado.pagina == 0
+        assert not recarregado.espectadores, "espectador deve ser promovido"
+        assert len(recarregado.jogadores) == 1
+        assert recarregado.jogadores[0].username == "Esp"
+        assert recarregado.jogadores[0].master, "promovido deve virar master"
+    finally:
+        funcoes_gerais.emit = emit_original
+        _limpar()
+    _ok("sala sem jogadores promove espectador ao lobby")
+
+
+def teste_config_nome_roundtrip():
+    # O input do master lê `config.nome`, mas o nome vive no Lobby: o payload de
+    # config precisa carregá-lo ou o campo é limpo a cada atualização.
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.get_received()  # descarta os eventos do connect/apelido
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"nome": "Sala do Fbi"}})
+    eventos = c1.get_received()
+    listas = [e for e in eventos if e["name"] == "update_user_list"]
+    assert listas, "configurar_partida deve atualizar a lista"
+    config = listas[-1]["args"][0].get("config", {})
+    assert config.get("nome") == "Sala do Fbi", \
+        "o cliente precisa receber config.nome para manter o input do master"
+    c1.disconnect()
+    _limpar()
+    _ok("nome da partida no payload de config")
+
+
 def teste_resumo_malformado_nao_quebra_busca():
     _limpar()
     modulo_store.salvar_resumo("quebrado", {"sala": "quebrado", "publica": True})
@@ -1140,11 +1298,20 @@ def verificar_integracao():
         ("upstash-indice", teste_upstash_indice_resumos),
         ("resumo-dedup", teste_resumo_dedup),
     ]
+    testes_correcoes = [
+        ("perdedor-cai", teste_conferencia_perdedor_desconectado),
+        ("gate-aposta", teste_aposta_fora_da_pagina),
+        ("master-bot", teste_master_apos_substituicao_ia),
+        ("grace-espectador", teste_espectador_segura_grace),
+        ("sala-sem-jogadores", teste_sala_sem_jogadores_promove_espectador),
+        ("config-nome", teste_config_nome_roundtrip),
+    ]
     testes_seed = [
         ("commit-reveal", teste_commit_reveal),
     ]
     try:
-        for nome, func in testes_fase6 + testes_fase7 + testes_fase15 + testes_hardening + testes_seed:
+        for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
+                           + testes_hardening + testes_correcoes + testes_seed):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)
