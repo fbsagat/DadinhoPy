@@ -23,7 +23,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 27** — Infra: ambiente, segredos e deploy (`.env.example`, fallback do store, `maxDuration`, cache de estáticos). ✅ concluída
 - **Fase 28** — Infra: robustez do store e locks (blob corrompido, `Partida` vazia, `esquecer_sala`). ✅ concluída
 - **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ✅ concluída
-- **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ⬜ pendente
+- **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ✅ concluída
 - **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ⬜ pendente
 
 ---
@@ -352,16 +352,16 @@ Objetivo: fechar a aposta irrespondível e o bypass do limite de jogadores pelo 
 
 Verificação (local, `.venv`): `python verificar.py` — novos testes `H2-aposta-max` (aposta "100" com 3 dados vira 3 e o turno é criado; o próximo é forçado a desconfiar e a conferência fecha) e `H3-cap-placeholder` (4º connect com `tem_chave=1` numa espera 3/3 leva `sala_cheia`; 21º espectador com `tem_chave=1` estoura `MAX_ESPECTADORES` e leva `sala_cheia`); regressão zero nas demais fases. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
 
-## Fase 30 — Frontend: fila de alertas e seleção de dado
+## Fase 30 — Frontend: fila de alertas e seleção de dado ✅ concluída
 
 Objetivo: eliminar os bugs de interação que "travam" o jogador na tela.
 
-- [ ] **F1 — Race no resolver de alerta** (`static/script.js:1969-2004`): `_alerta_resolver` único é sobrescrito se um 2º alerta abre sobre o 1º → a promise do 1º nunca resolve e cadeias `.then()` morrem (ex.: `sala_cheia → criar_sala`, `expulso_da_sala → navegação`). Filar alertas (ou devolver a promise atual quando um já está aberto).
-- [ ] **F2 — Seleção de dado stale entre turnos** (`script.js:2844`, `1319`, `1653`): `selectedImageValue` não é resetado em `meu_turno`/`espera_turno`/`reset_rodada` — a aposta envia a face do turno anterior quando o jogador não clica de novo, e `ajustar_quantidade_minima` recorre à face velha. Resetar a seleção e desmarcar `.selected` a cada turno/rodada.
-- [ ] **F3 — Limite do `#increase`** (`script.js:2831-2834`): deixa exceder o total de dados da mesa; o servidor rebate com `jogada_invalida`. Capar no total de `dados_mesa`.
-- [ ] **F4 — Enter em alerta de confirmação** (`script.js:2091-2124`): `Enter` resolve `true` mesmo no alerta de Cancelar. Atender só ao alerta "Ok"; `Escape` → `false` no de cancelar.
+- [x] **F1 — Race no resolver de alerta** (`static/script.js:1969-2004`): o resolver único `_alerta_resolver` era sobrescrito quando um 2º alerta abria sobre o 1º → a promise do 1º nunca resolvia e cadeias `.then()` morriam (ex.: `sala_cheia → criar_sala`, `expulso_da_sala → navegação`). Agora os alertas têm **fila**: `_alerta_ativo` (alerta aberto) + `_fila_alertas` (pendentes) — quando o atual fecha, o próximo abre e resolve a própria promise na ordem.
+- [x] **F2 — Seleção de dado stale entre turnos** (`script.js:2844`, `1319`, `1653`): `selectedImageValue` não era resetado em `meu_turno`/`espera_turno`/`reset_rodada` — a aposta enviava a face do turno anterior quando o jogador não clicava de novo, e `ajustar_quantidade_minima` recorria à face velha. Novo helper `limpar_selecao_dado()` (zera a seleção e desmarca `.selected`) chamado nesses 3 handlers.
+- [x] **F3 — Limite do `#increase`** (`script.js:2831-2834`): deixava exceder o total de dados da mesa; o servidor rebatia com `jogada_invalida` (e clampeava — Fase 29 H2). O handler de `dados_mesa` agora guarda `total_dados_mesa` e o botão `+` para de subir no total.
+- [x] **F4 — Enter em alerta de confirmação** (`script.js:2091-2124`): `Enter` resolvia `true` mesmo no alerta de Cancelar. Agora o Enter só confirma (`fechar_alerta(true)`) no alerta de "Ok" (aviso/erro/info/sucesso); no `confirmar`, o Enter ativa o botão em foco (o padrão é o Cancelar → `false`) e o `Escape` resolve `false`.
 
-Verificação: `node --check static/script.js` + `python verificar.py` (integração existente) + manual em 2 abas: alerta sobre alerta (a cadeia do 1º continua), 2 turnos seguidos sem clicar em dado exigem nova seleção, `#increase` para no total da mesa.
+Verificação: `node --check static/script.js` OK + `python verificar.py` 100% verde (integração existente). Teste manual em 2 abas: alerta sobre alerta (a cadeia do 1º continua — ex.: `sala_cheia` e a criação de sala em sequência), 2 turnos seguidos sem clicar em dado exigem nova seleção (pede `msg.selecione_dado`), `#increase` para no total da mesa.
 
 ## Fase 31 — Frontend: performance, CSS e segurança
 

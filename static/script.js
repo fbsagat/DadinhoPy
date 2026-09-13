@@ -929,8 +929,13 @@ socket.on('meus_dados', function (data) {
 
 });
 
+// Total de dados vivos na mesa (vem em `dados_mesa`): F3 usa para capar o
+// botão de aumentar a quantidade (o servidor clampeia a aposta — Fase 29 H2).
+let total_dados_mesa = 0;
+
 // Função para preencher a info sobre os dados na mesa
 socket.on('dados_mesa', function (data) {
+    total_dados_mesa = Number(data.total) || 0;
     const dados_mesa = document.getElementById('dados_mesa')
     const total = data.total
     dados_mesa.innerHTML = ""
@@ -1316,6 +1321,8 @@ socket.on('meu_turno', function (data) {
         coringa_atual_qtd: Number(data.coringa_atual_qtd) || 0,
         ultima_aposta: data.ultima_aposta || null
     };
+    // F2: nova vez = nova escolha de face (a do turno anterior não vale mais).
+    limpar_selecao_dado();
     ajustar_quantidade_minima(true);
 })
 
@@ -1328,6 +1335,8 @@ socket.on('espera_turno', function (data) {
     // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
     // isso para pedir um `espera_turno` reenviado se o indicador se perder).
     vez_atual_nome = String(data.username || '');
+    // F2: fora da vez a seleção antiga não pode vazar para o próximo turno.
+    limpar_selecao_dado();
     painel_jogada.style.display = "none"; // Oculta o painel de jogada
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
 })
@@ -1342,6 +1351,8 @@ socket.on('reset_rodada', function (data) {
     rearmar_ok('bot_confe_fim'); // Fase A: nova rodada, "Ok" volta ao estado inicial.
     botao.disabled = false; // Reativa o input
     botao_desc.disabled = true; // Desativa o input
+    // F2: rodada nova = face anterior não vale mais para a próxima aposta.
+    limpar_selecao_dado();
 
     jogadores.forEach((jogador, index) => {
         const card = document.getElementById(`card_hea_${jogador}`);
@@ -1956,7 +1967,12 @@ const alerta_overlay = document.getElementById('alerta_overlay');
 const alerta_icone = document.getElementById('alerta_icone');
 const alerta_titulo = document.getElementById('alerta_titulo');
 const alerta_mensagem = document.getElementById('alerta_mensagem');
-let _alerta_resolver = null;
+// F1: fila de alertas — `_alerta_ativo` é o alerta aberto agora; `_fila_alertas`
+// guarda os que chegaram por cima dele. Antes, um resolver único era
+// sobrescrito quando um 2º alerta abria sobre o 1º, e a promise do 1º nunca
+// resolvia (cadeias `.then()` morriam — ex.: `sala_cheia -> criar_sala`).
+let _alerta_ativo = null;
+let _fila_alertas = [];
 
 const ALERTA_ESTILOS = {
     aviso: { icone: '⚠️', titulo: 'alerta.aviso' },
@@ -1968,38 +1984,50 @@ const ALERTA_ESTILOS = {
 
 function mostrar_alerta(mensagem, tipo) {
     const chave = ALERTA_ESTILOS[tipo] ? tipo : 'aviso';
-    const estilo = ALERTA_ESTILOS[chave];
     if (!alerta_overlay) {
         return Promise.resolve(true);
     }
-    const confirmar = tipo === 'confirmar';
+    return new Promise(function (resolve) {
+        const alerta = { mensagem, tipo: chave, resolver: resolve };
+        if (_alerta_ativo) {
+            _fila_alertas.push(alerta);
+        } else {
+            _abrir_alerta(alerta);
+        }
+    });
+}
+
+function _abrir_alerta(alerta) {
+    _alerta_ativo = alerta;
+    const estilo = ALERTA_ESTILOS[alerta.tipo];
+    const confirmar = alerta.tipo === 'confirmar';
     alerta_icone.textContent = estilo.icone;
     alerta_titulo.textContent = t(estilo.titulo);
-    alerta_mensagem.textContent = mensagem;
-    alerta_overlay.dataset.tipo = chave;
+    alerta_mensagem.textContent = alerta.mensagem;
+    alerta_overlay.dataset.tipo = alerta.tipo;
     const botao_cancelar = document.getElementById('alerta_cancelar');
     if (botao_cancelar) {
         botao_cancelar.style.display = confirmar ? '' : 'none';
     }
     alerta_overlay.style.display = 'flex';
-    return new Promise(function (resolve) {
-        _alerta_resolver = resolve;
-        const botao = confirmar && botao_cancelar ? botao_cancelar : document.getElementById('alerta_ok');
-        if (botao) {
-            botao.focus();
-        }
-    });
+    const botao = confirmar && botao_cancelar ? botao_cancelar : document.getElementById('alerta_ok');
+    if (botao) {
+        botao.focus();
+    }
 }
 
 function fechar_alerta(resultado) {
-    if (!alerta_overlay || alerta_overlay.style.display === 'none') {
+    if (!alerta_overlay || !_alerta_ativo) {
         return;
     }
-    alerta_overlay.style.display = 'none';
-    if (_alerta_resolver) {
-        const resolver = _alerta_resolver;
-        _alerta_resolver = null;
-        resolver(!!resultado);
+    const atual = _alerta_ativo;
+    _alerta_ativo = null;
+    atual.resolver(!!resultado);
+    const proximo = _fila_alertas.shift();
+    if (proximo) {
+        _abrir_alerta(proximo);
+    } else {
+        alerta_overlay.style.display = 'none';
     }
 }
 
@@ -2099,8 +2127,13 @@ document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') {
         return;
     }
-    if (alerta_overlay && alerta_overlay.style.display === 'flex') {
-        fechar_alerta(true);
+    if (_alerta_ativo) {
+        // F4: só o alerta de "Ok" (aviso/erro/info/sucesso) confirma com Enter.
+        // No alerta de confirmação o Enter ativa o botão em foco (o padrão é o
+        // Cancelar → false) em vez de forçar `true`; Escape resolve false.
+        if (_alerta_ativo.tipo !== 'confirmar') {
+            fechar_alerta(true);
+        }
         return;
     }
     if (overlay_tutorial && overlay_tutorial.style.display === 'flex') {
@@ -2827,10 +2860,13 @@ const inputQuantidade = document.getElementById("quantidade");
 const btnIncrease = document.getElementById("increase");
 const btnDecrease = document.getElementById("decrease");
 
-// Incrementa o valor
+// Incrementa o valor (F3: capado no total de dados da mesa, senão o servidor
+// rebate com `jogada_invalida`).
 btnIncrease.addEventListener("click", () => {
     const currentValue = parseInt(inputQuantidade.value) || 1;
-    inputQuantidade.value = currentValue + 1;
+    if (!total_dados_mesa || currentValue < total_dados_mesa) {
+        inputQuantidade.value = currentValue + 1;
+    }
 });
 
 // Decrementa o valor (não permitindo valores menores que o mínimo)
@@ -2842,6 +2878,16 @@ btnDecrease.addEventListener("click", () => {
 });
 
 let selectedImageValue = null; // Para armazenar o valor da imagem selecionada
+
+// F2: a seleção de dado vale só para o turno corrente — limpa a face escolhida
+// (`selectedImageValue` e o destaque `.selected`) a cada turno/rodada, senão a
+// aposta reutiliza a face do turno anterior quando o jogador não clica de novo.
+function limpar_selecao_dado() {
+    selectedImageValue = null;
+    document.querySelectorAll('.image-button').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+}
 
 // Menor quantidade legal para apostar uma face, espelhando Rodada.explicar_jogada.
 function minimo_quantidade(face) {
