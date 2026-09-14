@@ -15,7 +15,7 @@
 
 ## Publicar na Vercel (fluxo real, Fase 3 do `todo.md`)
 
-0. **Produção atual:** https://dadinho-hazel.vercel.app (projeto `dadinho` da Vercel, scope `fbsagats-projects`, GitHub `fbsagat/DadinhoPy` conectado).
+0. **Produção atual:** https://dadinho.memetrigger.com (domínio custom do projeto `dadinho` da Vercel, scope `fbsagats-projects`; alias de projeto também em https://dadinho-hazel.vercel.app). Git integration conectado ao `fbsagat/DadinhoPy` com **Production Branch = `master`**.
 
 1. **Pré-requisitos:** conta Vercel + CLI logado (`vercel whoami`), e um banco Redis REST da Upstash (node → panel → create database; copiar URL REST e token REST). Sem Upstash o código cai silenciosamente em `ArmazenamentoMemoria` (`store.py:257-266`), quebra o estado entre instâncias serverless — só serve para validar na hora.
 
@@ -24,7 +24,7 @@
    - `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` — o par REST do banco Upstash.
    - `VERCEL=1` é setado automaticamente pela plataforma (muda transportes/`socketio.run`); `DADINHO_PERMITIR_WEBSOCKET` e `DADINHO_ASYNC_MODE` não precisam de valor (padrão já é o correto em produção).
 
-3. **Publicar:** `vercel --prod` (submete o diretório local; `.vercelignore` exclui `.venv`/`.idea`/`__pycache__`). Alternativa: git integration (push builda automaticamente).
+3. **Publicar:** `git push origin master` — a git integration deploya e promove para produção automaticamente (Production Branch = `master`), e `dadinho.memetrigger.com` acompanha na hora. Não é preciso `vercel --prod` manual; use apenas pontualmente se quiser publicar um estado local sem push (`.vercelignore` exclui `.venv`/`.idea`/`__pycache__`).
 
 4. **Validar:** abrir a URL de produção em 2+ abas/navegadores/dispositivos, criar sala, rodar partida completa até vitória.
 
@@ -35,4 +35,5 @@
 - **Custo do heartbeat (Fase C):** cadência da espera 5s → 20s; `heartbeat` não passa por `autenticar`; partida usa o cache tolerante `store.carregar_sala_leve` (TTL 25s) e só a espera recarrega fresco; piso do `visto_em` 30s → 60s. Estourava o free tier com poucos jogadores ociosos.
 - **Limitação conhecida:** rooms/emits do Socket.IO vivem por instância → dois jogadores podem cair em instâncias diferentes e não ver emits um do outro (estado persiste no Upstash e é reidratado no reconnect). Coberta na espera pelo re-sync do heartbeat; gap durante a partida é iteração futura (message queue). Detalhes em `docs/arquitetura.md`.
 - **Sem leaderboard/estado de longo prazo:** casual only; o store guarda só o lobby atual de cada sala.
+- **Proteção de deploy (Vercel Authentication):** o projeto tem `ssoProtection` = `all_except_custom_domains`. Os domínios registrados (`dadinho.memetrigger.com` e `dadinho-hazel.vercel.app`) são isentos e servem o jogo; os aliases `.vercel.app` não-registrados (ex.: `dadinho-git-master-fbsagats-projects.vercel.app`) caem na tela de login/proteção da Vercel — não é outra versão do deploy.
 - **Segredos:** `DADINHO_SECRET_KEY`/tokens Upstash vêm de env vars — não comitar. Não subir `.env*`/`.vercel` (OIDC token) para a Vercel.
