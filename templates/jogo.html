@@ -9,7 +9,90 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
     <meta name="theme-color" content="#001125">
-    <title>Jogo do Dadinho</title>
+    <title>Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger</title>
+
+    <!-- SEO: descrição/canonical em pt-BR como fallback estático (o JS localiza
+         title/description via aplicar_meta_seo em i18n.js, mesma convenção dos
+         data-i18n). Robots/permissões e alternates de idioma são únicos. -->
+    <meta name="description"
+        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <meta name="referrer" content="origin">
+    <link rel="canonical" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="en" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="pt-BR" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="es" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="fr" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="zh-CN" href="https://dadinho.memetrigger.com/">
+    <link rel="alternate" hreflang="x-default" href="https://dadinho.memetrigger.com/">
+    <link rel="icon" type="image/png" href="/static/imagens/dado/6.png">
+
+    <!-- Open Graph / Twitter Cards (valores i18n são aplicados via JS; estes são
+         o fallback pt-BR para crawlers sem JS). -->
+    <meta property="og:site_name" content="MemeTrigger">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://dadinho.memetrigger.com/">
+    <meta property="og:title" content="Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger">
+    <meta property="og:description"
+        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+    <meta property="og:image" content="https://dadinho.memetrigger.com/static/imagens/titulo.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:locale" content="pt_BR">
+    <meta property="og:locale:alternate" content="en">
+    <meta property="og:locale:alternate" content="es">
+    <meta property="og:locale:alternate" content="fr">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger">
+    <meta name="twitter:description"
+        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+    <meta name="twitter:image" content="https://dadinho.memetrigger.com/static/imagens/titulo.png">
+
+    <!-- Dados estruturados (JSON-LD): WebSite + VideoGame para os buscadores. -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebSite",
+                "@id": "https://dadinho.memetrigger.com/#website",
+                "url": "https://dadinho.memetrigger.com/",
+                "name": "Dadinho",
+                "inLanguage": ["pt-BR", "en", "es", "fr", "zh-CN"],
+                "publisher": {
+                    "@type": "Organization",
+                    "name": "MemeTrigger",
+                    "url": "https://memetrigger.com"
+                }
+            },
+            {
+                "@type": "VideoGame",
+                "@id": "https://dadinho.memetrigger.com/#game",
+                "url": "https://dadinho.memetrigger.com/",
+                "name": "Dadinho",
+                "description": "Play Dadinho, the official MemeTrigger game! A real-time multiplayer dice-bluffing game right in your browser. No sign-up — create a room and play with friends.",
+                "applicationCategory": "Game",
+                "operatingSystem": "Any",
+                "browserRequirements": "Requires JavaScript",
+                "genre": ["Party game", "Bluffing game"],
+                "numberOfPlayers": "2-10",
+                "inLanguage": ["pt-BR", "en", "es", "fr", "zh-CN"],
+                "isFamilyFriendly": true,
+                "publisher": {
+                    "@type": "Organization",
+                    "name": "MemeTrigger",
+                    "url": "https://memetrigger.com"
+                },
+                "offers": {
+                    "@type": "Offer",
+                    "price": "0",
+                    "priceCurrency": "USD",
+                    "availability": "https://schema.org/InStock"
+                }
+            }
+        ]
+    }
+    </script>
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"
         integrity="sha384-c79GN5VsunZvi+Q/WObgk2in0CbZsHnjEqvFxC5DxHn9lTfNce2WW6h2pH6u/kF+"
         crossorigin="anonymous"></script>

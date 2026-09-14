@@ -452,6 +452,50 @@ def index():
     return render_template("jogo.html")
 
 
+@app.route("/robots.txt")
+def robots_txt():
+    """
+    Permite a indexação da home e afasta crawlers do endpoint WebSocket (não
+    renderiza conteúdo) e das URLs ?sala= (transitórias, sem conteúdo indexável).
+    A URL do sitemap usa o Host do request para valer também em previews/dev.
+    """
+    base = request.url_root
+    texto = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /socket.io/\n"
+        "Disallow: /?sala=\n"
+        "\n"
+        f"Sitemap: {base}sitemap.xml\n"
+    )
+    resposta = Response(texto, mimetype="text/plain")
+    resposta.headers['Cache-Control'] = 'public, max-age=3600'
+    return resposta
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    """
+    Sitemap do site. O jogo é uma SPA única (home + salas ?sala= efêmeras), então
+    o sitemap lista só a raiz. lastmod dinâmico reflete o dia do deploy.
+    """
+    base = request.url_root.rstrip('/')
+    ultima = datetime.now().strftime('%Y-%m-%d')
+    xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{base}/</loc>
+    <lastmod>{ultima}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
+'''
+    resposta = Response(xml, mimetype="application/xml")
+    resposta.headers['Cache-Control'] = 'public, max-age=3600'
+    return resposta
+
+
 @app.route("/tema.mid")
 def tema_midi():
     """

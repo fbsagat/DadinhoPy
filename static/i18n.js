@@ -61,7 +61,8 @@ I18N_DICIONARIOS.en = {
 
     // Sala de espera
     'ui.subtitulo': 'The official <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> game!',
-    'ui.titulo_documento': 'Dadinho — The official MemeTrigger game!',
+    'ui.titulo_documento': 'Dadinho — Online Dice Bluff Multiplayer Game | MemeTrigger',
+    'seo.descricao': 'Play Dadinho, the official MemeTrigger game! A real-time multiplayer dice-bluffing game right in your browser. No sign-up — create a room and play with friends.',
     'ui.sala.atual': 'Current room:',
     'ui.sala.codigo_placeholder': 'Room code',
     'ui.sala.entrar': 'Join',
@@ -463,7 +464,8 @@ I18N_DICIONARIOS['pt-BR'] = {
     'ui.lobby.dots': 'Painéis do lobby',
 
     'ui.subtitulo': 'O jogo oficial do <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!',
-    'ui.titulo_documento': 'Dadinho — O jogo oficial do MemeTrigger!',
+    'ui.titulo_documento': 'Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger',
+    'seo.descricao': 'Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.',
     'ui.sala.atual': 'Sala atual:',
     'ui.sala.codigo_placeholder': 'Código da sala',
     'ui.sala.entrar': 'Entrar',
@@ -842,7 +844,8 @@ I18N_DICIONARIOS.es = {
     'ui.lobby.dots': 'Paneles del lobby',
 
     'ui.subtitulo': '¡El juego oficial de <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!',
-    'ui.titulo_documento': 'Dadinho — ¡El juego oficial de MemeTrigger!',
+    'ui.titulo_documento': 'Dadinho — Juego de Faroleo de Dados Online Multijugador | MemeTrigger',
+    'seo.descricao': 'Juega a Dadinho, ¡el juego oficial de MemeTrigger! Un juego multijugador de faroleo de dados en tiempo real en el navegador. Sin registro: crea una sala y juega con amigos.',
     'ui.sala.atual': 'Sala actual:',
     'ui.sala.codigo_placeholder': 'Código de sala',
     'ui.sala.entrar': 'Entrar',
@@ -1221,7 +1224,8 @@ I18N_DICIONARIOS.fr = {
     'ui.lobby.dots': 'Panneaux du lobby',
 
     'ui.subtitulo': 'Le jeu officiel de <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> !',
-    'ui.titulo_documento': 'Dadinho — Le jeu officiel de MemeTrigger !',
+    'ui.titulo_documento': 'Dadinho — Jeu de Bluff aux Dés en Ligne Multijoueur | MemeTrigger',
+    'seo.descricao': 'Jouez à Dadinho, le jeu officiel de MemeTrigger ! Un jeu multijoueur de bluff aux dés en temps réel dans votre navigateur. Sans inscription — créez une salle et jouez avec vos amis.',
     'ui.sala.atual': 'Salle actuelle :',
     'ui.sala.codigo_placeholder': 'Code de la salle',
     'ui.sala.entrar': 'Rejoindre',
@@ -1600,7 +1604,8 @@ I18N_DICIONARIOS['zh-CN'] = {
     'ui.lobby.dots': '大厅面板',
 
     'ui.subtitulo': '<a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> 官方游戏！',
-    'ui.titulo_documento': 'Dadinho — MemeTrigger 官方游戏！',
+    'ui.titulo_documento': 'Dadinho — 在线多人骰子吹牛游戏 | MemeTrigger',
+    'seo.descricao': '游玩 Dadinho，MemeTrigger 官方游戏！在浏览器中实时多人骰子吹牛游戏。无需注册——创建房间，与朋友一同游玩。',
     'ui.sala.atual': '当前房间：',
     'ui.sala.codigo_placeholder': '房间代码',
     'ui.sala.entrar': '加入',
@@ -2134,10 +2139,38 @@ function _montar_seletor_idioma() {
     });
 }
 
+// SEO: reflete no <title> e nas metas sociais o idioma do jogador. O HTML
+// carrega fallback pt-BR (mesma convenção dos data-i18n); aqui os crawlers com
+// JS e quem troca de idioma recebem title/description consistentes. O guard de
+// `document.querySelector` preserva o sandbox do verificar.py (cobertura i18n).
+function aplicar_meta_seo() {
+    const titulo = t('ui.titulo_documento');
+    const descricao = t('seo.descricao');
+    document.title = titulo;
+    if (!document.querySelector) {
+        return;
+    }
+    const definir_por_nome = function (nome, valor) {
+        const el = document.querySelector('meta[name="' + nome + '"]');
+        if (el) el.content = valor;
+    };
+    const definir_por_propriedade = function (prop, valor) {
+        const el = document.querySelector('meta[property="' + prop + '"]');
+        if (el) el.content = valor;
+    };
+    definir_por_nome('description', descricao);
+    definir_por_nome('twitter:title', titulo);
+    definir_por_nome('twitter:description', descricao);
+    definir_por_propriedade('og:title', titulo);
+    definir_por_propriedade('og:description', descricao);
+    const og_locale = document.querySelector('meta[property="og:locale"]');
+    if (og_locale) og_locale.content = idioma_atual.replace('-', '_');
+}
+
 function iniciar_i18n() {
     idioma_atual = _detectar_idioma();
     document.documentElement.lang = idioma_atual;
-    document.title = t('ui.titulo_documento');
+    aplicar_meta_seo();
     aplicar_traducoes(document);
     _montar_seletor_idioma();
 }
