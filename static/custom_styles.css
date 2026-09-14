@@ -273,7 +273,9 @@ canvas {
     }
 
     #cards .card {
-        min-height: 150px !important;
+        height: 148px !important;
+        display: flex;
+        flex-direction: column;
     }
 }
 
@@ -760,11 +762,16 @@ h5,
 }
 
 #cards .card-header {
+    flex-shrink: 0;
     font-weight: 700;
     letter-spacing: 0.4px;
     font-size: 0.95rem;
     background-image: linear-gradient(135deg, rgba(29, 155, 240, 0.28), rgba(13, 202, 240, 0.08));
     border-bottom: 1px solid var(--cor-borda);
+    /* Nome do jogador não deve fazer o header crescer: trunca em uma linha. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #cards .card-header.text-bg-primary {
@@ -827,13 +834,18 @@ h5,
 }
 
 /* Fase 32 (P3): cards de jogadores com altura FIXA e compactos — o histórico
-   de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo. */
+   de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo.
+   `height` (não `min-height`) garante tamanho padronizado: nome longo,
+   quebrar linha ou excesso de jogadas não alteram a altura do card. */
 #cards .card {
     height: 148px;
+    display: flex;
+    flex-direction: column;
 }
 
 #cards .card-body {
     /* padding-top extra p/ não cortar o selo "ÚLTIMA" (top: -9px) da 1ª jogada */
+    flex: 1 1 auto;
     padding: 0.6rem 0.4rem 0.3rem;
     overflow-y: auto;
 }
@@ -1010,5 +1022,261 @@ h5,
 
     ::-webkit-scrollbar-thumb:hover {
         background: #0a3d6b;
+    }
+}
+
+/* ============================================================
+   Fase M1: Navegação por swipe horizontal (mobile).
+   Substitui scroll vertical por swipe lateral + dots.
+   Desktop mantém layout original (grid/flex).
+   ============================================================ */
+
+/* --- Safe areas (notch / app gesture bar) --- */
+@media (max-width: 768px) {
+    body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* --- LOBBY SWIPE (Tela 0) --- */
+
+/* Desktop: grid 2-col (jogadores | config+IA) */
+@media (min-width: 769px) {
+    .lobby-panels-wrapper {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        justify-content: center;
+    }
+
+    .lobby-panels-wrapper #painel_jogador,
+    .lobby-panels-wrapper #painel_config,
+    .lobby-panels-wrapper #painel_ia {
+        flex: 1 1 320px;
+        max-width: 420px;
+    }
+
+    #painel_jogador.mx-auto {
+        margin: 0;
+    }
+
+    .lobby-dots {
+        display: none !important;
+    }
+}
+
+/* Mobile: horizontal scroll-snap */
+@media (max-width: 768px) {
+    .lobby-panels-wrapper {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scroll-snap-type: x;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 0;
+        margin-top: 0.5rem;
+    }
+
+    .lobby-panels-wrapper::-webkit-scrollbar {
+        display: none;
+    }
+
+    .lobby-page {
+        flex: 0 0 100%;
+        min-width: 100%;
+        scroll-snap-align: start;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* Lobby dot indicators */
+    .lobby-dots {
+        display: flex !important;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 0;
+    }
+
+    .lobby-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.4);
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        flex-shrink: 0;
+    }
+
+    .lobby-dot:hover {
+        transform: scale(1.3);
+        background: rgba(255, 255, 255, 0.7);
+    }
+
+    .lobby-dot.active {
+        background: #0dcaf0;
+        box-shadow: 0 0 8px rgba(13, 202, 240, 0.6);
+    }
+
+    /* Hidden pages/dots for non-masters on mobile */
+    .lobby-page.oculto-mobile,
+    .lobby-dot.oculto-mobile {
+        display: none !important;
+    }
+}
+
+/* --- STATUS PANELS SWIPE (Tela 2: meus_dados / dados_mesa / corin_atual) --- */
+
+/* Desktop: side-by-side (existing d-flex + col-5) */
+
+/* Mobile: horizontal scroll-snap */
+@media (max-width: 768px) {
+    #status_panels_wrap {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        scroll-snap-type: x;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    #status_panels_wrap::-webkit-scrollbar {
+        display: none;
+    }
+
+    #meus_dados,
+    #dados_mesa,
+    #corin_atual {
+        flex: 0 0 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+        scroll-snap-align: start;
+    }
+
+    /* Status dot indicators */
+    .status-dots {
+        display: flex !important;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.4);
+        cursor: pointer;
+        transition: background 0.2s ease, box-shadow 0.2s ease;
+        flex-shrink: 0;
+    }
+
+    .status-dot:hover {
+        background: rgba(255, 255, 255, 0.7);
+    }
+
+    .status-dot.active {
+        background: #0dcaf0;
+        box-shadow: 0 0 6px rgba(13, 202, 240, 0.6);
+    }
+}
+
+/* Desktop: hide status dots */
+@media (min-width: 769px) {
+    .status-dots {
+        display: none !important;
+    }
+}
+
+/* --- PLAYER CARDS: horizontal scroll on mobile/tablet --- */
+@media (max-width: 991px) {
+    #cards {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        scroll-snap-type: x;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 0.75rem;
+        padding-bottom: 4px;
+    }
+
+    #cards::-webkit-scrollbar {
+        display: none;
+    }
+
+    #cards > div {
+        flex: 0 0 70% !important;
+        max-width: 70% !important;
+        scroll-snap-align: start;
+    }
+}
+
+/* --- STICKY BETTING PANEL (mobile) --- */
+@media (max-width: 768px) {
+    #painel_jogada {
+        position: fixed !important;
+        left: env(safe-area-inset-left, 0);
+        right: env(safe-area-inset-right, 0);
+        bottom: calc(12px + env(safe-area-inset-bottom, 0));
+        margin: 0;
+        z-index: 60;
+        background: rgba(0, 17, 37, 0.95);
+        backdrop-filter: blur(6px);
+    }
+
+    /* Smaller dice in betting panel on mobile */
+    #painel_jogada .image-button img {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    #painel_jogada .image-button {
+        border-radius: 8px;
+    }
+
+    /* Make the "sua vez" badge fit */
+    #painel_jogada .badge {
+        font-size: 0.9rem;
+    }
+
+    /* Add bottom gap to cards so they aren't hidden behind the fixed panel */
+    #cards {
+        padding-bottom: 180px;
+    }
+}
+
+/* --- Safe-area for fixed elements --- */
+@media (max-width: 768px) {
+    .position-fixed.top-0.end-0 {
+        top: calc(8px + env(safe-area-inset-top));
+        right: calc(8px + env(safe-area-inset-right));
+    }
+
+    .position-fixed.top-0.start-0 {
+        top: calc(8px + env(safe-area-inset-top));
+        left: calc(8px + env(safe-area-inset-left));
+    }
+
+    #bot_sair_da_sala {
+        top: calc(8px + env(safe-area-inset-top)) !important;
+        right: calc(8px + env(safe-area-inset-right)) !important;
+    }
+
+    #contador_jogada {
+        top: calc(8px + env(safe-area-inset-top)) !important;
+    }
+
+    .painel-dicas {
+        top: calc(64px + env(safe-area-inset-top));
+    }
+
+    .narrador {
+        left: calc(8px + env(safe-area-inset-left));
+        bottom: calc(16px + env(safe-area-inset-bottom));
+        right: calc(8px + env(safe-area-inset-right));
     }
 }

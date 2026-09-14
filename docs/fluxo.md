@@ -85,7 +85,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |
 | `jogador_desconectado` | app.py:699 | cliente | 1835 |
-| `mudar_pagina` | funcoes_gerais:178/230 | sala/cliente | 832 |
+| `mudar_pagina` | funcoes_gerais:178/230 | sala/cliente | 880 |
 | `meus_dados` | app.py:933 | cliente | 899 |
 | `dados_mesa` | funcoes_gerais:280 | cliente | 925 |
 | `atualizar_coringa` | funcoes_gerais:282 | cliente/sala | 936 |

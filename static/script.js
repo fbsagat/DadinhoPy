@@ -635,6 +635,16 @@ function aplicar_master() {
     document.querySelectorAll('#painel_config input, #painel_config select, #painel_ia input, #painel_ia select, #painel_ia button').forEach(el => {
         el.disabled = !sou_master;
     });
+
+    // Mobile: non-master só vê a aba de Jogadores (config/IA ocultas via swipe)
+    const isMobile = window.innerWidth <= 768;
+    const ocultar = !sou_master && isMobile;
+    document.querySelectorAll('#painel_config, #painel_ia').forEach(el => {
+        el.classList.toggle('oculto-mobile', ocultar);
+    });
+    document.querySelectorAll('.lobby-dot[data-tab="1"], .lobby-dot[data-tab="2"]').forEach(el => {
+        el.classList.toggle('oculto-mobile', ocultar);
+    });
 }
 
 function aplicar_config(config) {
@@ -937,6 +947,115 @@ socket.on("mudar_pagina", function (data) {
         subtitulo.style.display = (data.pag_numero === 1 || data.pag_numero === 2) ? 'none' : 'block';
     }
     mostrar_dica(data.pag_numero);
+
+    // Fase M1: resetar swipe ao voltar para lobby (0) ou partida (2)
+    if (data.pag_numero === 0) {
+        resetar_swipe_lobby();
+    } else if (data.pag_numero === 2) {
+        resetar_swipe_status();
+    }
+});
+
+// ============================================================
+// Fase M1: Navegação por swipe horizontal (mobile).
+// Dots sincronizados com scroll-snap para lobby e painel de
+// status. Desktop mantém layout original (sem swipe).
+// ============================================================
+
+let lobby_tab_ativo = 0;
+let status_tab_ativo = 0;
+
+// --- Lobby swipe ---
+function init_swipe_lobby() {
+    const wrapper = document.getElementById('lobby_panels_wrapper');
+    const dots = document.querySelectorAll('.lobby-dot');
+
+    if (!wrapper || !dots.length) return;
+
+    dots.forEach((dot) => {
+        dot.addEventListener('click', () => {
+            const tab = Number(dot.getAttribute('data-tab'));
+            lobby_tab_ativo = tab;
+            atualizar_dots_lobby();
+            wrapper.scrollTo({
+                left: tab * wrapper.clientWidth,
+                behavior: 'smooth'
+            });
+        });
+    });
+
+    wrapper.addEventListener('scroll', () => {
+        const page = Math.round(wrapper.scrollLeft / wrapper.clientWidth);
+        if (page !== lobby_tab_ativo) {
+            lobby_tab_ativo = page;
+            atualizar_dots_lobby();
+        }
+    });
+}
+
+function atualizar_dots_lobby() {
+    document.querySelectorAll('.lobby-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === lobby_tab_ativo);
+    });
+}
+
+function resetar_swipe_lobby() {
+    const wrapper = document.getElementById('lobby_panels_wrapper');
+    if (!wrapper) return;
+    lobby_tab_ativo = 0;
+    wrapper.scrollTo({ left: 0, behavior: 'smooth' });
+    atualizar_dots_lobby();
+}
+
+// --- Status panels swipe (Tela 2) ---
+function init_swipe_status() {
+    const wrapper = document.getElementById('status_panels_wrap');
+    const dots = document.querySelectorAll('.status-dot');
+
+    if (!wrapper || !dots.length) return;
+
+    dots.forEach((dot) => {
+        dot.addEventListener('click', () => {
+            const tab = Number(dot.getAttribute('data-dot'));
+            status_tab_ativo = tab;
+            atualizar_dots_status();
+            wrapper.scrollTo({
+                left: tab * wrapper.clientWidth,
+                behavior: 'smooth'
+            });
+        });
+    });
+
+    wrapper.addEventListener('scroll', () => {
+        const page = Math.round(wrapper.scrollLeft / wrapper.clientWidth);
+        if (page !== status_tab_ativo) {
+            status_tab_ativo = page;
+            atualizar_dots_status();
+        }
+    });
+}
+
+function atualizar_dots_status() {
+    document.querySelectorAll('.status-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === status_tab_ativo);
+    });
+}
+
+function resetar_swipe_status() {
+    const wrapper = document.getElementById('status_panels_wrap');
+    if (!wrapper) return;
+    status_tab_ativo = 0;
+    wrapper.scrollTo({ left: 0, behavior: 'smooth' });
+    atualizar_dots_status();
+}
+
+// Initialize swipe (script is at end of body, so DOM is ready)
+init_swipe_lobby();
+init_swipe_status();
+
+// Re-evaluate master tab visibility on resize (mobile↔desktop)
+window.addEventListener('resize', () => {
+    if (typeof aplicar_master === 'function') aplicar_master();
 });
 
 // Função para preencher os dados do jogador na página de partida
@@ -1197,7 +1316,7 @@ socket.on('construtor_html', function (data) {
         card.className = 'card border border-secondary border-1 text-bg-dark';
         // Fase 32 (P3): altura FIXA no desktop (o corpo rola se o histórico
         // passar de 3 jogadas) — todos os cards ficam do mesmo tamanho.
-        card.style.minHeight = '148px';
+        card.style.height = '148px';
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card

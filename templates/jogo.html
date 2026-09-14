@@ -116,13 +116,11 @@
                 </div>
             </div>
 
-            <div class="container">
-                <div class="row justify-content-center g-2 align-items-start">
+            <div id="lobby_panels_wrapper" class="lobby-panels-wrapper">
 
-                    <div class="col-12 col-lg-5">
-                        <div id="painel_jogador"
-                            class="container my-1 p-2 bg-dark text-light border border-info rounded text-center mx-auto"
-                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
+                <div id="painel_jogador"
+                    class="lobby-page container my-1 p-2 bg-dark text-light border border-info rounded text-center mx-auto"
+                    style="--bs-bg-opacity: .8;">
                             <h5 class="text-info mb-2" data-i18n="ui.jogadores.titulo">👥 Jogadores</h5>
                             <div>
                                 <input type="text" id="apelido" class="container form-control text-center mx-auto"
@@ -146,12 +144,10 @@
                                     onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="col-12 col-lg-7 d-flex flex-wrap justify-content-center gap-3">
-                        <div id="painel_config"
-                            class="container my-1 p-2 bg-dark text-light border border-secondary rounded text-center"
-                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
+                    <div id="painel_config"
+                        class="lobby-page container my-1 p-2 bg-dark text-light border border-secondary rounded text-center"
+                        style="--bs-bg-opacity: .8;">
                             <h5 class="text-info mb-2" data-i18n="ui.config.titulo">Configurações da partida</h5>
                             <div class="mb-1">
                                 <label class="form-label small d-block" for="config_nome"
@@ -222,12 +218,12 @@
                                 </div>
                             </div>
                             <small class="text-muted d-block mt-1" data-i18n="ui.config.nota">Somente o master edita as
-                                configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
-                        </div>
+                                configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.                    </small>
+                </div>
 
-                        <div id="painel_ia"
-                            class="container my-1 p-2 bg-dark text-light border border-primary rounded text-center"
-                            style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
+                    <div id="painel_ia"
+                        class="lobby-page container my-1 p-2 bg-dark text-light border border-primary rounded text-center"
+                        style="--bs-bg-opacity: .8;">
                             <h5 class="text-info mb-2" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
                             <div class="row g-2 mb-1">
                                 <div class="col-6">
@@ -259,13 +255,14 @@
                                     onclick="remover_ias()">Remover IAs</button>
                             </div>
                             <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
-                                sozinhos. Só o master controla.</small>
-                        </div>
-                    </div>
-
+                                sozinhos. Só o master controla.                    </small>
                 </div>
             </div>
 
+            <div id="lobby_dots" class="lobby-dots">
+                <span class="lobby-dot active" data-tab="0"></span>
+                <span class="lobby-dot" data-tab="1"></span>
+                <span class="lobby-dot" data-tab="2"></span>
             </div>
         </div>
         <!-- TELA JOGADORES FIM -->
@@ -345,7 +342,7 @@
 
         <div id="rodada_atual_txt" class="text-info fs-4 fw-bold mb-2 d-none">Rodada 1</div>
 
-        <div
+        <div id="status_panels_wrap"
             class="d-flex justify-content-between flex-wrap mt-2 bg-info bg-opacity-50 border border-primary border-start-0 rounded-end">
 
             <div id="meus_dados"
@@ -363,6 +360,11 @@
                 style="flex: 1 1 200px; min-width: 0;">
             </div>
 
+        </div>
+        <div id="status_dots" class="status-dots">
+            <span class="status-dot active" data-dot="0"></span>
+            <span class="status-dot" data-dot="1"></span>
+            <span class="status-dot" data-dot="2"></span>
         </div>
         <div class="row justify-content-around mt-2">
             <div class="container-fluid">
