@@ -25,6 +25,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 29** — Regra de jogo: aposta irrespondível e cap de jogadores burlado. ✅ concluída
 - **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ✅ concluída
 - **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ✅ concluída
+- **Fase 33** — Mobile: menu sandwich, swipe no lobby e ação fixa na partida. ✅ concluída (resumo no fim do arquivo)
 
 ---
 
@@ -375,3 +376,37 @@ Objetivo: loop de confete sem custo ocioso, conflitos de CSS resolvidos e discip
 - [x] **P6 — `<canvas>` com `z-index:-1`** (`custom_styles.css:194-201`): dependia do quirk de propagação do background do body (poderia sumir atrás do fundo). Agora `z-index: 0` + `pointer-events: none` (não intercepta cliques; os painéis com `z-index` 55+ seguem na frente).
 
 Verificação: `node --check static/script.js`/`static/i18n.js` OK, `python verificar.py` 100% verde (cobertura i18n intocada — P5 não trocou chaves). Teste manual de perf no mobile/devtools: o `requestAnimationFrame` deve estar parado em telas sem festa (loop só roda na celebração).
+
+---
+
+# Plano mobile (Fase 33)
+
+## Fase 33 — Mobile: menu sandwich, swipe no lobby e ação fixa na partida
+
+Objetivo: transformar a exibição em telas pequenas (≤768px) num layout de "app": os botões de ferramenta saem do caminho da visão (menu sandwich), o lobby troca de painel por gesto lateral (sem rolar a página) e o controle de aposta fica sempre visível no rodapé da partida — o jogador não sobe e desce a tela o tempo todo. Desktop (≥992px) permanece intacto. Tudo é **client-side** (HTML/CSS/JS): nenhum evento, estado, env var ou serialização muda.
+
+- [x] **M1 — Menu sandwich (hambúrguer) para os controles do topo.** Hoje 2 grupos de botões fixos disputam o topo com o jogo (`jogo.html:25-51`): idioma + som/música à direita, tutorial/dicas/narrador à esquerda. No mobile eles somem e viram um único botão `☰` (canto topo-direito, respeitando o safe-area) que abre um drawer sobreposto com as 6 ferramentas: **Tutorial** (❓), **Dicas/Help** (💡), **Narrador** (🎙️), **Idioma** (`#seletor_idioma`), **Sons** (🔊 + slider de volume) e **Música** (🎵 + slider de volume). Fecha no toque fora, no Esc e num botão ✖. O `#contador_jogada` e o `#bot_sair_da_sala` seguem fixos **fora** do menu. Desktop: manter os botões atuais como estão (o menu sandwich é só mobile).
+
+- [x] **M2 — Lobby: swipe lateral para o menu do host.** `painel_jogador`/`painel_config`/`painel_ia` (`jogo.html:122-264`) empilham verticalmente e o host rola a página inteira pra chegar nas configurações. No mobile os 3 viram um carrossel horizontal: contêiner `display:flex; overflow-x:auto; scroll-snap-type:x mandatory`, cada painel `flex:0 0 100%` com `scroll-snap-align:center`. Tela 1 = **Jogadores** (apelido + lista + pronto/iniciar, padrão), tela 2 = **Configurações do host**, tela 3 = **Bots IA**. Dots indicadores + setas discretas nas bordas com `scrollIntoView({behavior:'smooth'})` — fallback acessível, swipe nunca é o único caminho. Não-master não vê as telas 2/3 (menos gestos); painéis ocultos ficam `display:none`. A lista de jogadores ganha scroll vertical interno (cresce sem estourar a tela).
+
+- [x] **M3 — Partida: rodapé de ação fixo.** `#tela_partida` (`jogo.html:344-460`) vira flex-column com `height:100dvh` (fallback `100vh`) e `overflow:hidden`: **topo** com `rodada_atual_txt` + barra `meus_dados`/`dados_mesa`/`corin_atual` compacta (uma linha, dados menores); **meio** com `#cards` (`flex:1; min-height:0; overflow-y:auto`) — histórico rolável; **rodapé** fixo por construção (dentro do flex, não `position:fixed`) com `#painel_jogada`/`#painel_aguarde`. Minha vez: linha única de 6 dados de face compactos (`row-cols-6`, `overflow-x:auto` se apertar) + stepper `#quantidade` + Apostar/Desconfiar em fileira (~48px). Não minha vez: badge "Aguarde" + contador regressivo. Integrar o `#contador_jogada` (`jogo.html:61`) ao rodapé. Resolver o conflito com o `.narrador` mobile (`custom_styles.css:674-682`): quando a action bar existe, o narrador sobe para o topo esquerdo.
+
+- [x] **M4 — Base mobile.** `<meta name="viewport">` (`jogo.html:6`) ganha `viewport-fit=cover` + `maximum-scale=1, user-scalable=no` (evita o zoom acidental ao tocar nos dados/botões); safe-areas `env(safe-area-inset-*)` nos botões fixos e no rodapé de ação (notch iOS); título `#div_titulo_img` reduzido no lobby mobile (20vh → ~14vh, `custom_styles.css:212`) e calibrado nas telas de jogo (`script.js:924-933`) para não estourar o `100dvh` — body vira flex-column e a tela ativa recebe `flex:1; min-height:0`.
+
+Extras no caminho (não listados originalmente):
+- `.app-main` nunca era fechado no HTML (quirk tolerado pelo navegador) — fechado corretamente após `#tela_vitoria`; o `<br>` entre cards e painel de jogada virou `margin-top` no `#rodape_acao` (desktop idêntico).
+- Drawer/setas/dots ganharam aria-labels com chaves i18n (`ui.lobby.seta_esq`/`seta_dir`/`dots`); dots têm `role="tab"`/`aria-selected`.
+- Sliders de volume (desktop e drawer) sincronizados com o valor persistido no load (regressão da refatoração evitada).
+- A dica de swipe só aparece no mobile (gate por `matchMedia`), evitando vazamento para o desktop.
+
+Notas/limitações (aceitas para o casual):
+- O `#contador_jogada`, agora descendente de `#tela_partida`, sofre um glitch cosmético de ~350ms no desktop ao entrar na tela 2 (a animação `tela_aparecer` com `transform` cria um containing block temporário para o `position: fixed`) — só visível quando o timer está ativo no momento da troca de tela.
+- `user-scalable=no` (M4) é decisão consciente para evitar zoom acidental ao tocar nos dados/botões (acessibilidade à parte, documentada).
+
+Notas/limitações (aceitas para o casual):
+- Scroll-snap e `100dvh` têm suporte em todos os navegadores modernos; `100vh` fica como fallback de altura.
+- O swipe usa o scroll nativo (sem lib de touch, sem handlers manuais) — não compete com a rolagem vertical nem adiciona dependência.
+- Novos textos (labels das abas/drawer, dica de swipe) passam pela skill `i18n-dadinho` (cobertura dos 5 dicionários e `verificar.py`).
+- Nenhuma invariante de servidor é tocada (client-side puro); o re-sync serverless do lobby segue intacto.
+
+Verificação (local, `.venv`): `python verificar.py` 100% verde (regressão zero — nenhuma chave i18n trocada, nenhum evento novo, serialização intocada) + `node --check static/script.js`; teste manual em 2 abas em device mode (Chrome DevTools, ex.: 375×667 e 414×896): drawer abre/fecha sem sobrepor a jogada, swipe alterna as telas do lobby (host chega na config sem rolar), apostar sem rolar a página, narrador não cobre a action bar, idioma/dicas/narrador seguem funcionando pelo menu; desktop ≥992px idêntico ao de hoje.
