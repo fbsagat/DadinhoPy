@@ -3,11 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <!-- Fase 33 (M4): `viewport-fit=cover` libera as safe-areas (notch iOS) e
-         `maximum-scale=1, user-scalable=no` evita o zoom acidental ao tocar nos
-         dados/botões em telas pequenas. -->
-    <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#001125">
     <title>Jogo do Dadinho</title>
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"
@@ -26,8 +22,7 @@
 <body>
     <canvas id="fireworks"></canvas>
 
-    <div class="barra-topo-desktop position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end"
-        style="z-index: 50;">
+    <div class="position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end" style="z-index: 50;">
         <select id="seletor_idioma" class="form-select form-select-sm bg-dark text-light border-light"
             style="width: auto;" aria-label="Idioma"></select>
         <div class="d-flex align-items-center gap-2">
@@ -46,7 +41,7 @@
         </div>
     </div>
 
-    <div class="barra-topo-desktop position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">
+    <div class="position-fixed top-0 start-0 m-2 d-flex gap-2" style="z-index: 50;">
         <button id="botao_tutorial" class="btn btn-sm btn-outline-light" data-i18n-title="ui.botao_tutorial"
             title="Como jogar (tutorial)">❓</button>
         <button id="botao_dicas" class="btn btn-sm btn-outline-warning" data-i18n-title="ui.botao_dicas"
@@ -55,58 +50,16 @@
             title="Narrador: todas as falas">🎙️</button>
     </div>
 
-    <!-- Fase 33 (M1): menu sandwich — no mobile os dois grupos de botões fixos
-         do topo somem e viram um único botão ☰ que abre um drawer com as 6
-         ferramentas (Tutorial, Dicas, Narrador, Idioma, Sons, Música). Desktop
-         (≥992px) mantém os botões atuais. -->
-    <button id="botao_menu" class="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2"
-        style="z-index: 70; display: none;" data-i18n-aria-label="ui.menu.abrir" aria-label="Abrir menu">☰</button>
-
-    <div id="menu_drawer" class="menu-drawer" role="dialog" aria-modal="true" aria-hidden="true"
-        data-i18n-aria-label="ui.menu.titulo" aria-label="Menu">
-        <div class="menu-drawer-header">
-            <span class="fs-5 fw-bold text-info" data-i18n="ui.menu.titulo">Menu</span>
-            <button id="botao_fechar_menu" class="btn btn-outline-light btn-sm" data-i18n-aria-label="ui.menu.fechar"
-                aria-label="Fechar menu">✖</button>
-        </div>
-        <div class="menu-drawer-corpo">
-            <button id="menu_tutorial" class="btn btn-outline-light menu-item" data-i18n="ui.menu.tutorial">❓
-                Tutorial</button>
-            <button id="menu_dicas" class="btn btn-outline-warning menu-item" data-i18n="ui.menu.dicas">💡
-                Dicas</button>
-            <button id="menu_narrador" class="btn btn-outline-info menu-item" data-i18n="ui.menu.narrador">🎙️
-                Narrador</button>
-            <div class="menu-item menu-item-select">
-                <label class="form-label small mb-1" for="seletor_idioma_mobile"
-                    data-i18n="ui.menu.idioma">Idioma</label>
-                <select id="seletor_idioma_mobile" class="form-select form-select-sm bg-dark text-light border-light"></select>
-            </div>
-            <div class="menu-item">
-                <div class="d-flex align-items-center justify-content-between">
-                    <span class="small"><span data-i18n="ui.menu.som">Sons</span></span>
-                    <button id="menu_botao_som" class="btn btn-sm btn-outline-light" data-i18n-aria-label="ui.botao_som"
-                        aria-label="Efeitos sonoros ligados/desligados">🔊</button>
-                </div>
-                <input type="range" id="menu_volume_som" class="form-range" min="0" max="100" value="100"
-                    data-i18n-aria-label="ui.volume_som" aria-label="Volume dos efeitos sonoros">
-            </div>
-            <div class="menu-item">
-                <div class="d-flex align-items-center justify-content-between">
-                    <span class="small"><span data-i18n="ui.menu.musica">Música</span></span>
-                    <button id="menu_botao_musica" class="btn btn-sm btn-outline-light" data-i18n-aria-label="ui.botao_musica"
-                        aria-label="Música ligada/desligada">🎵</button>
-                </div>
-                <input type="range" id="menu_volume_musica" class="form-range" min="0" max="100" value="50"
-                    data-i18n-aria-label="ui.volume_musica" aria-label="Volume da música">
-            </div>
-        </div>
-    </div>
-
     <div id="narrador" class="narrador" role="log" aria-live="polite" style="display: none;">
         <div class="narrador-header" data-i18n="ui.narrador.titulo">🎙️ Narrador</div>
         <div id="narrador_log" class="narrador-log"></div>
         <div id="narrador_pensando" class="narrador-pensando" style="display: none;"></div>
     </div>
+
+    <!-- Fase 21: contador regressivo da jogada automática (mostrado ao jogador
+         da vez / na rolagem). O tempo vem do servidor via `tempo_max`. -->
+    <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
+        style="z-index: 60; display: none; font-size: 1.1rem;"></div>
 
     <!-- Fase 30: o espectador pode sair da sala e voltar ao menu. O botão só
          aparece para quem está assistindo (não-jogador) durante a partida. -->
@@ -163,15 +116,10 @@
                 </div>
             </div>
 
-            <!-- Fase 33 (M2): no mobile o lobby vira um carrossel horizontal com
-                 scroll-snap — tela 1 = Jogadores, tela 2 = Configurações do
-                 host, tela 3 = Bots IA. `lobby-linha` é o trilho; as setas e os
-                 dots (`lobby_seta_*`/`lobby_dots`) são o fallback acessível (o
-                 swipe nunca é o único caminho). Desktop mantém o grid atual. -->
-            <div class="container lobby-carrossel">
-                <div class="row justify-content-center g-2 align-items-start lobby-linha">
+            <div class="container">
+                <div class="row justify-content-center g-2 align-items-start">
 
-                    <div class="col-12 col-lg-5 lobby-slide">
+                    <div class="col-12 col-lg-5">
                         <div id="painel_jogador"
                             class="container my-1 p-2 bg-dark text-light border border-info rounded text-center mx-auto"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
@@ -201,7 +149,7 @@
 
                     <div class="col-12 col-lg-7 d-flex flex-wrap justify-content-center gap-3">
                         <div id="painel_config"
-                            class="container my-1 p-2 bg-dark text-light border border-secondary rounded text-center lobby-slide"
+                            class="container my-1 p-2 bg-dark text-light border border-secondary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
                             <h5 class="text-info mb-2" data-i18n="ui.config.titulo">Configurações da partida</h5>
                             <div class="mb-1">
@@ -277,7 +225,7 @@
                 </div>
 
                         <div id="painel_ia"
-                            class="container my-1 p-2 bg-dark text-light border border-primary rounded text-center lobby-slide"
+                            class="container my-1 p-2 bg-dark text-light border border-primary rounded text-center"
                             style="--bs-bg-opacity: .8; max-width: 420px; flex: 1 1 320px;">
                             <h5 class="text-info mb-2" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
                             <div class="row g-2 mb-1">
@@ -312,17 +260,6 @@
                             <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
                                 sozinhos. Só o master controla.                    </small>
                 </div>
-
-                <!-- Fase 33 (M2): setas discretas + dots do carrossel (fallback
-                     acessível do swipe; só visíveis no mobile). -->
-                <button id="lobby_seta_esq" class="lobby-seta" data-i18n-aria-label="ui.lobby.seta_esq"
-                    aria-label="Painel anterior">‹</button>
-                <button id="lobby_seta_dir" class="lobby-seta" data-i18n-aria-label="ui.lobby.seta_dir"
-                    aria-label="Próximo painel">›</button>
-                <div id="lobby_dots" class="lobby-dots" role="tablist" data-i18n-aria-label="ui.lobby.dots"
-                    aria-label="Painéis do lobby"></div>
-                <div id="lobby_swipe_dica" class="lobby-swipe-dica" data-i18n="ui.lobby.swipe">
-                    Deslize para o lado</div>
             </div>
 
             <div id="lobby_dots" class="lobby-dots">
@@ -404,13 +341,8 @@
         </div>
         <!-- TELA JOGAR DADOS FIM -->
         <!-- TELA PARTIDA INICIO (2) -->
-<!-- Fase 33 (M3): a `#tela_partida` vira flex-column com `100dvh` no mobile:
-         `#area_mesa` (rodada + barra de dados + histórico) é o meio rolável e
-         `#rodape_acao` é o rodapé fixo por construção (dentro do flex). No
-         desktop o wrapper não muda nada no fluxo atual. -->
-    <div id="tela_partida" class="tela_partida container-fluid text-center" style="display: none;">
+<div id="tela_partida" class="tela_partida container-fluid text-center" style="display: none;">
 
-        <div id="area_mesa">
         <div id="rodada_atual_txt" class="text-info fs-4 fw-bold mb-2 d-none">Rodada 1</div>
 
         <div id="status_panels_wrap"
@@ -444,13 +376,7 @@
             </div>
 
         </div>
-        </div>
-
-        <div id="rodape_acao">
-        <!-- Fase 33 (M3): contador da jogada automática mora no rodapé; no
-             desktop a CSS o devolve ao topo (`position: fixed`). -->
-        <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
-            style="z-index: 60; display: none; font-size: 1.1rem;"></div>
+        <br>
         <div id="painel_jogada" style="display: none;">
 
             <div class="container-fluid text-center">
@@ -535,7 +461,6 @@
             <span id="painel_aguarde" class="fs-4 badge text-bg-warning text-wrap mb-1 me-1"
                 data-i18n="ui.jogo.aguarde" style="width: 16rem; display: none;">Aguarde a sua vez</span>
         </div>
-        </div>
 
     </div>
     <!-- TELA PARTIDA FIM -->
@@ -586,8 +511,6 @@
 
     </div>
     <!-- TELA VITORIA FIM -->
-    </div>
-    <!-- FIM DO APP-MAIN (container das telas) -->
 
     <!-- TUTORIAL INICIO -->
     <div id="tutorial_overlay" class="tutorial-overlay" role="dialog" aria-modal="true">
