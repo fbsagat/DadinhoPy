@@ -252,19 +252,27 @@ class Lobby:
 
     @staticmethod
     def config_padrao():
-        """Configuração padrão de uma partida (editável pelo master na sala de espera)."""
+        """
+        Configuração padrão de uma partida (editável pelo master na sala de espera).
+        É a fonte única dos defaults: o cliente só espelha estes valores enquanto
+        não recebe o payload do servidor (`config_padrao` em `update_user_list`).
+        O trio `dados_qtd`/`max_jogadores` casa com `simular_ia.montar_partida`,
+        que sobrescreve os valores para os cenários headless.
+        """
         return {
-            'dados_qtd': 1,
-            'max_jogadores': 6,
+            'dados_qtd': 3,
+            'max_jogadores': 4,
             'com_coringa': True,
-            'publica': True,
-            'substituir_desconectado_por_ia': False,
-            'ia_nivel_padrao': 2,
-            # Verificação de integridade dos dados (provably fair): opt-in do master.
-            'verificacao_ativa': False,
+            # Sala nasce privada (só entra por link); o master libera na busca.
+            'publica': False,
+            'substituir_desconectado_por_ia': True,
+            'ia_nivel_padrao': 3,
+            # Verificação de integridade dos dados (provably fair): ligada por
+            # padrão; o master pode desligar. Exige o reveal da seed antes de iniciar.
+            'verificacao_ativa': True,
             # Tempo máximo (segundos) por jogada; 0 desliga. Quando expira, o
             # jogo joga pelo jogador atrasado (jogada automática, Fase 21).
-            'tempo_max_jogada': 30,
+            'tempo_max_jogada': 60,
         }
 
     def sala_room(self):

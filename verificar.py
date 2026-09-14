@@ -189,6 +189,20 @@ def verificar_roundtrip():
     import modelos
 
     lobby = modelos.Lobby(sala_id="rt", lobby_numero=7)
+    # A política de defaults da sala é fonte única (`config_padrao`); o
+    # cliente só espelha via `config_padrao` do payload de `update_user_list`.
+    _checar("config padrão (fonte única)",
+            modelos.Lobby.config_padrao() == {
+                'dados_qtd': 3,
+                'max_jogadores': 4,
+                'com_coringa': True,
+                'publica': False,
+                'substituir_desconectado_por_ia': True,
+                'ia_nivel_padrao': 3,
+                'verificacao_ativa': True,
+                'tempo_max_jogada': 60,
+            },
+            str(modelos.Lobby.config_padrao()))
     for cid, nome in (("cli1", "Ana"), ("cli2", "Bia")):
         jogador = modelos.Jogador(client_id=cid)
         jogador.username = nome
@@ -2582,6 +2596,24 @@ def verificar_integracao():
 
     grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
     modulo_app.GRACE_RECONEXAO_SEGUNDOS = 0
+    # Os testes genéricos exercitam o fluxo de jogo, não a política de defaults.
+    # Com `verificacao_ativa` ligada no padrão, a sala só inicia com o reveal da
+    # seed — e os clientes de teste não rodam JS. Congela os defaults "neutros"
+    # (pré-política: verif desligada, sala pública, 1 dado) durante a integração;
+    # os valores reais do padrão são validados em `verificar_roundtrip` e o
+    # fluxo de seed tem teste próprio (commit-reveal) que liga a verificação.
+    import modelos
+    _padrao_original = modelos.Lobby.config_padrao
+    modelos.Lobby.config_padrao = staticmethod(lambda: {
+        'dados_qtd': 1,
+        'max_jogadores': 6,
+        'com_coringa': True,
+        'publica': True,
+        'substituir_desconectado_por_ia': False,
+        'ia_nivel_padrao': 2,
+        'verificacao_ativa': False,
+        'tempo_max_jogada': 30,
+    })
     testes_fase6 = [
         ("B3", teste_b3_aposta_invalida),
         ("B6", teste_b6_bools_reais),
@@ -2677,6 +2709,7 @@ def verificar_integracao():
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)
                 _falhou(nome, repr(erro))
     finally:
+        modelos.Lobby.config_padrao = _padrao_original
         modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
 
 

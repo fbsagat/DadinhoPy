@@ -392,6 +392,9 @@ def montar_payload_lista_usuarios(lobby):
         "nome": lobby.nome,
         "status": lobby.status,
         "config": config_publica,
+        # Fonte única dos defaults: o cliente usa isto (em vez de uma cópia local
+        # desatualizável) para decidir se a sala recém-criada ainda está no padrão.
+        "config_padrao": Lobby.config_padrao(),
         "seed": lobby.info_publica_seed(),
         "pode_iniciar": pode_iniciar,
         "motivo": motivo,

@@ -1358,4 +1358,4 @@ def foguetear(dados, lobby, jogador):
 
 if __name__ == '__main__':
     if os.environ.get("VERCEL") != "1":
-        socketio.run(app, allow_unsafe_werkzeug=True)
+        socketio.run(app, host='0.0.0.0', allow_unsafe_werkzeug=True)

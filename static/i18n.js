@@ -44,6 +44,20 @@ I18N_DICIONARIOS.en = {
     'js.narrador.modo.ultima': 'Narrator: last line only',
     'js.narrador.modo.desligado': 'Narrator: off',
     'ui.seletor_idioma': 'Language',
+    'ui.menu.abrir': 'Open menu',
+    'ui.menu.fechar': 'Close menu',
+    'ui.menu.titulo': 'Menu',
+    'ui.menu.tutorial': 'Tutorial',
+    'ui.menu.dicas': 'Tips',
+    'ui.menu.narrador': 'Narrator',
+    'ui.menu.idioma': 'Language',
+    'ui.menu.som': 'Sounds',
+    'ui.menu.musica': 'Music',
+    'ui.lobby.swipe': 'Swipe to see more panels',
+    'ui.lobby.aba': 'Lobby panel {n}',
+    'ui.lobby.seta_esq': 'Previous panel',
+    'ui.lobby.seta_dir': 'Next panel',
+    'ui.lobby.dots': 'Lobby panels',
 
     // Sala de espera
     'ui.subtitulo': 'The official <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> game!',
@@ -433,6 +447,20 @@ I18N_DICIONARIOS['pt-BR'] = {
     'js.narrador.modo.ultima': 'Narrador: só a última fala',
     'js.narrador.modo.desligado': 'Narrador: desligado',
     'ui.seletor_idioma': 'Idioma',
+    'ui.menu.abrir': 'Abrir menu',
+    'ui.menu.fechar': 'Fechar menu',
+    'ui.menu.titulo': 'Menu',
+    'ui.menu.tutorial': 'Tutorial',
+    'ui.menu.dicas': 'Dicas',
+    'ui.menu.narrador': 'Narrador',
+    'ui.menu.idioma': 'Idioma',
+    'ui.menu.som': 'Sons',
+    'ui.menu.musica': 'Música',
+    'ui.lobby.swipe': 'Deslize para ver mais painéis',
+    'ui.lobby.aba': 'Painel do lobby {n}',
+    'ui.lobby.seta_esq': 'Painel anterior',
+    'ui.lobby.seta_dir': 'Próximo painel',
+    'ui.lobby.dots': 'Painéis do lobby',
 
     'ui.subtitulo': 'O jogo oficial do <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!',
     'ui.titulo_documento': 'Dadinho — O jogo oficial do MemeTrigger!',
@@ -798,6 +826,20 @@ I18N_DICIONARIOS.es = {
     'js.narrador.modo.ultima': 'Narrador: solo la última frase',
     'js.narrador.modo.desligado': 'Narrador: apagado',
     'ui.seletor_idioma': 'Idioma',
+    'ui.menu.abrir': 'Abrir menú',
+    'ui.menu.fechar': 'Cerrar menú',
+    'ui.menu.titulo': 'Menú',
+    'ui.menu.tutorial': 'Tutorial',
+    'ui.menu.dicas': 'Consejos',
+    'ui.menu.narrador': 'Narrador',
+    'ui.menu.idioma': 'Idioma',
+    'ui.menu.som': 'Sonidos',
+    'ui.menu.musica': 'Música',
+    'ui.lobby.swipe': 'Desliza para ver más paneles',
+    'ui.lobby.aba': 'Panel del lobby {n}',
+    'ui.lobby.seta_esq': 'Panel anterior',
+    'ui.lobby.seta_dir': 'Siguiente panel',
+    'ui.lobby.dots': 'Paneles del lobby',
 
     'ui.subtitulo': '¡El juego oficial de <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!',
     'ui.titulo_documento': 'Dadinho — ¡El juego oficial de MemeTrigger!',
@@ -1163,6 +1205,20 @@ I18N_DICIONARIOS.fr = {
     'js.narrador.modo.ultima': 'Narrateur : seulement la dernière',
     'js.narrador.modo.desligado': 'Narrateur : désactivé',
     'ui.seletor_idioma': 'Langue',
+    'ui.menu.abrir': 'Ouvrir le menu',
+    'ui.menu.fechar': 'Fermer le menu',
+    'ui.menu.titulo': 'Menu',
+    'ui.menu.tutorial': 'Tutoriel',
+    'ui.menu.dicas': 'Astuces',
+    'ui.menu.narrador': 'Narrateur',
+    'ui.menu.idioma': 'Langue',
+    'ui.menu.som': 'Sons',
+    'ui.menu.musica': 'Musique',
+    'ui.lobby.swipe': 'Glissez pour voir plus de panneaux',
+    'ui.lobby.aba': 'Panneau du lobby {n}',
+    'ui.lobby.seta_esq': 'Panneau précédent',
+    'ui.lobby.seta_dir': 'Panneau suivant',
+    'ui.lobby.dots': 'Panneaux du lobby',
 
     'ui.subtitulo': 'Le jeu officiel de <a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> !',
     'ui.titulo_documento': 'Dadinho — Le jeu officiel de MemeTrigger !',
@@ -1528,6 +1584,20 @@ I18N_DICIONARIOS['zh-CN'] = {
     'js.narrador.modo.ultima': '解说：仅最后一句',
     'js.narrador.modo.desligado': '解说：关闭',
     'ui.seletor_idioma': '语言',
+    'ui.menu.abrir': '打开菜单',
+    'ui.menu.fechar': '关闭菜单',
+    'ui.menu.titulo': '菜单',
+    'ui.menu.tutorial': '教程',
+    'ui.menu.dicas': '提示',
+    'ui.menu.narrador': '解说',
+    'ui.menu.idioma': '语言',
+    'ui.menu.som': '音效',
+    'ui.menu.musica': '音乐',
+    'ui.lobby.swipe': '滑动查看更多面板',
+    'ui.lobby.aba': '大厅面板 {n}',
+    'ui.lobby.seta_esq': '上一个面板',
+    'ui.lobby.seta_dir': '下一个面板',
+    'ui.lobby.dots': '大厅面板',
 
     'ui.subtitulo': '<a href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a> 官方游戏！',
     'ui.titulo_documento': 'Dadinho — MemeTrigger 官方游戏！',
@@ -1886,6 +1956,10 @@ I18N_DICIONARIOS['zh-CN'] = {
 // ---------------------------------------------------------------------------
 let idioma_atual = 'en';
 
+// Idioma padrão quando o navegador não fala um idioma suportado (fallback único
+// da detecção). O cliente nunca envia preferência ao servidor (invariante 5).
+const IDIOMA_PADRAO = 'en';
+
 function _detectar_idioma() {
     try {
         const valor = localStorage.getItem('dadinho_idioma');
@@ -1908,7 +1982,7 @@ function _detectar_idioma() {
     if (nav.indexOf('zh') === 0) {
         return 'zh-CN';
     }
-    return 'en';
+    return IDIOMA_PADRAO;
 }
 
 function _resolver_face(valor, quantidade) {
@@ -2034,24 +2108,29 @@ function definir_idioma(codigo) {
 }
 
 function _montar_seletor_idioma() {
-    const seletor = document.getElementById('seletor_idioma');
-    if (!seletor) {
-        return;
-    }
-    seletor.innerHTML = '';
-    I18N_IDIOMAS.forEach(function (idioma) {
-        const opcao = document.createElement('option');
-        opcao.value = idioma.codigo;
-        opcao.textContent = idioma.nome;
-        if (idioma.codigo === idioma_atual) {
-            opcao.selected = true;
-        }
-        seletor.appendChild(opcao);
-    });
-    seletor.setAttribute('aria-label', t('ui.seletor_idioma'));
-    seletor.title = t('ui.seletor_idioma');
-    seletor.addEventListener('change', function () {
-        definir_idioma(seletor.value);
+    // Fase 33 (M1): o drawer do mobile tem o próprio seletor — ambos são
+    // populados e ligados ao mesmo `definir_idioma`.
+    const seletores = ['seletor_idioma', 'seletor_idioma_mobile']
+        .map(function (id) {
+            return document.getElementById(id);
+        })
+        .filter(Boolean);
+    seletores.forEach(function (seletor) {
+        seletor.innerHTML = '';
+        I18N_IDIOMAS.forEach(function (idioma) {
+            const opcao = document.createElement('option');
+            opcao.value = idioma.codigo;
+            opcao.textContent = idioma.nome;
+            if (idioma.codigo === idioma_atual) {
+                opcao.selected = true;
+            }
+            seletor.appendChild(opcao);
+        });
+        seletor.setAttribute('aria-label', t('ui.seletor_idioma'));
+        seletor.title = t('ui.seletor_idioma');
+        seletor.addEventListener('change', function () {
+            definir_idioma(seletor.value);
+        });
     });
 }
 

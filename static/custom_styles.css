@@ -210,8 +210,9 @@ canvas {
    Os estilos inline de dimensões (JS/HTML) são sobrescritos via !important. */
 @media (max-width: 768px) {
     #div_titulo_img {
-        height: 20vh !important;
-        padding-top: 44px;
+        height: 14vh !important;
+        /* Fase 33 (M4): 20vh → 14vh p/ o lobby caber na tela com o carrossel */
+        padding-top: calc(env(safe-area-inset-top, 0px) + 44px);
     }
 
     #titulo_img {
@@ -273,7 +274,9 @@ canvas {
     }
 
     #cards .card {
-        min-height: 150px !important;
+        /* Fase 34: altura FIXA no mobile também (era `min-height`, que deixava
+           o card crescer quando um nome longo quebrava linha no cabeçalho). */
+        height: 150px !important;
     }
 }
 
@@ -318,8 +321,9 @@ canvas {
 .painel-dicas {
     position: fixed;
     bottom: 16px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: auto;
+    right: 12px;
+    transform: none;
     z-index: 60;
     display: none;
     align-items: center;
@@ -690,6 +694,17 @@ h5,
         right: auto;
         transform: translateX(-50%);
     }
+    /* Fase 33 (M3): quando a partida está aberta no mobile, o rodapé de ação
+       (action bar) ocupa a base da tela — o narrador sobe para o topo esquerdo
+       (abaixo dos botões fixos) para não cobrir Apostar/Desconfiar. */
+    body.em_tela_2 .narrador {
+        bottom: auto;
+        top: calc(env(safe-area-inset-top, 0px) + 60px);
+        left: 8px;
+        right: 60px;
+        width: auto;
+        max-height: 30vh;
+    }
 }
 
 /* ------- Botões ------- */
@@ -760,16 +775,11 @@ h5,
 }
 
 #cards .card-header {
-    flex-shrink: 0;
     font-weight: 700;
     letter-spacing: 0.4px;
     font-size: 0.95rem;
     background-image: linear-gradient(135deg, rgba(29, 155, 240, 0.28), rgba(13, 202, 240, 0.08));
     border-bottom: 1px solid var(--cor-borda);
-    /* Nome do jogador não deve fazer o header crescer: trunca em uma linha. */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 #cards .card-header.text-bg-primary {
@@ -832,16 +842,29 @@ h5,
 }
 
 /* Fase 32 (P3): cards de jogadores com altura FIXA e compactos — o histórico
-   de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo.
-   `height` (não `min-height`) garante tamanho padronizado: nome longo,
-   quebrar linha ou excesso de jogadas não alteram a altura do card. */
+   de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo. */
 #cards .card {
     height: 148px;
+    min-width: 0;
+}
+
+/* Fase 34: o nome do jogador NÃO influencia o tamanho do card — o cabeçalho
+   fica em linha única e trunca com reticências (sem quebrar linha nem crescer
+   o card). `min-width: 0` evita o nome empurrar a coluna além do trilho do
+   grid/flex; `overflow: hidden` do card corta qualquer sobra. */
+#cards .card-header {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+#cards > div {
+    min-width: 0;
 }
 
 #cards .card-body {
     /* padding-top extra p/ não cortar o selo "ÚLTIMA" (top: -9px) da 1ª jogada */
-    flex: 1 1 auto;
     padding: 0.6rem 0.4rem 0.3rem;
     overflow-y: auto;
 }
@@ -1018,5 +1041,444 @@ h5,
 
     ::-webkit-scrollbar-thumb:hover {
         background: #0a3d6b;
+    }
+}
+
+/* ============================================================
+   Fase 33 — Mobile: menu sandwich, swipe no lobby e ação fixa.
+   Tudo client-side (HTML/CSS/JS); desktop (≥992px) intocado.
+   ============================================================ */
+
+/* -------- M1: menu sandwich (drawer) -------- */
+/* No desktop o ☰ e o drawer não existem visualmente. */
+#botao_menu {
+    display: none;
+}
+
+.menu-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(84vw, 320px);
+    z-index: 75;
+    display: none;
+    flex-direction: column;
+    background-color: rgba(0, 17, 37, 0.98);
+    border-left: 1px solid var(--cor-borda);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.55);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px);
+}
+
+/* Animação de entrada só quando abre via botão (classe `abrir`, pontual).
+   Abrir/fechar por swipe usa `arrastando`, que desliga a animação/transição
+   para o drawer acompanhar o dedo sem lutar com o CSS. */
+.menu-drawer.aberto {
+    display: flex;
+    transition: transform 0.2s ease;
+}
+
+.menu-drawer.abrir {
+    animation: drawer_aparecer 0.25s ease;
+}
+
+.menu-drawer.arrastando {
+    animation: none;
+    transition: none;
+}
+
+@keyframes drawer_aparecer {
+    from {
+        opacity: 0;
+        transform: translateX(24px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.menu-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(13, 202, 240, 0.3);
+    margin-bottom: 10px;
+}
+
+.menu-drawer-corpo {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+}
+
+.menu-item {
+    width: 100%;
+    min-height: 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background-color: rgba(0, 41, 82, 0.65);
+    border: 1px solid var(--cor-borda);
+    color: #eaf6ff;
+}
+
+.menu-item-select {
+    align-items: stretch;
+}
+
+.menu-item select {
+    width: 100%;
+}
+
+/* -------- M2: setas/dots/dica do carrossel (só mobile) -------- */
+.lobby-seta,
+.lobby-dots,
+.lobby-swipe-dica {
+    display: none;
+}
+
+/* -------- M3: rodapé de ação e telas de jogo (só mobile) -------- */
+/* No desktop o `#rodape_acao` é um wrapper comum; o `margin-top` repõe o
+   espaço que o antigo `<br>` dava entre os cards e o painel de jogada. */
+#rodape_acao {
+    margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+    /* As duas barras de botões fixos do topo somem; o ☰ assume. */
+    .barra-topo-desktop {
+        display: none !important;
+    }
+
+    #botao_menu {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        font-size: 1.15rem;
+        background-color: rgba(0, 41, 82, 0.55);
+        backdrop-filter: blur(4px);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+        margin-top: calc(env(safe-area-inset-top, 0px) + 8px);
+        margin-right: calc(env(safe-area-inset-right, 0px) + 8px);
+    }
+
+    /* Botão "Sair da sala" fica à esquerda do ☰ quando visível. */
+    #bot_sair_da_sala {
+        right: calc(env(safe-area-inset-right, 0px) + 64px) !important;
+        margin-top: calc(env(safe-area-inset-top, 0px) + 8px);
+    }
+
+    /* -------- M2: carrossel do lobby -------- */
+    .lobby-carrossel {
+        position: relative;
+        padding: 0 4px;
+        max-width: 560px;
+    }
+
+    .lobby-linha {
+        display: flex;
+        flex-wrap: nowrap;
+        /* O trilho NÃO usa `justify-content-center` (Bootstrap, com
+           `!important`): centrar o overflow empurra o 1º card para fora da
+           tela e deixa só 2 telas alcançáveis. `flex-start` + snap `start` =
+           cada card preenche a largura e o swipe desloca exatamente um slide. */
+        justify-content: flex-start;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scroll-padding-left: 0;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .lobby-linha::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Cada card mora no SEU slide (`col-... lobby-slide`); não há wrapper:
+       `display: contents` é instável no mobile (vira 2 slides e estoura a
+       tela), então o trilho trabalha com colunas diretas. Especificidade
+       (0,2,0) vence o `.col-12`/`.col-lg-*` do Bootstrap sem `!important`. */
+    .lobby-linha .lobby-slide {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        flex: 0 0 100%;
+        max-width: 100%;
+        min-width: 0;
+        scroll-snap-align: start;
+    }
+
+    .lobby-linha .lobby-slide > * {
+        width: 100%;
+    }
+
+    /* Lista de jogadores com scroll interno: cresce sem estourar a tela. */
+    #lista_de_jogadores {
+        max-height: 32vh;
+        overflow-y: auto;
+    }
+
+    .lobby-seta {
+        display: flex;
+        position: absolute;
+        top: 38%;
+        width: 30px;
+        height: 46px;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 8px;
+        background-color: rgba(0, 41, 82, 0.85);
+        color: #0dcaf0;
+        font-size: 1.4rem;
+        z-index: 3;
+    }
+
+    #lobby_seta_esq {
+        left: -2px;
+    }
+
+    #lobby_seta_dir {
+        right: -2px;
+    }
+
+    .lobby-seta:disabled {
+        opacity: 0.35;
+    }
+
+    .lobby-dots {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .lobby-dots .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: none;
+        padding: 0;
+        background-color: rgba(13, 202, 240, 0.35);
+        transition: background-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .lobby-dots .dot.ativo {
+        background-color: #0dcaf0;
+        transform: scale(1.3);
+    }
+
+    .lobby-swipe-dica {
+        display: block;
+        text-align: center;
+        font-size: 0.75rem;
+        color: #9fb8cf;
+        margin-top: 4px;
+    }
+
+    /* -------- M3: partida vira layout de app (flex 100dvh) -------- */
+    body.em_tela_2 {
+        overflow: hidden;
+        height: 100vh;
+        height: 100dvh;
+    }
+
+    /* Título e subtítulo somem na tela de turnos: a partida ocupa a viewport
+       inteira. `!important` vence o `.d-flex` do Bootstrap (utility com
+       `!important`), que mantinha o título visível mesmo em tela de jogo. */
+    body.em_tela_2 #div_titulo_img {
+        display: none !important;
+    }
+
+    body.em_tela_2 #subtitulo_jogo {
+        display: none;
+    }
+
+    /* Sem o padding do `.app-main`, a partida preenche a viewport exata. */
+    body.em_tela_2 .app-main {
+        padding: 0;
+    }
+
+    /* A partida vira tela cheia por construção (`position: fixed` +
+       `top/right/bottom/left: 0`): o `height: 100dvh` sozinho não bastava
+       porque o `#tela_partida` continuava no fluxo da página abaixo do
+       título/subtítulo — o rodapé de ação (dados + Apostar/Desconfiar) caía
+       para fora da viewport no mobile. Com o `fixed`, a tela cobre a viewport
+       inteira e o `#rodape_acao` fica sempre visível na base, independente do
+       que estiver acima no fluxo. */
+    #tela_partida.tela-partida-ativa {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex !important;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        padding: 0;
+        max-width: 100%;
+    }
+
+    #area_mesa {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 8px 6px;
+    }
+
+    #rodape_acao {
+        flex: 0 0 auto;
+        margin-top: 0;
+        padding: 6px 8px calc(env(safe-area-inset-bottom, 0px) + 6px);
+        background-color: rgba(0, 17, 37, 0.96);
+        border-top: 1px solid var(--cor-borda);
+        box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Contador da jogada automática: sai do topo e entra no rodapé. */
+    body.em_tela_2 #contador_jogada {
+        position: static;
+        transform: none;
+        margin: 0 auto 4px;
+        width: fit-content;
+    }
+
+    /* Barra de status compacta (uma linha, dados menores). */
+    #tela_partida .d-flex.justify-content-between {
+        gap: 4px;
+        margin-top: 6px !important;
+        font-size: 0.78rem;
+    }
+
+    #meus_dados img,
+    #dados_mesa img,
+    #corin_atual img {
+        width: 22px !important;
+        height: 22px !important;
+    }
+
+    #meus_dados span,
+    #dados_mesa span,
+    #corin_atual span {
+        font-size: 0.85rem !important;
+    }
+
+    #cards {
+        max-height: none;
+    }
+
+    /* Painel de jogada compacto no rodapé. */
+    #painel_jogada .container-fluid.text-center {
+        padding: 0;
+    }
+
+    #painel_jogada .badge {
+        width: auto !important;
+        font-size: 1rem !important;
+        margin-bottom: 4px !important;
+    }
+
+    #painel_jogada .container-sm {
+        max-width: 100% !important;
+        margin-bottom: 6px !important;
+        padding: 4px 2px !important;
+    }
+
+    /* 6 dados de face compactos numa linha única (rola se apertar). */
+    #painel_jogada .row.row-cols-3 {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        --bs-gutter-x: 0.25rem;
+    }
+
+    #painel_jogada .row-cols-3 > .col {
+        flex: 0 0 16.6666%;
+        max-width: 16.6666%;
+    }
+
+    #painel_jogada .image-button img {
+        width: 42px !important;
+        height: 42px !important;
+    }
+
+    /* Stepper + Apostar/Desconfiar em fileira (~48px). */
+    #painel_jogada .d-flex.justify-content-center.align-items-center.flex-wrap {
+        flex-wrap: nowrap;
+        gap: 4px;
+        overflow-x: auto;
+    }
+
+    #quantidade,
+    #desconfiar,
+    #apostar {
+        width: 92px !important;
+        height: 48px;
+        font-size: 0.95rem;
+        margin: 0 2px !important;
+    }
+
+    #quantidade {
+        width: 64px !important;
+        padding: 0 4px;
+    }
+
+    #decrease,
+    #increase {
+        width: 40px !important;
+        height: 40px !important;
+    }
+
+    #painel_aguarde {
+        width: auto !important;
+        min-width: 12rem;
+        font-size: 1.05rem !important;
+    }
+}
+
+/* O botão de espectador não disputa o canto com os controles de som/música
+   no desktop — ele fica abaixo da coluna direita. No mobile a media query da
+   Fase 33 acima o reposiciona à esquerda do ☰. */
+@media (min-width: 769px) {
+    #bot_sair_da_sala {
+        top: calc(env(safe-area-inset-top, 0px) + 140px) !important;
+        right: 8px !important;
+    }
+}
+
+/* Conferência em telas muito estreitas: 1 card por linha (6 dados de 40px
+   não cabem em 2 colunas de ~50% sem transbordar). */
+@media (max-width: 400px) {
+    #cards_conferencia > div {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+}
+
+/* Desktop médio (769-1119px): a dica ancorada à direita ainda alcançava o
+   narrador (bottom-left, até 330px); vai para o topo, como no mobile. */
+@media (min-width: 769px) and (max-width: 1119px) {
+    .painel-dicas {
+        bottom: auto;
+        top: 64px;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
     }
 }

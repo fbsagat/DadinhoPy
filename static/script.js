@@ -109,6 +109,19 @@ socket.onevent = function (packet) {
     }
 };
 
+// Defaults das preferências locais do cliente (não vão ao servidor). Ficam
+// centralizados aqui: cada variável persistida abaixo só cai no valor daqui
+// quando não há nada salvo em localStorage. Idioma é o único fora daqui —
+// mora em i18n.js (`_detectar_idioma`), que detecta o navegador e cai em `en`.
+const PADROES_CLIENTE = {
+    som_ativado: true,
+    volume_som: 70,
+    musica_ativada: false,
+    volume_musica: 40,
+    narrador: 'completo',
+    dicas: true,
+};
+
 // Modo de exibição do narrador, persistido entre sessões:
 //   completo  -> histórico de falas (padrão)
 //   ultima    -> mostra só a última fala
@@ -121,11 +134,12 @@ const NARRADOR_MODOS = {
 const NARRADOR_CICLO = ['completo', 'ultima', 'desligado'];
 let narrador_modo = localStorage.getItem('dadinho_narrador');
 if (!NARRADOR_MODOS[narrador_modo]) {
-    narrador_modo = 'completo';
+    narrador_modo = PADROES_CLIENTE.narrador;
 }
 
 function aplicar_estado_narrador() {
     const botao = document.getElementById('botao_narrador');
+    const botao_menu = document.getElementById('menu_narrador');
     const painel = document.getElementById('narrador');
     const cfg = NARRADOR_MODOS[narrador_modo];
     if (botao) {
@@ -135,6 +149,14 @@ function aplicar_estado_narrador() {
             botao.classList.remove(NARRADOR_MODOS[chave].classe);
         });
         botao.classList.add(cfg.classe);
+    }
+    // Fase 33 (M1): o botão do drawer mostra o modo atual junto ao label.
+    if (botao_menu) {
+        botao_menu.textContent = cfg.icone + ' ' + t('ui.menu.narrador');
+        Object.keys(NARRADOR_MODOS).forEach(function (chave) {
+            botao_menu.classList.remove(NARRADOR_MODOS[chave].classe);
+        });
+        botao_menu.classList.add(cfg.classe);
     }
     if (painel) {
         painel.style.display = (narrador_modo === 'desligado' || indiceAtual === 0) ? 'none' : 'flex';
@@ -507,6 +529,12 @@ socket.on("update_user_list", (data) => {
     // Aplica a configuração da partida (read-only para não-master).
     aplicar_config(data.config);
 
+    // Fonte única dos defaults: o servidor manda o padrão vigente junto do
+    // estado da sala, então HTML/JS nunca precisam manter uma cópia à mão.
+    if (data.config_padrao) {
+        CONFIG_PADRAO_LOCAL = data.config_padrao;
+    }
+
     // Fase F: selo de verificação de integridade (provably fair) na espera.
     renderizar_badge_fair(data.config);
 
@@ -529,11 +557,11 @@ socket.on("update_user_list", (data) => {
         rowDiv.className = "row border-bottom";
 
         const jogadoresDiv = document.createElement("div");
-        jogadoresDiv.className = "col-md-6 font-weight-bold";
+        jogadoresDiv.className = "col-md-6 fw-bold";
         jogadoresDiv.textContent = t('js.jogadores_conectados');
 
         const pontuacaoDiv = document.createElement("div");
-        pontuacaoDiv.className = "col-md-6 font-weight-bold";
+        pontuacaoDiv.className = "col-md-6 fw-bold";
         pontuacaoDiv.textContent = t('js.pontuacao');
 
         userListItems.appendChild(rowDiv);
@@ -635,6 +663,11 @@ function aplicar_master() {
     document.querySelectorAll('#painel_config input, #painel_config select, #painel_ia input, #painel_ia select, #painel_ia button').forEach(el => {
         el.disabled = !sou_master;
     });
+    // Fase 33 (M2): o carrossel do lobby tem sempre as 3 telas (Jogadores,
+    // Config, IA) para host e cliente — no cliente os controles ficam
+    // read-only (já desabilitados acima), como no desktop. Reconstrói os
+    // dots/setas do carrossel ao mudar o estado.
+    atualizar_carrossel();
 }
 
 function aplicar_config(config) {
@@ -700,18 +733,20 @@ function enviar_config() {
 }
 
 // --- Facilidade: lembra a configuração da partida entre sessões ---
-// A configuração padrão espelha `Lobby.config_padrao` (modelos.py). Quando o
-// master entra numa sala recém-criada (config ainda é a padrão), a preferência
-// salva é aplicada e enviada de uma vez — não precisa reconfigurar toda vez.
-const CONFIG_PADRAO_LOCAL = {
-    dados_qtd: 1,
-    max_jogadores: 6,
+// Fallback do padrão de `Lobby.config_padrao` (modelos.py) usado só até o
+// servidor mandar `config_padrao` em `update_user_list` — a partir daí o
+// cliente adota o valor autoritativo do servidor (fonte única). Quando o master
+// entra numa sala recém-criada (config ainda é a padrão), a preferência salva é
+// aplicada e enviada de uma vez — não precisa reconfigurar toda vez.
+let CONFIG_PADRAO_LOCAL = {
+    dados_qtd: 3,
+    max_jogadores: 4,
     com_coringa: true,
-    publica: true,
-    substituir_desconectado_por_ia: false,
-    ia_nivel_padrao: 2,
-    verificacao_ativa: false,
-    tempo_max_jogada: 30,
+    publica: false,
+    substituir_desconectado_por_ia: true,
+    ia_nivel_padrao: 3,
+    verificacao_ativa: true,
+    tempo_max_jogada: 60,
 };
 
 function config_igual_padrao(config) {
@@ -919,6 +954,19 @@ socket.on("mudar_pagina", function (data) {
     aplicar_estado_narrador();
     // Mostra a próxima página
     paginas[indiceAtual].style.display = "block";
+    // Fase 33 (M3): no mobile a tela da partida vira flex-column 100dvh com
+    // rodapé de ação fixo — `em_tela_2` no body e `tela-partida-ativa` na tela
+    // disparam o layout de app (CSS). Desktop não é afetado (regras em media
+    // query ≤768px).
+    const em_partida = data.pag_numero === 2;
+    document.body.classList.toggle('em_tela_2', em_partida);
+    if (paginas[2]) {
+        paginas[2].classList.toggle('tela-partida-ativa', em_partida);
+    }
+    if (data.pag_numero === 0) {
+        // Fase 33 (M2): de volta ao lobby, reconstrói dots/setas do carrossel.
+        atualizar_carrossel();
+    }
     // Fase 32 (P1): o título é texto "DADINHO" (sem imagens titulo.png/titulo_p).
     // Só o tamanho varia por página para abrir espaço nas telas de jogo.
     if (data.pag_numero === 2) {
@@ -937,115 +985,6 @@ socket.on("mudar_pagina", function (data) {
         subtitulo.style.display = (data.pag_numero === 1 || data.pag_numero === 2) ? 'none' : 'block';
     }
     mostrar_dica(data.pag_numero);
-
-    // Fase M1: resetar swipe ao voltar para lobby (0) ou partida (2)
-    if (data.pag_numero === 0) {
-        resetar_swipe_lobby();
-    } else if (data.pag_numero === 2) {
-        resetar_swipe_status();
-    }
-});
-
-// ============================================================
-// Fase M1: Navegação por swipe horizontal (mobile).
-// Dots sincronizados com scroll-snap para lobby e painel de
-// status. Desktop mantém layout original (sem swipe).
-// ============================================================
-
-let lobby_tab_ativo = 0;
-let status_tab_ativo = 0;
-
-// --- Lobby swipe ---
-function init_swipe_lobby() {
-    const wrapper = document.getElementById('lobby_panels_wrapper');
-    const dots = document.querySelectorAll('.lobby-dot');
-
-    if (!wrapper || !dots.length) return;
-
-    dots.forEach((dot) => {
-        dot.addEventListener('click', () => {
-            const tab = Number(dot.getAttribute('data-tab'));
-            lobby_tab_ativo = tab;
-            atualizar_dots_lobby();
-            wrapper.scrollTo({
-                left: tab * wrapper.clientWidth,
-                behavior: 'smooth'
-            });
-        });
-    });
-
-    wrapper.addEventListener('scroll', () => {
-        const page = Math.round(wrapper.scrollLeft / wrapper.clientWidth);
-        if (page !== lobby_tab_ativo) {
-            lobby_tab_ativo = page;
-            atualizar_dots_lobby();
-        }
-    });
-}
-
-function atualizar_dots_lobby() {
-    document.querySelectorAll('.lobby-dot').forEach((dot, i) => {
-        dot.classList.toggle('active', i === lobby_tab_ativo);
-    });
-}
-
-function resetar_swipe_lobby() {
-    const wrapper = document.getElementById('lobby_panels_wrapper');
-    if (!wrapper) return;
-    lobby_tab_ativo = 0;
-    wrapper.scrollTo({ left: 0, behavior: 'smooth' });
-    atualizar_dots_lobby();
-}
-
-// --- Status panels swipe (Tela 2) ---
-function init_swipe_status() {
-    const wrapper = document.getElementById('status_panels_wrap');
-    const dots = document.querySelectorAll('.status-dot');
-
-    if (!wrapper || !dots.length) return;
-
-    dots.forEach((dot) => {
-        dot.addEventListener('click', () => {
-            const tab = Number(dot.getAttribute('data-dot'));
-            status_tab_ativo = tab;
-            atualizar_dots_status();
-            wrapper.scrollTo({
-                left: tab * wrapper.clientWidth,
-                behavior: 'smooth'
-            });
-        });
-    });
-
-    wrapper.addEventListener('scroll', () => {
-        const page = Math.round(wrapper.scrollLeft / wrapper.clientWidth);
-        if (page !== status_tab_ativo) {
-            status_tab_ativo = page;
-            atualizar_dots_status();
-        }
-    });
-}
-
-function atualizar_dots_status() {
-    document.querySelectorAll('.status-dot').forEach((dot, i) => {
-        dot.classList.toggle('active', i === status_tab_ativo);
-    });
-}
-
-function resetar_swipe_status() {
-    const wrapper = document.getElementById('status_panels_wrap');
-    if (!wrapper) return;
-    status_tab_ativo = 0;
-    wrapper.scrollTo({ left: 0, behavior: 'smooth' });
-    atualizar_dots_status();
-}
-
-// Initialize swipe (script is at end of body, so DOM is ready)
-init_swipe_lobby();
-init_swipe_status();
-
-// Re-evaluate master tab visibility on resize (mobile↔desktop)
-window.addEventListener('resize', () => {
-    if (typeof aplicar_master === 'function') aplicar_master();
 });
 
 // Função para preencher os dados do jogador na página de partida
@@ -1304,9 +1243,9 @@ socket.on('construtor_html', function (data) {
         // Criação do card
         const card = document.createElement('div');
         card.className = 'card border border-secondary border-1 text-bg-dark';
-        // Fase 32 (P3): altura FIXA no desktop (o corpo rola se o histórico
-        // passar de 3 jogadas) — todos os cards ficam do mesmo tamanho.
-        card.style.minHeight = '148px';
+        // Fase 32 (P3) + Fase 34: o tamanho (fixo) do card vem da CSS
+        // (`#cards .card`) — o nome do jogador não o altera; no cabeçalho o
+        // nome longo é truncado com reticências (o `title` mostra o nome todo).
         card.id = `card_${jogador}`;
 
         // Criação do cabeçalho do card
@@ -1321,6 +1260,7 @@ socket.on('construtor_html', function (data) {
 
         cardHeader.textContent = `${jogador} (🎲 x ${data.dados_tt})`;
         cardHeader.id = `card_hea_${jogador}`;
+        cardHeader.title = jogador;
 
         // Criação do corpo do card
         const cardBody = document.createElement('div');
@@ -2052,32 +1992,75 @@ const sons_disponiveis = {
 const sons = {};
 
 // Preferência de som do jogador, persistida entre sessões. Valor padrão: ligado.
-let som_ativado = localStorage.getItem('dadinho_som') !== 'off';
+const som_salvo = localStorage.getItem('dadinho_som');
+let som_ativado = som_salvo === null ? PADROES_CLIENTE.som_ativado : som_salvo !== 'off';
 const botao_som = document.getElementById('botao_som');
+// Fase 33 (M1): o drawer do mobile tem o próprio botão de som — ambos
+// compartilham o mesmo estado via `alternar_som`/`atualizar_icones_som`.
+const botao_menu_som = document.getElementById('menu_botao_som');
+
+function atualizar_icones_som() {
+    const icone = som_ativado ? '🔊' : '🔇';
+    if (botao_som) {
+        botao_som.textContent = icone;
+    }
+    if (botao_menu_som) {
+        botao_menu_som.textContent = icone;
+    }
+}
+
+function alternar_som() {
+    som_ativado = !som_ativado;
+    localStorage.setItem('dadinho_som', som_ativado ? 'on' : 'off');
+    atualizar_icones_som();
+}
+
 if (botao_som) {
-    botao_som.textContent = som_ativado ? '🔊' : '🔇';
-    botao_som.addEventListener('click', () => {
-        som_ativado = !som_ativado;
-        localStorage.setItem('dadinho_som', som_ativado ? 'on' : 'off');
-        botao_som.textContent = som_ativado ? '🔊' : '🔇';
-    });
+    atualizar_icones_som();
+    botao_som.addEventListener('click', alternar_som);
+}
+if (botao_menu_som) {
+    botao_menu_som.addEventListener('click', alternar_som);
 }
 
 // Volume dos efeitos sonoros (0 a 100), persistido entre sessões.
-let volume_som = Number(localStorage.getItem('dadinho_volume_som') || '100');
+let volume_som = Number(localStorage.getItem('dadinho_volume_som') || PADROES_CLIENTE.volume_som);
 const slider_volume_som = document.getElementById('volume_som');
+const slider_menu_volume_som = document.getElementById('menu_volume_som');
+
+function sincronizar_sliders_volume_som() {
+    if (slider_volume_som) {
+        slider_volume_som.value = volume_som;
+    }
+    if (slider_menu_volume_som) {
+        slider_menu_volume_som.value = volume_som;
+    }
+}
+
+function ao_mudar_volume_som(valor) {
+    volume_som = Number(valor) || 0;
+    localStorage.setItem('dadinho_volume_som', String(volume_som));
+    sincronizar_sliders_volume_som();
+    aplicar_volume_som();
+}
+
 if (slider_volume_som) {
-    slider_volume_som.value = volume_som;
-    slider_volume_som.addEventListener('input', () => {
-        volume_som = Number(slider_volume_som.value);
-        localStorage.setItem('dadinho_volume_som', String(volume_som));
-        aplicar_volume_som();
+    slider_volume_som.addEventListener('input', (event) => {
+        ao_mudar_volume_som(event.target.value);
     });
 }
+if (slider_menu_volume_som) {
+    slider_menu_volume_som.addEventListener('input', (event) => {
+        ao_mudar_volume_som(event.target.value);
+    });
+}
+// Aplica o volume persistido nos sliders (desktop + drawer) já no load.
+sincronizar_sliders_volume_som();
 
 // --- Sistema de ajuda: tutorial + dicas durante a partida ---
 // Preferência de dicas do jogador, persistida entre sessões. Valor padrão: ligado.
-let dicas_ativadas = localStorage.getItem('dadinho_dicas') !== 'off';
+const dicas_salvas = localStorage.getItem('dadinho_dicas');
+let dicas_ativadas = dicas_salvas === null ? PADROES_CLIENTE.dicas : dicas_salvas !== 'off';
 
 // Dicas contextuais mostradas conforme a página da partida (0 a 4). São chaves
 // de tradução; o texto é resolvido no idioma do jogador em mostrar_dica().
@@ -2176,11 +2159,16 @@ if (alerta_overlay) {
 }
 
 function aplicar_estado_dicas() {
-    if (!botao_dicas) {
-        return;
+    // Fase 33 (M1): o drawer do mobile tem o próprio switch de dicas.
+    const menu_dicas_switch = document.getElementById('menu_dicas_switch');
+    if (botao_dicas) {
+        botao_dicas.classList.toggle('btn-outline-warning', dicas_ativadas);
+        botao_dicas.classList.toggle('btn-outline-secondary', !dicas_ativadas);
     }
-    botao_dicas.classList.toggle('btn-outline-warning', dicas_ativadas);
-    botao_dicas.classList.toggle('btn-outline-secondary', !dicas_ativadas);
+    if (menu_dicas_switch) {
+        menu_dicas_switch.checked = dicas_ativadas;
+        menu_dicas_switch.setAttribute('aria-checked', dicas_ativadas ? 'true' : 'false');
+    }
     if (switch_tutorial) {
         switch_tutorial.checked = dicas_ativadas;
     }
@@ -2204,16 +2192,20 @@ function fechar_dica() {
     }
 }
 
-function alternar_dicas() {
-    dicas_ativadas = !dicas_ativadas;
+function definir_dicas(ativadas) {
+    dicas_ativadas = ativadas;
     localStorage.setItem('dadinho_dicas', dicas_ativadas ? 'on' : 'off');
-aplicar_estado_dicas();
-aplicar_estado_narrador();
+    aplicar_estado_dicas();
+    aplicar_estado_narrador();
     if (dicas_ativadas) {
         mostrar_dica(indiceAtual);
     } else {
         fechar_dica();
     }
+}
+
+function alternar_dicas() {
+    definir_dicas(!dicas_ativadas);
 }
 
 function abrir_tutorial() {
@@ -2239,7 +2231,9 @@ if (botao_narrador) {
     botao_narrador.addEventListener('click', alternar_narrador);
 }
 if (switch_tutorial) {
-    switch_tutorial.addEventListener('change', alternar_dicas);
+    switch_tutorial.addEventListener('change', function () {
+        definir_dicas(this.checked);
+    });
 }
 if (overlay_tutorial) {
     overlay_tutorial.addEventListener('click', (event) => {
@@ -2248,6 +2242,324 @@ if (overlay_tutorial) {
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// Fase 33 (M1): menu sandwich (drawer) do mobile.
+// O ☰ abre um drawer com as 6 ferramentas (Tutorial, Dicas, Narrador, Idioma,
+// Sons, Música); fecha no toque fora, no Esc, no ✖ ou arrastando para a
+// esquerda. Abre também por swipe da borda direita da tela. Desktop não usa
+// (o ☰ fica `display:none`).
+// ---------------------------------------------------------------------------
+const botao_menu = document.getElementById('botao_menu');
+const menu_drawer = document.getElementById('menu_drawer');
+
+function abrir_menu() {
+    if (!menu_drawer) {
+        return;
+    }
+    menu_drawer.classList.add('aberto', 'abrir');
+    menu_drawer.setAttribute('aria-hidden', 'false');
+    // A animação é pontual (classe `abrir`): sem ela o drawer não "pula" ao
+    // abrir por swipe (que posiciona o drawer seguindo o dedo).
+    window.setTimeout(function () {
+        menu_drawer.classList.remove('abrir');
+    }, 300);
+    const fechar = document.getElementById('botao_fechar_menu');
+    if (fechar) {
+        fechar.focus();
+    }
+}
+
+function fechar_menu() {
+    if (!menu_drawer) {
+        return;
+    }
+    menu_drawer.classList.remove('aberto', 'abrir', 'arrastando');
+    menu_drawer.style.transform = '';
+    menu_drawer.setAttribute('aria-hidden', 'true');
+    if (botao_menu) {
+        botao_menu.focus();
+    }
+}
+
+if (botao_menu && menu_drawer) {
+    botao_menu.addEventListener('click', abrir_menu);
+    const botao_fechar_menu = document.getElementById('botao_fechar_menu');
+    if (botao_fechar_menu) {
+        botao_fechar_menu.addEventListener('click', fechar_menu);
+    }
+    // Toque/clique fora do drawer (e fora do ☰) fecha.
+    document.addEventListener('pointerdown', function (event) {
+        if (menu_drawer.classList.contains('aberto') &&
+            !menu_drawer.contains(event.target) && event.target !== botao_menu) {
+            fechar_menu();
+        }
+    });
+    // Esc fecha o drawer.
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && menu_drawer.classList.contains('aberto')) {
+            fechar_menu();
+        }
+    });
+    // -----------------------------------------------------------------------
+    // Swipe do drawer: arrastar para a esquerda fecha; um gesto começando na
+    // borda direita da tela abre. Botões (☰/✖/toque fora) seguem como fallback.
+    // Só existe no mobile (a media query que mostra o ☰ é max-width: 768px).
+    // -----------------------------------------------------------------------
+    const gesto_mobile = window.matchMedia('(max-width: 768px)');
+    const NAO_ARRASTAVEIS = 'input, select, button, textarea, a, label';
+    let arrasto_menu = null;
+
+    // Gestos de abertura interrompidos (scroll/cancel) voltam ao estado
+    // fechado — o drawer só fica aberto quando o dedo passa o limiar.
+    function reverter_abertura_menu() {
+        if (arrasto_menu && arrasto_menu.abrindo) {
+            menu_drawer.classList.remove('aberto');
+            menu_drawer.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    function limpar_arrasto_menu() {
+        arrasto_menu = null;
+        menu_drawer.classList.remove('arrastando');
+        menu_drawer.style.transform = '';
+    }
+
+    document.addEventListener('pointerdown', function (event) {
+        if (!gesto_mobile.matches) {
+            return;
+        }
+        const aberto = menu_drawer.classList.contains('aberto');
+        if (aberto) {
+            // Só arrasta se o toque começou dentro do drawer em área não
+            // interativa (não rouba o gesto dos sliders, switchs e selects).
+            if (!menu_drawer.contains(event.target) ||
+                (event.target instanceof Element && event.target.closest(NAO_ARRASTAVEIS))) {
+                return;
+            }
+        } else if (event.clientX <= window.innerWidth - 28) {
+            // Fora da zona da borda direita: não é um gesto de abertura.
+            return;
+        }
+        arrasto_menu = {
+            inicioX: event.clientX,
+            inicioY: event.clientY,
+            dx: 0,
+            abrindo: !aberto,
+            definido: false
+        };
+        // Interrompe a animação de abertura por botão, se ainda estiver rodando.
+        menu_drawer.classList.remove('abrir');
+        if (arrasto_menu.abrindo) {
+            menu_drawer.classList.add('aberto', 'arrastando');
+            // Lê a largura depois de mostrar (display:none tem 0).
+            menu_drawer.style.transform = 'translateX(' + menu_drawer.offsetWidth + 'px)';
+        } else {
+            menu_drawer.classList.add('arrastando');
+        }
+        try {
+            menu_drawer.setPointerCapture(event.pointerId);
+        } catch (e) { /* captura falha em poucos browsers; ouvintes no document bastam */ }
+    });
+
+    document.addEventListener('pointermove', function (event) {
+        if (!arrasto_menu) {
+            return;
+        }
+        const dx = event.clientX - arrasto_menu.inicioX;
+        const dy = event.clientY - arrasto_menu.inicioY;
+        if (!arrasto_menu.definido) {
+            // Só vira gesto depois de cruzar o limiar; arrasto vertical (scroll
+            // do corpo do drawer) é ignorado.
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) {
+                return;
+            }
+            if (Math.abs(dy) > Math.abs(dx)) {
+                reverter_abertura_menu();
+                limpar_arrasto_menu();
+                return;
+            }
+            arrasto_menu.definido = true;
+        }
+        arrasto_menu.dx = dx;
+        if (arrasto_menu.abrindo) {
+            // Só entra (dx negativo): acompanha o dedo, limitado à largura.
+            const deslocar = Math.min(0, Math.max(-menu_drawer.offsetWidth, dx));
+            menu_drawer.style.transform = 'translateX(' + deslocar + 'px)';
+        } else {
+            // Fechando: segue o dedo para a esquerda, nunca passa do 0.
+            const deslocar = Math.min(0, dx);
+            menu_drawer.style.transform = 'translateX(' + deslocar + 'px)';
+        }
+    });
+
+    document.addEventListener('pointerup', function () {
+        if (!arrasto_menu) {
+            return;
+        }
+        const limiar = Math.round(menu_drawer.offsetWidth * 0.25);
+        if (arrasto_menu.abrindo) {
+            if (arrasto_menu.dx < -limiar) {
+                menu_drawer.setAttribute('aria-hidden', 'false');
+                const fechar = document.getElementById('botao_fechar_menu');
+                if (fechar) {
+                    fechar.focus();
+                }
+            } else {
+                fechar_menu();
+            }
+        } else if (arrasto_menu.dx < -limiar) {
+            fechar_menu();
+        }
+        limpar_arrasto_menu();
+    });
+    document.addEventListener('pointercancel', function () {
+        reverter_abertura_menu();
+        limpar_arrasto_menu();
+    });
+}
+
+// Liga os botões do drawer às funções existentes.
+const menu_tutorial = document.getElementById('menu_tutorial');
+if (menu_tutorial) {
+    menu_tutorial.addEventListener('click', function () {
+        fechar_menu();
+        abrir_tutorial();
+    });
+}
+const menu_dicas_switch = document.getElementById('menu_dicas_switch');
+if (menu_dicas_switch) {
+    menu_dicas_switch.addEventListener('change', function () {
+        definir_dicas(this.checked);
+    });
+}
+const menu_narrador = document.getElementById('menu_narrador');
+if (menu_narrador) {
+    menu_narrador.addEventListener('click', function () {
+        alternar_narrador();
+        fechar_menu();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Fase 33 (M2): carrossel do lobby no mobile.
+// Scroll-snap nativo (sem lib de touch); setas + dots são o fallback acessível.
+// Os dots são 3 (Jogadores/Config/IA) para host e cliente — a contagem segue
+// os painéis realmente visíveis (`offsetParent`), então se algum dia um painel
+// for escondido os dots se ajustam sozinhos.
+// ---------------------------------------------------------------------------
+let carrossel_slides = [];
+let carrossel_atual = 0;
+
+function slides_carrossel() {
+    const paineis = [
+        document.getElementById('painel_jogador'),
+        document.getElementById('painel_config'),
+        document.getElementById('painel_ia')
+    ];
+    return paineis.filter(function (painel) {
+        return painel && painel.offsetParent !== null;
+    });
+}
+
+function rolar_para_slide(indice) {
+    const trilho = document.querySelector('.lobby-linha');
+    const alvo = carrossel_slides[indice];
+    if (!trilho || !alvo) {
+        return;
+    }
+    // Calcula o scroll diretamente no trilho (mais previsível que
+    // `scrollIntoView`, que interage mal com o scroll-snap no mobile).
+    const delta = alvo.getBoundingClientRect().left - trilho.getBoundingClientRect().left;
+    trilho.scrollTo({ left: trilho.scrollLeft + delta, behavior: 'smooth' });
+}
+
+function marcar_ponto_atual() {
+    const trilho = document.querySelector('.lobby-linha');
+    if (!trilho || carrossel_slides.length === 0) {
+        return;
+    }
+    const trilho_esq = trilho.getBoundingClientRect().left;
+    const meio = trilho.clientWidth / 2;
+    let atual = 0;
+    carrossel_slides.forEach(function (slide, indice) {
+        const r = slide.getBoundingClientRect();
+        if (r.left - trilho_esq <= meio && r.right - trilho_esq > meio) {
+            atual = indice;
+        }
+    });
+    carrossel_atual = atual;
+    const dots = document.getElementById('lobby_dots');
+    if (dots) {
+        Array.from(dots.children).forEach(function (dot, indice) {
+            dot.classList.toggle('ativo', indice === carrossel_atual);
+            dot.setAttribute('aria-selected', indice === carrossel_atual ? 'true' : 'false');
+        });
+    }
+    const seta_esq = document.getElementById('lobby_seta_esq');
+    const seta_dir = document.getElementById('lobby_seta_dir');
+    if (seta_esq) {
+        seta_esq.disabled = carrossel_atual === 0;
+    }
+    if (seta_dir) {
+        seta_dir.disabled = carrossel_atual >= carrossel_slides.length - 1;
+    }
+}
+
+function atualizar_carrossel() {
+    const trilho = document.querySelector('.lobby-linha');
+    const dots = document.getElementById('lobby_dots');
+    const dica = document.getElementById('lobby_swipe_dica');
+    if (!trilho || !dots) {
+        return;
+    }
+    carrossel_slides = slides_carrossel();
+    // Reconstrói os dots conforme os painéis visíveis.
+    dots.innerHTML = '';
+    carrossel_slides.forEach(function (_, indice) {
+        const dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = 'dot';
+        dot.setAttribute('role', 'tab');
+        dot.setAttribute('aria-selected', 'false');
+        dot.setAttribute('aria-label', t('ui.lobby.aba', { n: indice + 1 }));
+        dot.addEventListener('click', function () {
+            rolar_para_slide(indice);
+        });
+        dots.appendChild(dot);
+    });
+    if (dica) {
+        // A dica de swipe só existe no mobile (no desktop os painéis são
+        // grade — estilo inline aqui vazaria para fora da media query).
+        const eh_mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+        dica.style.display = (eh_mobile && carrossel_slides.length > 1) ? 'block' : 'none';
+    }
+    marcar_ponto_atual();
+}
+
+// Atualiza os dots ao rolar (scroll-snap) e em mudanças de viewport/layout.
+const trilho_lobby = document.querySelector('.lobby-linha');
+if (trilho_lobby) {
+    trilho_lobby.addEventListener('scroll', function () {
+        marcar_ponto_atual();
+    }, { passive: true });
+}
+const seta_esq_lobby = document.getElementById('lobby_seta_esq');
+const seta_dir_lobby = document.getElementById('lobby_seta_dir');
+if (seta_esq_lobby) {
+    seta_esq_lobby.addEventListener('click', function () {
+        rolar_para_slide(Math.max(0, carrossel_atual - 1));
+    });
+}
+if (seta_dir_lobby) {
+    seta_dir_lobby.addEventListener('click', function () {
+        rolar_para_slide(Math.min(carrossel_slides.length - 1, carrossel_atual + 1));
+    });
+}
+window.addEventListener('resize', function () {
+    atualizar_carrossel();
+    marcar_ponto_atual();
+});
 
 // Facilidade (teclado): Enter confirma a ação do contexto e Esc fecha o que
 // estiver aberto (alerta, tutorial, busca, dica). O Enter em um input dispara a
@@ -2384,19 +2696,13 @@ function tocar_estouro() {
 // Kong Country.
 // O som da música é controlado por um botão próprio, independente dos efeitos.
 // ---------------------------------------------------------------------------
-let musica_ativada = localStorage.getItem('dadinho_musica') === 'on';
+const musica_salva = localStorage.getItem('dadinho_musica');
+let musica_ativada = musica_salva === null ? PADROES_CLIENTE.musica_ativada : musica_salva === 'on';
 
-// Volume da música (0 a 100), persistido entre sessões. Padrão: 50 (metade).
-let volume_musica = Number(localStorage.getItem('dadinho_volume_musica') || '50');
-const slider_volume_musica = document.getElementById('volume_musica');
-if (slider_volume_musica) {
-    slider_volume_musica.value = volume_musica;
-    slider_volume_musica.addEventListener('input', () => {
-        volume_musica = Number(slider_volume_musica.value);
-        localStorage.setItem('dadinho_volume_musica', String(volume_musica));
-        aplicar_volume_musica();
-    });
-}
+// Volume da música (0 a 100), persistido entre sessões. Padrão: 40.
+// Fase 33 (M1): o slider do drawer é sincronizado em `ao_mudar_volume_musica`
+// (logo abaixo de `alternar_musica`), então o wiring fica concentrado ali.
+let volume_musica = Number(localStorage.getItem('dadinho_volume_musica') || PADROES_CLIENTE.volume_musica);
 
 // Lê um inteiro em 'variable-length quantity' do MIDI.
 function ler_varint(view, estado) {
@@ -2901,33 +3207,81 @@ function parar_musica() {
 }
 
 // Botão próprio da música: liga/desliga sem afetar os efeitos sonoros.
+// Fase 33 (M1): o drawer do mobile tem o próprio botão de música.
 const botao_musica = document.getElementById('botao_musica');
+const botao_menu_musica = document.getElementById('menu_botao_musica');
 
 function aplicar_estado_musica() {
-    if (!botao_musica) {
-        return;
+    if (botao_musica) {
+        botao_musica.textContent = '🎵';
+        botao_musica.classList.toggle('btn-outline-light', musica_ativada);
+        botao_musica.classList.toggle('btn-outline-secondary', !musica_ativada);
+        botao_musica.title = musica_ativada
+            ? t('js.musica.on')
+            : t('js.musica.off');
     }
-    botao_musica.textContent = '🎵';
-    botao_musica.classList.toggle('btn-outline-light', musica_ativada);
-    botao_musica.classList.toggle('btn-outline-secondary', !musica_ativada);
-    botao_musica.title = musica_ativada
-        ? t('js.musica.on')
-        : t('js.musica.off');
+    if (botao_menu_musica) {
+        botao_menu_musica.textContent = '🎵';
+        botao_menu_musica.classList.toggle('btn-outline-light', musica_ativada);
+        botao_menu_musica.classList.toggle('btn-outline-secondary', !musica_ativada);
+        botao_menu_musica.title = musica_ativada
+            ? t('js.musica.on')
+            : t('js.musica.off');
+    }
+}
+
+function alternar_musica() {
+    musica_ativada = !musica_ativada;
+    localStorage.setItem('dadinho_musica', musica_ativada ? 'on' : 'off');
+    aplicar_estado_musica();
+    if (musica_ativada) {
+        iniciar_musica();
+    } else {
+        parar_musica();
+    }
 }
 
 if (botao_musica) {
     aplicar_estado_musica();
-    botao_musica.addEventListener('click', function () {
-        musica_ativada = !musica_ativada;
-        localStorage.setItem('dadinho_musica', musica_ativada ? 'on' : 'off');
-        aplicar_estado_musica();
-        if (musica_ativada) {
-            iniciar_musica();
-        } else {
-            parar_musica();
-        }
+    botao_musica.addEventListener('click', alternar_musica);
+}
+if (botao_menu_musica) {
+    botao_menu_musica.addEventListener('click', alternar_musica);
+}
+
+// Volume da música (0 a 100), persistido entre sessões — sliders do topo e do
+// drawer (M1) compartilham o mesmo estado.
+const slider_volume_musica = document.getElementById('volume_musica');
+const slider_menu_volume_musica = document.getElementById('menu_volume_musica');
+
+function sincronizar_sliders_volume_musica() {
+    if (slider_volume_musica) {
+        slider_volume_musica.value = volume_musica;
+    }
+    if (slider_menu_volume_musica) {
+        slider_menu_volume_musica.value = volume_musica;
+    }
+}
+
+function ao_mudar_volume_musica(valor) {
+    volume_musica = Number(valor) || 0;
+    localStorage.setItem('dadinho_volume_musica', String(volume_musica));
+    sincronizar_sliders_volume_musica();
+    aplicar_volume_musica();
+}
+
+if (slider_volume_musica) {
+    slider_volume_musica.addEventListener('input', (event) => {
+        ao_mudar_volume_musica(event.target.value);
     });
 }
+if (slider_menu_volume_musica) {
+    slider_menu_volume_musica.addEventListener('input', (event) => {
+        ao_mudar_volume_musica(event.target.value);
+    });
+}
+// Aplica o volume persistido nos sliders (desktop + drawer) já no load.
+sincronizar_sliders_volume_musica();
 
 // A política de autoplay dos navegadores exige um gesto do usuário: a música
 // começa no primeiro clique/toque/tecla e segue em loop até ser desligada.
@@ -3534,3 +3888,7 @@ async function render_auditoria(data) {
 socket.on('auditoria_partida', function (data) {
     render_auditoria(data);
 });
+
+// Fase 33 (M2): na primeira carga o lobby já pode estar visível — constrói os
+// dots/setas do carrossel (no desktop são `display:none`, então é no-op).
+atualizar_carrossel();
