@@ -267,8 +267,10 @@ def enviar_snapshot_sala(lobby, jogador):
 
     # Fase 9: espectador (entrou no meio da partida pela busca) recebe o selo
     # ESPECTADOR já no snapshot, para não aparecer com os painéis de jogo.
-    # Na página 4 o selo é pulado: o espectador precisa do "Ok" para o reset.
-    if espectador and pagina in (1, 2, 3):
+    # A página 4 também conta: o selo não esconde o "Ok" da vitória (botão
+    # `bot_vencedor_fim`), e sem ele um espectador que dá refresh direto na
+    # vitória não teria o botão de "Sair da sala" (Fase 30).
+    if espectador and pagina in (1, 2, 3, 4):
         emit('espectador', {'nome': jogador.username}, to=jogador.client_id)
 
     if pagina == 1:

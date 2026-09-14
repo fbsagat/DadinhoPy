@@ -980,19 +980,37 @@ def expulsar_jogador(dados, lobby, jogador):
 
 
 @socketio.on('sair_da_sala')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar(extrair_chave=None)
 def sair_da_sala(dados, lobby, jogador):
     """
-    Fase 30: o ESPECTADOR escolhe sair da sala e voltar ao menu. Só vale para
-    quem não está jogando (espectador); jogadores ativos continuam usando a
-    janela de reconexão (`handle_disconnect`/graça). Limpa o índice sid e a
-    room; o `saiu_da_sala` faz o front limpar a chave e navegar para a home.
-    Se o espectador era o último humano, o GC fecha a sala como no disconnect.
+    Fase 30: sair da sala explicitamente e voltar ao menu. Duas situações valem:
+    - ESPECTADOR (assistindo uma partida em andamento): sai na hora — identidade
+      é o sid, sem chave (não tem stake na sala).
+    - JOGADOR fora de uma partida: na ESPERA (lobby) ou já eliminado (zerou os
+      dados e virou espectador na tela, mas ainda conta como jogador do lobby) —
+      abandono explícito: remove imediatamente, sem consumir a janela de
+      reconexão (a graça é para queda/refresh, não para sair). Exige a chave
+      secreta; a vaga liberada não vira "perdida por inatividade".
+    Jogador ativo no meio de uma partida: no-op — continua usando a janela de
+    reconexão (`handle_disconnect`), como antes. Se o master sai, `definir_master`
+    repassa a outra pessoa; se era o último humano, o GC fecha a sala. O
+    `saiu_da_sala` faz o front limpar a chave e navegar para a home.
+    `cooldown=None`: idempotente e voltado ao usuário — um drop silencioso
+    deixaria o clique do jogador sem efeito.
     """
-    if jogador not in lobby.espectadores:
+    if jogador in lobby.espectadores:
+        lobby.espectadores.remove(jogador)
+    elif jogador.partida_atual is None or jogador not in jogador.partida_atual.jogadores:
+        if jogador.chave_secreta != dados.get('chave', ''):
+            return
+        _remover_jogador_da_sala(lobby, jogador)
+        # Fase 30: saída explícita não é "vaga perdida por inatividade" (como na
+        # expulsão) — o retorno com a chave antiga não deve acusar inatividade.
+        lobby.vagas_recentes.pop(jogador.chave_secreta, None)
+        lobby.definir_master()
+    else:
         return
-    lobby.espectadores.remove(jogador)
     desregistrar_cliente(jogador.client_id, lobby.sala_id)
     leave_room(lobby.sala_room(), sid=jogador.client_id)
     emit('saiu_da_sala', {'sala': lobby.sala_id}, to=jogador.client_id)

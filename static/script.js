@@ -898,12 +898,15 @@ socket.on('expulso_da_sala', function () {
     });
 });
 
-// Fase 30: botão de "Sair da sala" visível só para quem está assistindo
-// (espectador) durante a partida — quem está jogando usa a janela de reconexão.
+// Fase 30: botão de "Sair da sala". Aparece em dois momentos: na sala de espera
+// (página 0) para qualquer jogador — sair explícito não consome a janela de
+// reconexão — e durante a partida só para quem está assistindo (espectador);
+// quem está jogando usa a janela de reconexão.
 function atualizar_botao_sair() {
     const botao = document.getElementById('bot_sair_da_sala');
     if (botao) {
-        botao.style.display = eh_espectador ? 'block' : 'none';
+        const na_espera_em_sala = indiceAtual === 0 && sala_atual && !modo_home;
+        botao.style.display = (eh_espectador || na_espera_em_sala) ? 'block' : 'none';
     }
 }
 
@@ -975,10 +978,8 @@ socket.on("mudar_pagina", function (data) {
         if (painel_aud) {
             painel_aud.style.display = 'none';
         }
-        // Fase 30: de volta ao lobby (reset/entrada), ninguém é espectador —
-        // esconde o botão de sair.
+        // Fase 30: de volta ao lobby (reset/entrada), ninguém é espectador.
         eh_espectador = false;
-        atualizar_botao_sair();
         limpar_narrador();
         parar_celebracao();
     }
@@ -992,6 +993,11 @@ socket.on("mudar_pagina", function (data) {
     paginas[indiceAtual].style.display = "none";
     // Atualiza o índice para a próxima página
     indiceAtual = data.pag_numero % paginas.length; // Ciclo entre 0 e o número de páginas
+    // Fase 30: reavalia o botão de "Sair da sala" em TODA transição — na espera
+    // (0) ele fica visível para todos; nas páginas de jogo some para quem está
+    // jogando (só espectador continua vendo). O "zera espectador" acima vale
+    // para a volta ao lobby; o refresh no meio da partida se corrige sozinho.
+    atualizar_botao_sair();
     aplicar_estado_narrador();
     // Mostra a próxima página
     paginas[indiceAtual].style.display = "block";
@@ -1831,6 +1837,9 @@ socket.on("connect_start", function (data) {
         modo_home = true;
     }
     aplicar_modo_home();
+    // Fase 30: entrou numa sala (espera) — o botão de sair fica visível na
+    // página 0; na home (sem sala) ele some.
+    atualizar_botao_sair();
     if (data && data.username) {
         // Reconexão retomada: devolve o apelido pro jogador.
         nome_jogador = data.username;

@@ -2592,6 +2592,107 @@ def teste_sair_da_sala_espectador():
     _ok("espectador sai da sala e a partida segue (Fase 30)")
 
 
+def teste_sair_da_sala_lobby():
+    """
+    Fase 30: jogador na ESPERA pode sair explicitamente (sem consumir a janela
+    de reconexão) — exige a chave secreta. Se o master sai, a outra pessoa é
+    reeleita; se era o último humano, o GC fecha a sala. Jogador ativo no meio
+    da partida continua sendo no-op (coberto em `teste_sair_da_sala_espectador`).
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+
+    # Chave errada: no-op (invariante: mutação exige a chave secreta do jogador).
+    c1.emit("sair_da_sala", {"chave": "errada"})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.buscar_jogador_pela_chave(cs1["chave_secreta"]) is not None, \
+        "chave errada não pode remover ninguém"
+
+    # Master sai com a chave certa: é removido e o outro vira master.
+    lobby = modulo_store.carregar_sala(SALA)
+    sid1 = lobby.buscar_jogador_pela_chave(cs1["chave_secreta"]).client_id
+    c1.emit("sair_da_sala", {"chave": cs1["chave_secreta"]})
+    eventos = c1.get_received()
+    assert _achar_evento(eventos, "saiu_da_sala") is not None, "deve confirmar a saída"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.buscar_jogador_pela_chave(cs1["chave_secreta"]) is None, \
+        "master que saiu deve ser removido do lobby"
+    resto = lobby.retornar_master()
+    assert resto is not None and not resto.is_ia and resto.username == "Bia", \
+        "master deve ser repassado a outro humano"
+    assert funcoes_gerais.sala_do_cliente(sid1) is None, \
+        "índice sid do que saiu deve ser limpo"
+    assert cs1["chave_secreta"] not in lobby.vagas_recentes, \
+        "saída explícita não pode acusar 'vaga perdida por inatividade'"
+    sid2 = lobby.buscar_jogador_pela_chave(cs2["chave_secreta"]).client_id
+    assert funcoes_gerais.sala_do_cliente(sid2) == SALA, \
+        "índice sid de quem restou continua apontando para a sala"
+
+    # Último humano sai: sala é fechada.
+    c2.emit("sair_da_sala", {"chave": cs2["chave_secreta"]})
+    assert modulo_store.carregar_sala(SALA) is None, "último humano saindo fecha a sala"
+    assert funcoes_gerais.sala_do_cliente(sid2) is None, \
+        "índice sid do último a sair deve ser limpo"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("jogador e master saem do lobby explicitamente (Fase 30)")
+
+
+def teste_sair_da_sala_eliminado():
+    """
+    Fase 30: quem zerou os dados (vira espectador na tela mas segue no lobby)
+    pode sair explicitamente — `partida_atual` continua apontando para a
+    partida, mas o jogador não está mais nela. Jogador ativo segue no-op.
+    """
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+
+    # Simula a eliminação (modelos.py:1164-1173): saiu da partida, zerou os
+    # dados e o rodada_atual, mas `partida_atual` fica apontando para a partida.
+    partida = lobby.partidas[-1]
+    alvo = next(j for j in partida.jogadores if j.username != "Ana")
+    nome_alvo = alvo.username
+    alvo.joguei_dados = False
+    alvo.rodadas = []
+    alvo.turnos = []
+    alvo.rodada_atual = None
+    alvo.turno_atual = None
+    alvo.dados_qtd = 0
+    partida.jogadores.remove(alvo)
+    lobby.marcar_visto()
+    modulo_store.salvar_sala(lobby)
+
+    # Eliminado sai: `saiu_da_sala` e removido do lobby; a partida segue.
+    c_alvo, chave_alvo = clis[nome_alvo]
+    c_alvo.emit("sair_da_sala", {"chave": chave_alvo})
+    assert _achar_evento(c_alvo.get_received(), "saiu_da_sala") is not None, \
+        "eliminado deve confirmar a saída"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert all(j.username != nome_alvo for j in lobby.jogadores), \
+        "eliminado que saiu deve ser removido do lobby"
+    assert chave_alvo not in lobby.vagas_recentes, \
+        "saída explícita não pode acusar 'vaga perdida por inatividade'"
+    assert lobby.pagina == 2, "a partida segue para os demais"
+
+    # Jogador ativo (ainda na partida) tentando sair: no-op.
+    nome_ativo = next(j.username for j in lobby.partidas[-1].jogadores)
+    c_ativo, chave_ativo = clis[nome_ativo]
+    c_ativo.emit("sair_da_sala", {"chave": chave_ativo})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert any(j.username == nome_ativo for j in lobby.jogadores), \
+        "jogador ativo não pode sair via sair_da_sala"
+    c_ativo.emit("sair_da_sala", {"chave": ""})
+    assert any(j.username == nome_ativo for j in modulo_store.carregar_sala(SALA).jogadores), \
+        "chave vazia é no-op para jogador registrado"
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("eliminado sai da partida e jogador ativo segue no-op (Fase 30)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -2700,6 +2801,8 @@ def verificar_integracao():
         ("iniciar-repetido-grace", teste_iniciar_repetido_nao_toca_grace),
         ("caido-sem-apelido", teste_iniciar_caido_sem_apelido_removido),
         ("sair-da-sala", teste_sair_da_sala_espectador),
+        ("sair-da-sala-lobby", teste_sair_da_sala_lobby),
+        ("sair-da-sala-eliminado", teste_sair_da_sala_eliminado),
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
     ]
     try:

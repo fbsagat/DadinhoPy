@@ -54,7 +54,7 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 | `solicitar_auditoria` | `solicitar_auditoria` | chave |
 | `adicionar_ia`/`completar_com_ias`/`remover_ia` (chave) | app.py:712/723/734 | master + chave |
 | `expulsar_jogador` (`chave`, `client_id`) | `expulsar_jogador` | master + chave |
-| `sair_da_sala` | `sair_da_sala` | extrair_chave=None, só espectador |
+| `sair_da_sala` (`chave`) | `sair_da_sala` | cooldown=None, espectador sem chave; jogador na espera/eliminado: exige chave e remove sem janela de reconexão; jogador ativo na partida: no-op |
 | `listar_partidas` (`filtros`, `sala_atual`) | `listar_partidas` | evento_leitura |
 | `criar_sala` | `criar_sala` | — |
 | `verificar_desconectados` | `verificar_desconectados` | extrair_chave=None |
