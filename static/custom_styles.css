@@ -342,6 +342,49 @@ canvas {
     flex-shrink: 0;
 }
 
+/* Fase 35 (mobile): no celular o narrador e as dicas viram um toast temporário
+   acima do painel de jogada (onde aparece "É a sua vez") — só a última fala,
+   some sozinho (JS). Fica em fluxo dentro do `#rodape_acao`, nunca bloqueia o
+   toque (`pointer-events: none`) e não incomoda os dados/botões da jogada. */
+.toast-mobile {
+    display: none;
+    justify-content: center;
+    align-items: center;
+    width: min(92vw, 420px);
+    margin: 0 auto 6px;
+    padding: 8px 12px;
+    background-color: rgba(0, 20, 45, 0.94);
+    border: 1px solid #0dcaf0;
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 14px rgba(13, 202, 240, 0.35);
+    font-size: 0.85rem;
+    line-height: 1.35;
+    color: #eaf6ff;
+    text-align: center;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
+.toast-mobile.visivel {
+    display: flex;
+}
+
+/* Desktop nunca usa o toast (só o JS liga, e só em telas ≤768px). */
+@media (min-width: 769px) {
+    .toast-mobile {
+        display: none !important;
+    }
+}
+
+@media (max-width: 768px) {
+    /* Os painéis fixos do narrador/dicas saem de cena no mobile: quem informa
+       é o toast acima (só a última fala; some sozinho). */
+    #narrador,
+    .painel-dicas {
+        display: none !important;
+    }
+}
+
 /* Narrador da partida (Fase 12): log das jogadas + "pensando" dos bots.
    No desktop fica no canto inferior esquerdo: no topo (60px) cobria a
    barra de dados e os cards mais à esquerda da mesa em telas 1080p. */

@@ -545,6 +545,10 @@
         </div>
 
         <div id="rodape_acao">
+        <!-- Fase 35 (mobile): no celular o narrador e as dicas viram um toast
+             temporário acima do painel de jogada (onde aparece "É a sua vez") —
+             só a última fala, some sozinho. Desktop não usa. -->
+        <div id="toast_mobile" class="toast-mobile" role="status" aria-live="polite"></div>
         <!-- Fase 33 (M3): contador da jogada automática mora no rodapé; no
              desktop a CSS o devolve ao topo (`position: fixed`). -->
         <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"

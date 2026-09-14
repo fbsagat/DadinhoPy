@@ -137,6 +137,12 @@ if (!NARRADOR_MODOS[narrador_modo]) {
     narrador_modo = PADROES_CLIENTE.narrador;
 }
 
+// Fase 35: no mobile (<768px) o narrador e as dicas viram um toast temporário
+// (só a última fala, some sozinho) — os painéis fixos ficam fora do caminho.
+function eh_mobile() {
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
 function aplicar_estado_narrador() {
     const botao = document.getElementById('botao_narrador');
     const botao_menu = document.getElementById('menu_narrador');
@@ -159,7 +165,7 @@ function aplicar_estado_narrador() {
         botao_menu.classList.add(cfg.classe);
     }
     if (painel) {
-        painel.style.display = (narrador_modo === 'desligado' || indiceAtual === 0) ? 'none' : 'flex';
+        painel.style.display = (eh_mobile() || narrador_modo === 'desligado' || indiceAtual === 0) ? 'none' : 'flex';
     }
     if (narrador_modo === 'ultima') {
         const log = document.getElementById('narrador_log');
@@ -183,6 +189,10 @@ function narrador_linha(texto) {
     if (narrador_modo === 'desligado') {
         return;
     }
+    if (eh_mobile()) {
+        mostrar_toast_mobile(texto);
+        return;
+    }
     const log = document.getElementById('narrador_log');
     if (!log) {
         return;
@@ -203,6 +213,10 @@ function narrador_linha(texto) {
 
 function mostrar_pensando(nome, ms) {
     if (narrador_modo === 'desligado') {
+        return;
+    }
+    if (eh_mobile()) {
+        mostrar_toast_mobile(t('js.pensando', { nome: nome || 'Bot' }), ms + 800);
         return;
     }
     const el = document.getElementById('narrador_pensando');
@@ -230,11 +244,38 @@ function esconder_pensando() {
 }
 
 function limpar_narrador() {
+    esconder_toast_mobile();
     const log = document.getElementById('narrador_log');
     if (log) {
         log.innerHTML = '';
     }
     esconder_pensando();
+}
+
+// Fase 35 (mobile): toast temporário acima do painel de jogada (onde aparece
+// "É a sua vez"). Serve de "última fala" para o narrador e de aviso para as
+// dicas; some sozinho após alguns segundos. Fica em fluxo no `#rodape_acao` e
+// nunca bloqueia o toque (`pointer-events: none`).
+const toast_mobile = document.getElementById('toast_mobile');
+
+function esconder_toast_mobile() {
+    if (!toast_mobile) {
+        return;
+    }
+    clearTimeout(mostrar_toast_mobile._timer);
+    toast_mobile.classList.remove('visivel');
+}
+
+function mostrar_toast_mobile(texto, duracao) {
+    if (!eh_mobile() || !toast_mobile) {
+        return;
+    }
+    toast_mobile.textContent = texto;
+    toast_mobile.classList.add('visivel');
+    clearTimeout(mostrar_toast_mobile._timer);
+    mostrar_toast_mobile._timer = setTimeout(function () {
+        toast_mobile.classList.remove('visivel');
+    }, duracao || 4500);
 }
 
 socket.on('narracao', function (data) {
@@ -2175,14 +2216,22 @@ function aplicar_estado_dicas() {
 }
 
 function mostrar_dica(pag_numero) {
-    if (!dicas_ativadas || !painel_dicas) {
+    if (!dicas_ativadas) {
         return;
     }
     const dicas = dicas_por_pagina[pag_numero] || [];
     if (dicas.length === 0) {
         return;
     }
-    document.getElementById('dicas_texto').textContent = t(dicas[Math.floor(Math.random() * dicas.length)]);
+    const texto = t(dicas[Math.floor(Math.random() * dicas.length)]);
+    if (eh_mobile()) {
+        mostrar_toast_mobile(texto);
+        return;
+    }
+    if (!painel_dicas) {
+        return;
+    }
+    document.getElementById('dicas_texto').textContent = texto;
     painel_dicas.style.display = 'flex';
 }
 
@@ -3457,10 +3506,15 @@ const ctx = canvas.getContext('2d');
 let largura_canvas = window.innerWidth;
 let altura_canvas = window.innerHeight;
 
+// Mobile tem GPU/CPU limitados: reduzimos resolução e quantidade de partículas.
+const eh_celular = window.matchMedia('(max-width: 768px)').matches;
+
 function ajustar_canvas() {
     largura_canvas = window.innerWidth;
     altura_canvas = window.innerHeight;
-    const escala = Math.min(window.devicePixelRatio || 1, 2);
+    // No celular o canvas fica em 1x (fogos/confetes não precisam de nitidez);
+    // no desktop mantém até 2x.
+    const escala = eh_celular ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.floor(largura_canvas * escala);
     canvas.height = Math.floor(altura_canvas * escala);
     canvas.style.width = largura_canvas + 'px';
@@ -3480,11 +3534,11 @@ const CORES_FOGOS = ['#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33a8', '#00
 
 function createFirework(x, y, cor) {
     const base = cor || CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)];
-    const quantidade = 90 + Math.floor(Math.random() * 70);
+    const quantidade = eh_celular ? 40 + Math.floor(Math.random() * 25) : 90 + Math.floor(Math.random() * 70);
     const preenchido = Math.random() < 0.35;
     for (let i = 0; i < quantidade; i++) {
         const angulo = (Math.PI * 2 * i) / quantidade + (Math.random() - 0.5) * 0.25;
-        let velocidade = 1.6 + Math.random() * 4.6;
+        let velocidade = eh_celular ? 1.2 + Math.random() * 3.2 : 1.6 + Math.random() * 4.6;
         if (preenchido) {
             velocidade *= 0.35 + Math.random() * 0.65;
         }
@@ -3498,7 +3552,7 @@ function createFirework(x, y, cor) {
             vida: 1,
             decaimento: 0.008 + Math.random() * 0.014,
             cor: Math.random() < 0.22 ? '#ffffff' : base,
-            tamanho: 1.4 + Math.random() * 1.8
+            tamanho: (eh_celular ? 1.0 : 1.4) + Math.random() * (eh_celular ? 1.2 : 1.8)
         });
     }
 }
@@ -3509,8 +3563,8 @@ function criar_confete(no_topo) {
         y: no_topo ? -20 - Math.random() * 60 : Math.random() * altura_canvas,
         vx: (Math.random() - 0.5) * 1.6,
         vy: 1.8 + Math.random() * 3.4,
-        w: 6 + Math.random() * 7,
-        h: 9 + Math.random() * 10,
+        w: eh_celular ? 4 + Math.random() * 4 : 6 + Math.random() * 7,
+        h: eh_celular ? 6 + Math.random() * 6 : 9 + Math.random() * 10,
         rot: Math.random() * Math.PI * 2,
         vrot: (Math.random() - 0.5) * 0.35,
         cor: CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)],
@@ -3522,18 +3576,19 @@ function criar_confete(no_topo) {
 function iniciar_celebracao() {
     celebrando = true;
     if (confetes.length === 0) {
-        for (let i = 0; i < 180; i++) {
+        const quantidade = eh_celular ? 70 : 180;
+        for (let i = 0; i < quantidade; i++) {
             confetes.push(criar_confete(true));
         }
     }
     garantir_loop_animacao(); // P1: liga o loop de animação (parado ocioso).
     if (!intervalo_fogos) {
-        disparar_fogos(3);
+        disparar_fogos(eh_celular ? 2 : 3);
         intervalo_fogos = setInterval(function () {
             if (celebrando) {
-                disparar_fogos(2);
+                disparar_fogos(eh_celular ? 1 : 2);
             }
-        }, 900);
+        }, eh_celular ? 1300 : 900);
     }
     // Evita fogos/confetes rodando sem parar caso o jogador não clique em Ok.
     clearTimeout(iniciar_celebracao._timer);
@@ -3551,6 +3606,9 @@ function parar_celebracao() {
 }
 
 function disparar_fogos(quantidade) {
+    if (eh_celular) {
+        quantidade = Math.min(quantidade, 2);
+    }
     for (let i = 0; i < quantidade; i++) {
         const x = largura_canvas * (0.15 + Math.random() * 0.7);
         const y = altura_canvas * (0.12 + Math.random() * 0.45);
