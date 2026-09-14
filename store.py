@@ -28,16 +28,19 @@ se a função serverless morrer sem disparar o GC do disconnect — antes a sala
 """
 
 import contextlib
+import http.client
 import json
+import logging
 import os
 import secrets
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
 from modelos import Lobby
+
+
+_log = logging.getLogger(__name__)
 
 
 _travas_salas = {}
@@ -246,6 +249,9 @@ class ArmazenamentoMemoria:
     def salvar_resumo(self, sala_id, resumo):
         self._resumos[sala_id] = resumo
 
+    def carregar_resumo(self, sala_id):
+        return self._resumos.get(sala_id)
+
     def remover_resumo(self, sala_id):
         self._resumos.pop(sala_id, None)
 
@@ -260,6 +266,54 @@ class ArmazenamentoMemoria:
 
     def desregistrar_sid(self, client_id):
         self._sids.pop(client_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Transporte HTTPS com keep-alive para a Upstash (Fase 41, C8/C9).
+#
+# O `urllib.request` abre um handshake TLS do zero a cada chamada; cada evento
+# mutável encadeia 2-4 chamadas (lock, leitura, gravação, unlock) — isso somava
+# latência real por jogada. Este pool reutiliza conexões `http.client` (keep-
+# alive) dentro da instância quente, com uma trava para ser seguro no
+# `async_mode='threading'` (uma conexão por thread por vez). `_enviar` soma 1
+# retry rápido com backoff para blips transitórios de rede/5xx (C9) — após
+# isso, levanta OSError/HTTPException, mesma política de aborto silencioso de
+# hoje (`evento_mutavel`).
+# ---------------------------------------------------------------------------
+_CAPACIDADE_POOL = 8
+_RETRY_TENTATIVAS = 2           # 1 tentativa inicial + 1 retry rápido
+_RETRY_ESPERA_BASE = 0.05
+
+
+class _PoolHTTPS:
+    """Pool de conexões HTTP(S) com keep-alive (uma por thread por vez)."""
+
+    def __init__(self, host, porta, timeout=10, conexao_cls=None):
+        self._host = host
+        self._porta = porta
+        self._timeout = timeout
+        self._conexao_cls = conexao_cls or http.client.HTTPSConnection
+        self._livres = []
+        self._trava = threading.Lock()
+
+    def obter(self):
+        with self._trava:
+            if self._livres:
+                return self._livres.pop()
+        return self._conexao_cls(self._host, self._porta, timeout=self._timeout)
+
+    def devolver(self, conexao):
+        with self._trava:
+            if len(self._livres) < _CAPACIDADE_POOL:
+                self._livres.append(conexao)
+                return
+        conexao.close()
+
+    def fechar(self):
+        with self._trava:
+            for conexao in self._livres:
+                conexao.close()
+            self._livres = []
 
 
 class ArmazenamentoUpstash:
@@ -284,19 +338,52 @@ class ArmazenamentoUpstash:
     def __init__(self, url_rest, token):
         self._base = url_rest.rstrip("/")
         self._token = token
+        partes = urllib.parse.urlsplit(self._base)
+        self._caminho_base = partes.path.rstrip("/")
+        conexao_cls = http.client.HTTPSConnection if partes.scheme == "https" \
+            else http.client.HTTPConnection
+        self._pool = _PoolHTTPS(partes.hostname,
+                                partes.port or (443 if partes.scheme == "https" else 80),
+                                conexao_cls=conexao_cls)
+
+    def _enviar(self, metodo, caminho, corpo=None):
+        """
+        Envia uma requisição ao host da Upstash com keep-alive (pool) e 1 retry
+        rápido em erro transitório (timeout, reset, 5xx). Devolve o JSON do
+        corpo; em falha persistente levanta OSError/http.client.HTTPException —
+        a mesma política de aborto silencioso dos handlers.
+        """
+        ultimo_erro = None
+        for tentativa in range(_RETRY_TENTATIVAS):
+            conexao = self._pool.obter()
+            try:
+                cabecalhos = {"Authorization": "Bearer " + self._token}
+                if corpo is not None:
+                    cabecalhos["Content-Type"] = "application/json"
+                conexao.request(metodo, caminho, body=corpo, headers=cabecalhos)
+                resposta = conexao.getresponse()
+                texto = resposta.read().decode("utf-8")
+                if not (200 <= resposta.status < 300):
+                    ultimo_erro = OSError(f"Upstash HTTP {resposta.status}")
+                else:
+                    self._pool.devolver(conexao)
+                    conexao = None
+                    return json.loads(texto) if texto else None
+            except (http.client.HTTPException, OSError) as erro:
+                ultimo_erro = erro
+            finally:
+                if conexao is not None:
+                    conexao.close()
+            if ultimo_erro is not None and tentativa + 1 < _RETRY_TENTATIVAS:
+                time.sleep(_RETRY_ESPERA_BASE * (2 ** tentativa))
+        raise ultimo_erro
 
     def _pedido(self, metodo, rota, corpo=None):
-        url = f"{self._base}/{rota}"
         dados = None
         if corpo is not None:
             dados = json.dumps(corpo, ensure_ascii=False).encode("utf-8")
-        pedido = urllib.request.Request(url, data=dados, method=metodo)
-        pedido.add_header("Authorization", "Bearer " + self._token)
-        if dados is not None:
-            pedido.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(pedido, timeout=10) as resposta:
-            texto = resposta.read().decode("utf-8")
-        return json.loads(texto) if texto else None
+        caminho = f"{self._caminho_base}/{rota}"
+        return self._enviar(metodo, caminho, dados)
 
     def _comando(self, *args):
         """
@@ -304,12 +391,7 @@ class ArmazenamentoUpstash:
         (recomendado para valores complexos — evita URL-encode de JSONs).
         """
         dados = json.dumps(list(args), ensure_ascii=False).encode("utf-8")
-        pedido = urllib.request.Request(self._base, data=dados, method="POST")
-        pedido.add_header("Authorization", "Bearer " + self._token)
-        pedido.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(pedido, timeout=10) as resposta:
-            texto = resposta.read().decode("utf-8")
-        return json.loads(texto) if texto else None
+        return self._enviar("POST", self._caminho_base or "/", dados)
 
     def _pipeline(self, comandos):
         """
@@ -317,12 +399,7 @@ class ArmazenamentoUpstash:
         reduz round-trips em operações que gravam mais de uma chave (sala+resumo).
         """
         dados = json.dumps(comandos, ensure_ascii=False).encode("utf-8")
-        pedido = urllib.request.Request(f"{self._base}/pipeline", data=dados, method="POST")
-        pedido.add_header("Authorization", "Bearer " + self._token)
-        pedido.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(pedido, timeout=10) as resposta:
-            texto = resposta.read().decode("utf-8")
-        return json.loads(texto) if texto else None
+        return self._enviar("POST", f"{self._caminho_base}/pipeline", dados)
 
     @classmethod
     def _chave_sala(cls, sala_id):
@@ -410,6 +487,17 @@ class ArmazenamentoUpstash:
             ["SREM", self.CHAVE_RESUMOS, sala_id],
         ])
 
+    def carregar_resumo(self, sala_id):
+        """Resumo leve de uma sala (para o OG dinâmico da home, Fase 42/N1)."""
+        resposta = self._pedido("GET", f"get/{urllib.parse.quote(self._chave_resumo(sala_id))}")
+        bloco = (resposta or {}).get("result")
+        if not bloco:
+            return None
+        try:
+            return json.loads(bloco)
+        except (ValueError, TypeError):
+            return None
+
     def listar_resumos(self):
         # Caminho rápido: SMEMBERS no índice + MGET nos resumos (2 comandos),
         # em vez de SCAN + um GET por sala.
@@ -487,8 +575,28 @@ def carregar_sala(sala_id):
     return armazenamento.carregar_sala(sala_id)
 
 
+# Detector CAS de lost-update (Fase 40, alerta — NÃO substitui o lock
+# distribuído). Em processo, por instância: registra a última revisão salva de
+# cada sala; se um save chega com o lobby numa revisão menor que a já salva,
+# é sinal de que outro handler salvou depois que este lobby foi carregado
+# (concorrência que o lock deveria ter evitado — loga para calibrar o
+# `TRAVA_TTL` ou achar um caminho que esqueceu o lock). Cross-instance fica
+# sob responsabilidade do próprio lock.
+_revisoes_salvas = {}
+_revisoes_guard = threading.Lock()
+
+
 def salvar_sala(lobby):
     if lobby is not None:
+        with _revisoes_guard:
+            anterior = _revisoes_salvas.get(lobby.sala_id, 0)
+            if anterior and lobby.revisao < anterior:
+                _log.warning(
+                    "Fase 40 (CAS): sala %s salva com revisão %s (última salva: %s) "
+                    "— possível lost-update (lock distribuído deveria ter evitado)",
+                    lobby.sala_id, lobby.revisao, anterior)
+            lobby.revisao = max(lobby.revisao, anterior) + 1
+            _revisoes_salvas[lobby.sala_id] = lobby.revisao
         armazenamento.salvar_sala(lobby)
         # Mantém o cache de re-sync do heartbeat com o objeto recém-persistido.
         with _cache_salas_guard:
@@ -498,6 +606,8 @@ def salvar_sala(lobby):
 def remover_sala(sala_id):
     with _cache_salas_guard:
         _cache_salas.pop(sala_id, None)
+    with _revisoes_guard:
+        _revisoes_salvas.pop(sala_id, None)
     armazenamento.remover_sala(sala_id)
 
 
@@ -537,6 +647,10 @@ def remover_resumo(sala_id):
 
 def listar_resumos():
     return armazenamento.listar_resumos()
+
+
+def carregar_resumo(sala_id):
+    return armazenamento.carregar_resumo(sala_id)
 
 
 def registrar_sid(client_id, sala_id):

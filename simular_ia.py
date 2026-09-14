@@ -18,9 +18,19 @@ from modelos import Jogador, Lobby
 
 
 def _silenciar_socket():
-    """Fora de um request do Socket.IO não há room/namespace: neutraliza o emit."""
-    modelos.emit = lambda *a, **k: None
-    funcoes_gerais.emit = lambda *a, **k: None
+    """Fora de um request do Socket.IO não há room/namespace: neutraliza o emit.
+    Fase 45 (M4): modelos virou pacote — o `emit` de cada submódulo é patcheado
+    (cada um tem seu próprio binding); `funcoes_gerais` e o facade também."""
+    import modelos.comum
+    import modelos.jogador
+    import modelos.turno
+    import modelos.rodada
+    import modelos.partida
+    import modelos.lobby
+    for modulo in (modelos, modelos.comum, modelos.jogador, modelos.turno,
+                   modelos.rodada, modelos.partida, modelos.lobby, funcoes_gerais):
+        if hasattr(modulo, 'emit'):
+            modulo.emit = lambda *a, **k: None
 
 
 def montar_partida(niveis, dados_qtd, com_coringa):

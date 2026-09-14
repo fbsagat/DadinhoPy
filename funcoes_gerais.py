@@ -237,9 +237,9 @@ def emitir_dispatcher_turno(lobby, jogador):
         payload = {'username': jogador.username,
                    'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)}
         payload.update(rodada.contexto_aposta())
-        emit('meu_turno', payload, to=jogador.client_id)
+        emit('meu_turno', payload, to=jogador.client_id, ignore_queue=True)
     else:
-        emit('espera_turno', {'username': vez.username}, to=jogador.client_id)
+        emit('espera_turno', {'username': vez.username}, to=jogador.client_id, ignore_queue=True)
 
 
 def enviar_snapshot_sala(lobby, jogador):
@@ -251,7 +251,10 @@ def enviar_snapshot_sala(lobby, jogador):
     este cliente, na ordem certa, baseado em `lobby.pagina`.
     """
     pagina = lobby.pagina
-    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id)
+    # Fase 40 (C5): o snapshot é sempre para o jogador que acaba de conectar/
+    # reconectar (o próprio request) — sid local à instância, então
+    # `ignore_queue` evita um PUBLISH à toa na fila.
+    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id, ignore_queue=True)
     if pagina == 0:
         return
 
@@ -271,17 +274,17 @@ def enviar_snapshot_sala(lobby, jogador):
     # `bot_vencedor_fim`), e sem ele um espectador que dá refresh direto na
     # vitória não teria o botão de "Sair da sala" (Fase 30).
     if espectador and pagina in (1, 2, 3, 4):
-        emit('espectador', {'nome': jogador.username}, to=jogador.client_id)
+        emit('espectador', {'nome': jogador.username}, to=jogador.client_id, ignore_queue=True)
 
     if pagina == 1:
         if rodada is not None:
             emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador,
                                       'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
-                 to=jogador.client_id)
+                 to=jogador.client_id, ignore_queue=True)
             if not espectador and jogador.joguei_dados and jogador.dados:
                 # Já rolou: repete o resultado pra reapresentar os dados na tela.
                 emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados},
-                     to=jogador.client_id)
+                     to=jogador.client_id, ignore_queue=True)
             emitir_status_rolagem(lobby)
         return
 
@@ -294,7 +297,7 @@ def enviar_snapshot_sala(lobby, jogador):
         }
         emit('construtor_html',
              {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista,
-              'dados_tt': partida.dados_qtd}, to=jogador.client_id)
+              'dados_tt': partida.dados_qtd}, to=jogador.client_id, ignore_queue=True)
         # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
         # construtor_html usa a base (partida.dados_qtd), então corrige os cards
         # com reset_rodada (mesmo mecanismo do fluxo normal do jogo).
@@ -302,22 +305,22 @@ def enviar_snapshot_sala(lobby, jogador):
             emit('reset_rodada',
                  {'jogadores_nomes': [j.username for j in partida.jogadores],
                   'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores]},
-                 to=jogador.client_id)
-        emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id)
+                 to=jogador.client_id, ignore_queue=True)
+        emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id, ignore_queue=True)
         if rodada.com_coringa is False:
-            emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id)
+            emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id, ignore_queue=True)
         else:
             emit('atualizar_coringa', {
                 'coringa_atual': rodada.coringa_atual_qtd,
                 'ultimo_coringa': rodada.coringa_atual_jogador.username if rodada.coringa_atual_jogador else '',
-            }, to=jogador.client_id)
+            }, to=jogador.client_id, ignore_queue=True)
         if not espectador:
-            emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id)
+            emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
         nomes = [j.username for j in partida.jogadores]
         vez_atual = rodada.vez_atual
         emit('formatador_coletivo', {'jogadores_nomes': nomes,
                                      'jogador_inicial_nome': vez_atual.username if vez_atual else ''},
-             to=jogador.client_id)
+             to=jogador.client_id, ignore_queue=True)
         ultimo_turno = rodada.turnos[-1] if rodada.turnos else None
         for j in partida.jogadores:
             if j.turnos:
@@ -325,14 +328,14 @@ def enviar_snapshot_sala(lobby, jogador):
                      {'jogador': j.username,
                       'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
                       'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
-                     to=jogador.client_id)
+                     to=jogador.client_id, ignore_queue=True)
         if not espectador:
             emitir_dispatcher_turno(lobby, jogador)
         return
 
     if pagina == 3:
         if rodada is not None and rodada.conferencia:
-            emit('cards_conferencia', rodada.conferencia, to=jogador.client_id)
+            emit('cards_conferencia', rodada.conferencia, to=jogador.client_id, ignore_queue=True)
         emitir_status_conferencia(lobby)
         return
 
@@ -341,14 +344,14 @@ def enviar_snapshot_sala(lobby, jogador):
             emit('vencedor_da_partida',
                  {'nome': partida.vencedor_final.username,
                   'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
-                 to=jogador.client_id)
+                 to=jogador.client_id, ignore_queue=True)
             nomes = [j.username for j in lobby.jogadores if j.username is not None]
             pontos = [j.pontos for j in lobby.jogadores if j.username is not None]
-            emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id)
+            emit('atualizar_pontos', {'nomes': nomes, 'pontos': pontos}, to=jogador.client_id, ignore_queue=True)
             if partida.seed_info:
-                emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id)
+                emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id, ignore_queue=True)
             if not espectador and partida.vencedor_final == jogador:
-                emit('botao_vencedor_ativ', to=jogador.client_id)
+                emit('botao_vencedor_ativ', to=jogador.client_id, ignore_queue=True)
         emitir_status_vitoria(lobby)
 
 

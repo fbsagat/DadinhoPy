@@ -1,5 +1,7 @@
 # Dadinho
 
+[![CI](https://github.com/fbsagat/DadinhoPy/actions/workflows/ci.yml/badge.svg)](https://github.com/fbsagat/DadinhoPy/actions/workflows/ci.yml)
+
 Jogo de blefe de dados multiplayer em tempo real no navegador. Cada jogador rola seus dados e, em turnos, aposta quantas vezes um número aparece na mesa — ou desconfia da aposta do anterior. Quem erra perde um dado; o último com dados vence.
 
 **Disponível em:** [dadinho.memetrigger.com](https://dadinho.memetrigger.com)

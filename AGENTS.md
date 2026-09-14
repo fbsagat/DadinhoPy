@@ -15,6 +15,7 @@
 
 - Rodar o servidor: `python app.py` (com o `.venv`, da raiz do repo). Sobe em http://localhost:5000. Dev local — produção é a Vercel.
 - Verificação: `python verificar.py` (Fase 10; `.venv`, da raiz) — `py_compile`, `node --check` de `static/*.js`, cobertura i18n, boot `VERCEL=1` 200, serialização/migração, integração `flask_socketio.test_client` (Fases 6/7 + `retomar_identidade` + `heartbeat-espera-fresco`). Bots headless: `python simular_ia.py --partidas 20 --dados 3`. Complementar sempre com o teste manual em dois browser tabs.
+- **CI (Fase 37):** `.github/workflows/ci.yml` roda os mesmos comandos (setup Python 3.12 + `pip install -r requirements.txt`; `verificar.py`; `node --check` dos estáticos; `simular_ia.py --partidas 20 --dados 3`) em todo push/PR para `master` — é a segunda linha de verificação além do teste manual em 2 abas. Todo PR deve estar com o CI verde antes do merge.
 - Deploy: seguir `docs/verificacao.md`.
 
 ## Conventions
@@ -36,4 +37,9 @@
 ## Pontos de atenção recorrentes
 
 - **Serverless/cross-instance:** rooms/emits vivem por instância — salas de espera dependem do re-sync do heartbeat (espera SEMPRE fresco do store; partida via `carregar_sala_leve`). Não introduzir estado X no caminho que precise de broadcast entre instâncias sem tratar o re-sync. Fase 25: `DADINHO_MESSAGE_QUEUE` (URL `rediss://` Upstash) liga o `GerenciadorRedisSeguro` (pub/sub ~ emits entre instâncias); sem a env, manager local. Config (`opencode.json`) e skills/agents não são recarregados a quente — depois de editar `.opencode/`/`opencode.json`, reiniciar o opencode.
+- **Camadas de rate limit (Fase 39):** cada uma guarda uma dimensão diferente — **não remover uma achando redundante**:
+  1. **Firewall da Vercel** (plataforma, antes da função): regra `rate-limit-socketio` — 120 req/60s por IP no caminho `/socket.io/`, deny ao exceder. Cobre spam de conexões/upgrade e brute-force de códigos de sala (cada tentativa de `connect` é um request no caminho). Criada/publicada via `vercel firewall rules`/`publish` (draft → produção).
+  2. **Cooldown por `sid`** (`funcoes_gerais.tem_cooldown`): anti-spam de handlers por socket na instância quente (V2) — protege o orçamento de comandos da Upstash. É por `sid`, não por IP; quem abre socket novo burla isto (por isso a camada 1 existe).
+  3. **Lock distribuído por sala** (`store.trancar_sala_distribuida`, Fase 24): consistência do read-modify-write entre instâncias — não é rate limit.
 - Novos textos/keys: ver skill `i18n-dadinho`; novos eventos: skill `evento-dadinho`; verificação/deploy: skill `verificar-deploy`.
+- **Frontend sem build step (Fase 45/M6):** `static/script.js` (~154 KB) é um arquivo único clássico (functions globais + `socket.on`), carregado após `i18n.js`. **Decisão: não adotar bundler (esbuild)** — o projeto não tem tooling JS e o deploy é Python puro; o ganho não paga o custo de pipeline. Não splitar em múltiplas `<script>` tags sem bundler (quebraria hoisting entre arquivos).

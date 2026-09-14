@@ -1,4 +1,4 @@
-from flask import Flask, Response, render_template, request, send_from_directory
+from flask import Flask, Response, make_response, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
                             atualizar_lista_usuarios, montar_payload_lista_usuarios, remover_sala,
@@ -12,6 +12,7 @@ from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
 from socketio.manager import Manager as GerenciadorSocketIOBase
 import functools
+import hmac
 import http.client
 import os
 import secrets
@@ -443,16 +444,82 @@ def autenticar(exigir_master=False, extrair_chave=_chave_simples):
                 return
             if exigir_master and not jogador.master:
                 return
-            if extrair_chave is not None and jogador.chave_secreta != extrair_chave(dados):
+            if extrair_chave is not None and not hmac.compare_digest(
+                    jogador.chave_secreta, str(extrair_chave(dados) or '')):
                 return
             return func(dados, lobby, jogador, *args, **kwargs)
         return wrapper
     return decorator
 
 
+OG_GENERICO = {
+    'titulo': 'Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger',
+    'descricao': ('Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados '
+                  'em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.'),
+}
+
+# Fase 44 (S6/S7): Content Security Policy. Com os `onclick` inline migrados
+# para `data-acao` (S5) e o stub do `window.va` removido, não resta script
+# inline executável (o ld+json é dado, não executa) — `script-src` dispensa
+# 'unsafe-inline'/nonce. `style-src` mantém 'unsafe-inline' porque o jogo usa
+# `style=` inline e `element.style` em massa no JS (endurecer isso é refactor
+# separado). Default: **Report-Only** (não bloqueia; revisar violações no
+# navegador antes de virar bloqueante com `DADINHO_CSP_MODO=bloqueante`).
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self' https://cdn.socket.io https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "connect-src 'self' https://fonts.gstatic.com https://va.vercel-scripts.com; "
+    "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+)
+
+
+def _og_sala(sala_id, url_atual):
+    """
+    Fase 42 (N1): Open Graph dinâmico para crawlers — bots de preview (WhatsApp,
+    Telegram, Discord, X) não executam JS, então o convite de sala precisa vir no
+    HTML estático. Lê o resumo leve da sala no store e monta um og específico
+    ("Fulano te chamou pra uma partida"). Sala inexistente/inválida cai no
+    genérico. O og:image permanece estático (gerar imagem por sala exigiria um
+    serviço de renderização — fica para depois).
+    """
+    resumo = store.carregar_resumo(sala_id)
+    if resumo is None:
+        return dict(OG_GENERICO, url=url_atual)
+    nome = resumo.get('nome') or f"Partida #{sala_id}"
+    jogadores = int(resumo.get('jogadores') or 0)
+    maximo = int(resumo.get('max_jogadores') or 6)
+    status = resumo.get('status', 'espera')
+    if status == 'jogando':
+        descricao = f"{nome} — partida em andamento ({jogadores} jogador(es) na mesa)."
+    elif resumo.get('pode_entrar'):
+        descricao = (f"{nome} — {jogadores}/{maximo} jogador(es). "
+                     "Sem cadastro, entre e jogue Dadinho com os amigos!")
+    else:
+        descricao = f"{nome} — {jogadores}/{maximo} jogador(es)."
+    return {
+        'titulo': f"{nome} | Dadinho — jogo de blefe de dados",
+        'descricao': descricao,
+        'url': url_atual,
+    }
+
+
 @app.route("/")
 def index():
-    return render_template("jogo.html")
+    og = dict(OG_GENERICO, url=request.url)
+    sala_id = normalizar_sala(request.args.get('sala'))
+    if sala_id != SALA_PADRAO:
+        og = _og_sala(sala_id, request.url)
+    resposta = make_response(render_template("jogo.html", og=og))
+    # Fase 44: CSP em Report-Only por padrão; `DADINHO_CSP_MODO=bloqueante`
+    # aplica a política de verdade (depois de revisar as violações no browser).
+    if os.environ.get("DADINHO_CSP_MODO", "").strip().lower() == "bloqueante":
+        resposta.headers['Content-Security-Policy'] = CSP
+    else:
+        resposta.headers['Content-Security-Policy-Report-Only'] = CSP
+    return resposta
 
 
 @app.route("/robots.txt")
@@ -544,7 +611,7 @@ def handle_connect():
         # para `criar_sala` e `listar_partidas`), mas sem sala nem jogador até
         # escolher criar uma sala ou entrar pela busca.
         emit('connect_start', {'is_master': False, 'chave_secreta': '', 'sala': None},
-             to=client_id)
+             to=client_id, ignore_queue=True)
         return
     with trancar_sala(sala_id):
         try:
@@ -585,13 +652,13 @@ def handle_connect():
                         # Fase 15: entrou no meio da partida (pela busca) — vira
                         # espectador, sem ocupar vaga nem contar como jogador.
                         if len(lobby.espectadores) >= MAX_ESPECTADORES:
-                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id, ignore_queue=True)
                             leave_room(lobby.sala_room(), sid=client_id)
                             return
                     else:
                         # Sala de espera lotada (config 'max_jogadores'): não deixa entrar mais ninguém.
                         if len(lobby.jogadores) >= int(lobby.config.get('max_jogadores', 6)):
-                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id)
+                            emit('sala_cheia', {'sala': lobby.sala_id}, to=client_id, ignore_queue=True)
                             leave_room(lobby.sala_room(), sid=client_id)
                             return
                     master = False if lobby.verificar_jogador_master() else True
@@ -665,7 +732,7 @@ def retomar_identidade(dados=None):
             motivo = {'chave': 'msg.vaga_perdida_inatividade'}
         else:
             motivo = {'chave': 'msg.retomar_outra_sala'}
-        emit('retomar_negado', {'motivo': motivo}, to=client_id)
+        emit('retomar_negado', {'motivo': motivo}, to=client_id, ignore_queue=True)
         return
     if alvo.client_id == client_id:
         return
@@ -688,7 +755,7 @@ def retomar_identidade(dados=None):
     lobby.definir_master()
     emit("connect_start",
          {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
-          'sala': lobby.sala_id, 'username': alvo.username}, to=client_id)
+          'sala': lobby.sala_id, 'username': alvo.username}, to=client_id, ignore_queue=True)
     atualizar_lista_usuarios(lobby)
     enviar_snapshot_sala(lobby, alvo)
     if ia.processar(lobby):
@@ -785,7 +852,7 @@ def escolher_apelido(dados, lobby, jogador):
         apelido_n = lobby.verificar_apelido(apelido if validar_input(apelido) else 'NOME_BUGADO',
                                             atual=jogador.username)
         jogador.username = apelido_n
-        emit("update_username", {'nome_jogador': jogador.username}, to=jogador.client_id)
+        emit("update_username", {'nome_jogador': jogador.username}, to=jogador.client_id, ignore_queue=True)
         atualizar_lista_usuarios(lobby)
 
 
@@ -813,7 +880,7 @@ def iniciar_partida(dados, lobby, jogador):
     _resolver_caidos_para_partida(lobby)
     pode, motivo = lobby.pode_iniciar()
     if not pode:
-        emit('iniciar_negado', {'motivo': motivo}, to=jogador.client_id)
+        emit('iniciar_negado', {'motivo': motivo}, to=jogador.client_id, ignore_queue=True)
         return
     # Verificação ativa: resolve a entropia e fixa a seed ANTES de criar a partida.
     seed_info = lobby.finalizar_seed()
@@ -910,7 +977,7 @@ def solicitar_auditoria(dados, lobby, jogador):
     partida = jogador.partida_atual
     if partida is None or not partida.seed_info:
         return
-    emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id)
+    emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id, ignore_queue=True)
 
 
 @socketio.on('adicionar_ia')
@@ -1016,7 +1083,7 @@ def sair_da_sala(dados, lobby, jogador):
         return
     desregistrar_cliente(jogador.client_id, lobby.sala_id)
     leave_room(lobby.sala_room(), sid=jogador.client_id)
-    emit('saiu_da_sala', {'sala': lobby.sala_id}, to=jogador.client_id)
+    emit('saiu_da_sala', {'sala': lobby.sala_id}, to=jogador.client_id, ignore_queue=True)
     if _gc_sala(lobby):
         return
     atualizar_lista_usuarios(lobby)
@@ -1034,7 +1101,7 @@ def listar_partidas(dados):
     filtros = dados.get('filtros', {})
     sala_atual = dados.get('sala_atual')
     resumos = listar_resumos_partidas(filtros, sala_atual=sala_atual)
-    emit('partidas_listadas', {'partidas': resumos}, to=client_id)
+    emit('partidas_listadas', {'partidas': resumos}, to=client_id, ignore_queue=True)
 
 
 @socketio.on('criar_sala')
@@ -1048,7 +1115,7 @@ def criar_sala(dados=None):
     codigo = gerar_codigo_sala()
     if codigo is None:
         return
-    emit('sala_criada', {'sala': codigo}, to=request.sid)
+    emit('sala_criada', {'sala': codigo}, to=request.sid, ignore_queue=True)
 
 
 @socketio.on('verificar_desconectados')
@@ -1157,7 +1224,7 @@ def heartbeat(dados=None):
             return
         pagina_sala = lobby.pagina or 0
         if lobby.status == 'espera':
-            emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id)
+            emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id, ignore_queue=True)
         if pagina_cliente != pagina_sala:
             enviar_snapshot_sala(lobby, jogador)
         elif vez_divergente:
@@ -1189,7 +1256,7 @@ def jogar_dados(dados, lobby, jogador):
     emitir_status_rolagem(lobby)
     # Fase 10 (S4): escopo explícito — o resultado é só de quem rolou.
     emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
-         to=jogador.client_id)
+         to=jogador.client_id, ignore_queue=True)
     salvar_sala(lobby)
 
 
@@ -1205,7 +1272,7 @@ def joguei_dados(dados, lobby, jogador):
     if jogador.rodada_atual is None:
         return
     # Fase 10 (S4): escopo explícito — os dados são só de quem confirmou.
-    emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id)
+    emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
     rodada = jogador.rodada_atual
     # Executar isso \/ quando o último jogar os dados
     if rodada.verificar_se_todos_ja_jogaram_seus_dados():

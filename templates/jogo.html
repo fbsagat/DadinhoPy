@@ -9,13 +9,13 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
     <meta name="theme-color" content="#001125">
-    <title>Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger</title>
+    <title>{{ og.titulo }}</title>
 
-    <!-- SEO: descrição/canonical em pt-BR como fallback estático (o JS localiza
-         title/description via aplicar_meta_seo em i18n.js, mesma convenção dos
-         data-i18n). Robots/permissões e alternates de idioma são únicos. -->
+    <!-- SEO: descrição/canonical (o `<title>` e o OG dinâmico por sala vêm do
+         servidor — Fase 42/N1 — para crawlers sem JS; o JS localiza via
+         aplicar_meta_seo em i18n.js, mesma convenção dos data-i18n). -->
     <meta name="description"
-        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+        content="{{ og.descricao }}">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="referrer" content="origin">
     <link rel="canonical" href="https://dadinho.memetrigger.com/">
@@ -31,10 +31,9 @@
          o fallback pt-BR para crawlers sem JS). -->
     <meta property="og:site_name" content="MemeTrigger">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://dadinho.memetrigger.com/">
-    <meta property="og:title" content="Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger">
-    <meta property="og:description"
-        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+    <meta property="og:url" content="{{ og.url }}">
+    <meta property="og:title" content="{{ og.titulo }}">
+    <meta property="og:description" content="{{ og.descricao }}">
     <meta property="og:image" content="https://dadinho.memetrigger.com/static/imagens/titulo.png">
     <meta property="og:image:type" content="image/png">
     <meta property="og:locale" content="pt_BR">
@@ -43,9 +42,8 @@
     <meta property="og:locale:alternate" content="fr">
     <meta property="og:locale:alternate" content="zh_CN">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Dadinho — Jogo de Blefe de Dados Online Multiplayer | MemeTrigger">
-    <meta name="twitter:description"
-        content="Jogue Dadinho, o jogo oficial do MemeTrigger! Jogo multiplayer de blefe de dados em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.">
+    <meta name="twitter:title" content="{{ og.titulo }}">
+    <meta name="twitter:description" content="{{ og.descricao }}">
     <meta name="twitter:image" content="https://dadinho.memetrigger.com/static/imagens/titulo.png">
 
     <!-- Dados estruturados (JSON-LD): WebSite + VideoGame para os buscadores. -->
@@ -96,6 +94,13 @@
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"
         integrity="sha384-c79GN5VsunZvi+Q/WObgk2in0CbZsHnjEqvFxC5DxHn9lTfNce2WW6h2pH6u/kF+"
         crossorigin="anonymous"></script>
+    <!-- Fase 42 (N2) + Fase 44 (S6): Vercel Web Analytics — páginaview automática
+         + eventos de funil (sem PII) via `window.va('event', ...)`. O script é
+         servido pela plataforma em /_vercel/insights/script.js e define o
+         `window.va` ao carregar (no-op sem o analytics habilitado). Sem o stub
+         inline (removido na Fase 44), o `script-src` do CSP dispensa
+         'unsafe-inline'/nonce. -->
+    <script defer src="/_vercel/insights/script.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -203,7 +208,7 @@
     <!-- Fase 30: o espectador pode sair da sala e voltar ao menu. O botão só
          aparece para quem está assistindo (não-jogador) durante a partida. -->
     <button id="bot_sair_da_sala" class="btn btn-outline-light btn-sm position-fixed top-0 end-0 m-2"
-        style="z-index: 60; display: none;" data-i18n="ui.sair_da_sala" onclick="sair_da_sala()">Sair da sala</button>
+        style="z-index: 60; display: none;" data-i18n="ui.sair_da_sala" data-acao="sair_da_sala">Sair da sala</button>
 
     <div id="div_titulo_img" class="d-flex justify-content-center align-items-center" style="height: 24vh;">
         <h1 id="titulo_img" class="titulo-jogo">DADINHO</h1>
@@ -221,10 +226,10 @@
             <div id="painel_home" class="mb-4" style="display: none;">
                 <p class="text-light mb-3 fs-5" data-i18n="ui.sala.home"></p>
                 <div class="d-flex justify-content-center gap-2 flex-wrap">
-                    <button class="btn btn-info btn-lg" data-i18n="ui.sala.criar" onclick="criar_sala()">Criar
+                    <button class="btn btn-info btn-lg" data-i18n="ui.sala.criar" data-acao="criar_sala">Criar
                         sala</button>
                     <button class="btn btn-outline-light btn-lg" data-i18n="ui.sala.buscar"
-                        onclick="abrir_busca()">🔍 Buscar partidas</button>
+                        data-acao="abrir_busca">🔍 Buscar partidas</button>
                 </div>
             </div>
 
@@ -236,11 +241,11 @@
                     <small id="status_conexao" class="text-success d-block mb-1"></small>
                     <div class="d-flex justify-content-center gap-2 flex-wrap">
                         <button id="bot_sala_criar" class="btn btn-info" data-i18n="ui.sala.criar"
-                            onclick="criar_sala()">Criar sala</button>
+                            data-acao="criar_sala">Criar sala</button>
                         <button id="bot_buscar_partidas" class="btn btn-outline-light" data-i18n="ui.sala.buscar"
-                            onclick="abrir_busca()">🔍 Buscar partidas</button>
+                            data-acao="abrir_busca">🔍 Buscar partidas</button>
                         <button class="btn btn-outline-light" data-i18n="ui.sala.copiar"
-                            onclick="copiar_link_sala()">Copiar link</button>
+                            data-acao="copiar_link_sala">Copiar link</button>
                     </div>
                 </div>
 
@@ -283,7 +288,7 @@
                                     data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
                                     maxlength="10" autocomplete="nickname">
                                 <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
-                                    onclick="enviar_apelido()">Pronto</button>
+                                    data-acao="enviar_apelido">Pronto</button>
                             </div>
 
                             <div class="container my-1 p-2 bg-dark text-light border border-info rounded gamer-container"
@@ -294,9 +299,9 @@
 
                             <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
                                 <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
-                                    onclick="alternar_pronto()">Ficar pronto</button>
+                                    data-acao="alternar_pronto">Ficar pronto</button>
                                 <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
-                                    onclick="iniciar_partida()" style="display: none;" disabled>Iniciar partida</button>
+                                    data-acao="iniciar_partida" style="display: none;" disabled>Iniciar partida</button>
                             </div>
                         </div>
                     </div>
@@ -407,11 +412,11 @@
                             </div>
                             <div class="d-flex justify-content-center gap-2 flex-wrap">
                                 <button class="btn btn-sm btn-primary" data-i18n="ui.ia.adicionar"
-                                    onclick="adicionar_ia()">Adicionar IA</button>
+                                    data-acao="adicionar_ia">Adicionar IA</button>
                                 <button class="btn btn-sm btn-success" data-i18n="ui.ia.completar"
-                                    onclick="completar_com_ias()">Completar vagas</button>
+                                    data-acao="completar_com_ias">Completar vagas</button>
                                 <button class="btn btn-sm btn-outline-danger" data-i18n="ui.ia.remover"
-                                    onclick="remover_ias()">Remover IAs</button>
+                                    data-acao="remover_ias">Remover IAs</button>
                             </div>
                             <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
                                 sozinhos. Só o master controla.</small>
@@ -430,6 +435,11 @@
                     aria-label="Painéis do lobby"></div>
                 <div id="lobby_swipe_dica" class="lobby-swipe-dica" data-i18n="ui.lobby.swipe">
                     Deslize para o lado</div>
+
+                <!-- Fase 42 (N3): link de retorno ao MemeTrigger, discreto, no
+                     lobby/espera (a vitória já tem o tagline equivalente). -->
+                <p class="tagline-jogo text-center text-info mt-3 mb-1" data-i18n-html="ui.subtitulo">O jogo oficial do <a
+                        href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!</p>
             </div>
 
             </div>
@@ -488,11 +498,11 @@
                 </div>
 
                 <div class="d-flex justify-content-center gap-2 mb-3 flex-wrap">
-                    <button class="btn btn-info" data-i18n="ui.busca.buscar" onclick="buscar_partidas()">Buscar</button>
+                    <button class="btn btn-info" data-i18n="ui.busca.buscar" data-acao="buscar_partidas">Buscar</button>
                     <button class="btn btn-outline-light" data-i18n="ui.busca.atualizar"
-                        onclick="buscar_partidas()">Atualizar</button>
+                        data-acao="buscar_partidas">Atualizar</button>
                     <button class="btn btn-outline-secondary" data-i18n="ui.busca.voltar"
-                        onclick="fechar_busca()">Voltar</button>
+                        data-acao="fechar_busca">Voltar</button>
                 </div>
 
                 <div id="lista_partidas" class="text-start">
@@ -658,7 +668,7 @@
             </div>
         </div>
         <div class="d-flex justify-content-center align-items-center">
-            <button id="bot_confe_fim" class="btn btn-primary mt-2" data-i18n="ui.ok" onclick="conferencia_final()"
+            <button id="bot_confe_fim" class="btn btn-primary mt-2" data-i18n="ui.ok" data-acao="conferencia_final"
                 style="width: 80px; display: block;">Ok</button>
         </div>
         <div id="status_conferencia" class="mt-2 fs-6 text-white text-wrap mx-auto"
@@ -674,7 +684,7 @@
         <div class="d-flex flex-column justify-content-center align-items-center">
             <button id="comemorar" class="btn btn-success mt-3" data-i18n="ui.vitoria.comemorar"
                 style="z-index: 10; display: none;">Comemorar!</button>
-            <button id="bot_vencedor_fim" class="btn btn-primary mt-3" data-i18n="ui.ok" onclick="vencedor_final()"
+            <button id="bot_vencedor_fim" class="btn btn-primary mt-3" data-i18n="ui.ok" data-acao="vencedor_final"
                 style="width: 80px; display: block;">Ok</button>
             <div id="status_vitoria" class="mt-2 fs-6 text-white text-wrap" style="max-width: 40rem;"></div>
         </div>
@@ -696,7 +706,7 @@
         <div class="tutorial-modal">
             <div class="tutorial-header">
                 <h3 class="text-info mb-0" data-i18n="ui.tut.titulo">📖 Como jogar Dadinho</h3>
-                <button class="btn btn-outline-light btn-sm" onclick="fechar_tutorial()">✖</button>
+                <button class="btn btn-outline-light btn-sm" data-acao="fechar_tutorial">✖</button>
             </div>
             <p class="tagline-jogo text-center text-info mb-2" data-i18n-html="ui.subtitulo">O jogo oficial do <a
                     href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!</p>
@@ -802,7 +812,7 @@
                     <label class="form-check-label small" for="tutorial_dicas_switch"
                         data-i18n="ui.tut.dicas_switch">Mostrar dicas durante a partida</label>
                 </div>
-                <button class="btn btn-info" data-i18n="ui.tut.entendi" onclick="fechar_tutorial()">Entendi! Vamos jogar
+                <button class="btn btn-info" data-i18n="ui.tut.entendi" data-acao="fechar_tutorial">Entendi! Vamos jogar
                     🎲</button>
             </div>
         </div>
@@ -818,10 +828,10 @@
             <p id="alerta_mensagem" class="alerta-mensagem"></p>
             <div class="alerta-botoes">
                 <button id="alerta_cancelar" class="btn btn-secondary" type="button"
-                    data-i18n="ui.alerta.cancelar" onclick="fechar_alerta(false)"
+                    data-i18n="ui.alerta.cancelar" data-acao="fechar_alerta" data-resultado="false"
                     style="display: none">Cancel</button>
                 <button id="alerta_ok" class="btn btn-info" type="button" data-i18n="ui.alerta.ok"
-                    onclick="fechar_alerta(true)">Ok</button>
+                    data-acao="fechar_alerta" data-resultado="true">Ok</button>
             </div>
         </div>
     </div>
@@ -830,7 +840,7 @@
     <!-- PAINEL DE DICAS INICIO -->
     <div id="painel_dicas" class="painel-dicas" role="status">
         <span id="dicas_texto" class="flex-grow-1"></span>
-        <button class="btn-close btn-close-white" onclick="fechar_dica()" data-i18n-aria-label="ui.dica.fechar"
+        <button class="btn-close btn-close-white" data-acao="fechar_dica" data-i18n-aria-label="ui.dica.fechar"
             aria-label="Fechar dica"></button>
     </div>
     <!-- PAINEL DE DICAS FIM -->

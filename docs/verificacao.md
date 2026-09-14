@@ -37,3 +37,19 @@
 - **Sem leaderboard/estado de longo prazo:** casual only; o store guarda só o lobby atual de cada sala.
 - **Proteção de deploy (Vercel Authentication):** o projeto tem `ssoProtection` = `all_except_custom_domains`. Os domínios registrados (`dadinho.memetrigger.com` e `dadinho-hazel.vercel.app`) são isentos e servem o jogo; os aliases `.vercel.app` não-registrados (ex.: `dadinho-git-master-fbsagats-projects.vercel.app`) caem na tela de login/proteção da Vercel — não é outra versão do deploy.
 - **Segredos:** `DADINHO_SECRET_KEY`/tokens Upstash vêm de env vars — não comitar. Não subir `.env*`/`.vercel` (OIDC token) para a Vercel.
+
+## Observabilidade e alertas (Fase 43)
+
+- **Error tracking:** adiado — o mantenedor decidiu não usar Sentry por enquanto. Se retomado, a
+  opção avaliada era `sentry-sdk` opt-in por env `SENTRY_DSN` (capturar aborts silenciosos de
+  rede/store/lock em `evento_mutavel` e blobs corrompidos no `store.py`, com
+  `max_request_body_size="never"` + redação de Authorization/cookies, sem PII). Ver `todo.md` O1.
+- **Alerta de custo/uso Vercel:** regra `dadinho - anomalia de uso (invocacoes/duration)` (id
+  `ar_01a0a21c-43cd-74fc-9f93-a67a7461f7f0`, project `dadinho`) — `usage_anomaly` nas métricas
+  `function_invocations` e `fluid_duration` (detecção de anomalia, não teto fixo). Gerenciar via
+  `vercel alerts rules add/ls/rm --body <json>` (schema: `vercel alerts rules schema --type usage_anomaly`).
+- **Alerta Upstash (manual, pendente):** no console da Upstash → database → **Alerts**, criar alertas de
+  **comandos/mês** (free tier = 500 mil — sugestão: alertar a ~400 mil, 80%) e de **banda** (10 GB —
+  sugestão: ~8 GB). Não há CLI para isso; conferir no painel antes de um pico de abuso pegar de surpresa.
+- **Funil sem PII (Fase 42):** Vercel Web Analytics com eventos `sala_criada`/`partida_iniciada`/
+  `partida_concluida`/`jogador_saiu_antes` — sem `client_id`/`chave_secreta` (habilitar no dashboard).

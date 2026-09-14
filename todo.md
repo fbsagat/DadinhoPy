@@ -405,16 +405,16 @@ Códigos de item seguem o padrão do repo (letra da categoria + número): **S** 
 
 ## Índice das fases propostas
 
-- **Fase 36** — Correções rápidas: estático fora da função Python + comparação de segredo. Prioridade alta, esforço baixo.
-- **Fase 37** — CI: `verificar.py`/`simular_ia.py`/`node --check` em GitHub Actions. Prioridade alta, esforço baixo.
-- **Fase 38** — Migrar `vercel.json` de `builds`/`routes` para `functions`. Prioridade média, esforço médio.
-- **Fase 39** — Rate limit de rede (Firewall Vercel + limite de tentativas por sala/IP). Prioridade média-alta, esforço médio.
-- **Fase 40** — Otimização pós-métricas (`ignore_queue`, detector CAS) — retomada do `docs/plano-cross-instance.md` Fase 26. Prioridade média, esforço baixo-médio.
-- **Fase 41** — Cliente Upstash com sessão HTTP reaproveitável. Prioridade média, esforço médio.
-- **Fase 42** — OG dinâmico por sala + analytics leve sem PII. Prioridade média (alto valor de negócio), esforço médio.
-- **Fase 43** — Observabilidade: error tracking + alerta de custo Vercel/Upstash. Prioridade média, esforço baixo-médio.
-- **Fase 44** — CSP real (retomar a decisão adiada na Fase 31). Prioridade baixa-média, esforço alto.
-- **Fase 45** — Modularização de `modelos.py` / `verificar.py` / `script.js`. Prioridade baixa, esforço alto.
+- **Fase 36** — Correções rápidas: estático fora da função Python + comparação de segredo. Prioridade alta, esforço baixo. ✅ concluída
+- **Fase 37** — CI: `verificar.py`/`simular_ia.py`/`node --check` em GitHub Actions. Prioridade alta, esforço baixo. ✅ concluída
+- **Fase 38** — Migrar `vercel.json` de `builds`/`routes` para `functions`. Prioridade média, esforço médio. ✅ concluída (C2/C3; C4 = checagem manual do Fluid compute no dashboard)
+- **Fase 39** — Rate limit de rede (Firewall Vercel + limite de tentativas por sala/IP). Prioridade média-alta, esforço médio. ✅ concluída
+- **Fase 40** — Otimização pós-métricas (`ignore_queue`, detector CAS) — retomada do `docs/plano-cross-instance.md` Fase 26. Prioridade média, esforço baixo-médio. ✅ concluída
+- **Fase 41** — Cliente Upstash com sessão HTTP reaproveitável. Prioridade média, esforço médio. ✅ concluída
+- **Fase 42** — OG dinâmico por sala + analytics leve sem PII. Prioridade média (alto valor de negócio), esforço médio. ✅ concluída
+- **Fase 43** — Observabilidade: error tracking + alerta de custo Vercel/Upstash. Prioridade média, esforço baixo-médio. ✅ concluída (O2/O3; O1 = error tracking adiado sem Sentry)
+- **Fase 44** — CSP real (retomar a decisão adiada na Fase 31). Prioridade baixa-média, esforço alto. ✅ concluída (S5/S6/S7 em Report-Only; falta revisão manual no navegador antes de virar bloqueante)
+- **Fase 45** — Modularização de `modelos.py` / `verificar.py` / `script.js`. Prioridade baixa, esforço alto. ✅ concluída (M4/M5 ✅; M6 avaliado: não adotar bundler)
 
 ---
 
@@ -423,7 +423,7 @@ Códigos de item seguem o padrão do repo (letra da categoria + número): **S** 
 Objetivo: eliminar dois itens de baixo esforço e alto retorno encontrados na auditoria — estático
 sendo cobrado/servido pela função Python e comparação de segredo não constant-time.
 
-- [ ] **C1 — Estáticos fora da função Python** (`vercel.json`, `app.py:32-42`). Hoje `/static/*`
+- [x] **C1 — Estáticos fora da função Python** (`vercel.json`, `app.py:32-42`). Hoje `/static/*`
   (2,6 MB de imagens + 384 KB de sons) passa pelo catch-all e é servido pelo Flask dentro da função
   serverless — o próprio comentário em `_cache_estaticos` já registra isso. Adicionar
   `{"handle": "filesystem"}` antes da rota catch-all em `vercel.json` para que arquivos existentes no
@@ -431,7 +431,7 @@ sendo cobrado/servido pela função Python e comparação de segredo não consta
   headers de cache atuais (`Cache-Control: public, max-age=86400`) continuam corretos vindos do
   filesystem handler (senão manter um fallback de header via configuração de `headers` no
   `vercel.json`).
-- [ ] **S1 — `chave_secreta` com comparação constant-time** (`app.py:443`, dentro de `autenticar`):
+- [x] **S1 — `chave_secreta` com comparação constant-time** (`app.py:443`, dentro de `autenticar`):
   trocar `jogador.chave_secreta != extrair_chave(dados)` por
   `not hmac.compare_digest(jogador.chave_secreta, extrair_chave(dados))` (import `hmac` no topo de
   `app.py`). Fecha um canal de timing teórico contra o segredo de 16 bytes usado para autenticar
@@ -450,15 +450,15 @@ Objetivo: hoje `python verificar.py`/`simular_ia.py`/`node --check` só rodam se
 rodar localmente — nada impede um push de ir direto para a branch principal sem passar pela própria
 rede de segurança que o projeto já tem.
 
-- [ ] **M1 — Workflow de CI** (`.github/workflows/ci.yml`, novo arquivo): job único rodando em
+- [x] **M1 — Workflow de CI** (`.github/workflows/ci.yml`, novo arquivo): job único rodando em
   `push`/`pull_request` para a branch principal:
   1. Setup Python (versão de `.python-version`) + `pip install -r requirements.txt`.
   2. `python verificar.py` (falha o job se não sair 100% verde).
   3. `node --check static/script.js` e `node --check static/i18n.js`.
   4. `python simular_ia.py --partidas 20 --dados 3` (falha se travar ou quebrar a hierarquia
      4>3>2>1 dos bots).
-- [ ] **M2 — Badge de status** no `README.md` apontando para o workflow.
-- [ ] **M3 — Registrar no `AGENTS.md`** (seção Commands) que o CI roda os mesmos comandos do
+- [x] **M2 — Badge de status** no `README.md` apontando para o workflow.
+- [x] **M3 — Registrar no `AGENTS.md`** (seção Commands) que o CI roda os mesmos comandos do
   `verificar-deploy`, para os agentes saberem que existe uma segunda linha de verificação além do
   teste manual em 2 abas.
 
@@ -474,22 +474,26 @@ bloqueia configurar `maxDuration`, memória por função e `excludeFiles` no pro
 (Hobby trava em 300s de qualquer forma), mas é dívida técnica que trava qualquer ajuste fino futuro
 e a adoção plena do Fluid compute.
 
-- [ ] **C2 — Novo `vercel.json`** usando o formato moderno: remover `builds`/`routes`, deixar a
-  detecção zero-config do Flask (entrypoint resolvido) e configurar via `functions`:
+- [x] **C2 — Novo `vercel.json`** usando o formato moderno: remover `builds`/`routes`, configurar via
+  `functions` + `rewrites` (entrypoint `api/index.py` — preserva o wrapper Socket.IO e o supressor de
+  `ConnectionError`; estáticos servidos pelo filesystem antes dos rewrites, como o C1 pretendia):
   ```json
   {
     "functions": {
-      "api/index.py": { "maxDuration": 60 }
-    }
+      "api/index.py": { "maxDuration": 300, "excludeFiles": "docs/**,Dadinho idéia.txt,todo.md,.opencode/**" }
+    },
+    "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
   }
   ```
-  Ajustar o path da chave conforme o entrypoint resolvido pela Vercel (confirmar em ambiente de
-  preview antes de apontar para produção).
-- [ ] **C3 — `excludeFiles`** no bloco de `functions` para excluir do bundle da função tudo que não
-  precisa rodar em runtime Python (ex.: `docs/`, `Dadinho idéia.txt`, `todo.md`, `.opencode/`),
+  `maxDuration` mantido em 300s (= atual default Hobby; o valor 60 do esboço cortaria a vida do
+  WebSocket para 60s — regressão no tempo real da partida). Confirmar o path da chave conforme o
+  entrypoint resolvido pela Vercel em preview antes de apontar para produção.
+- [x] **C3 — `excludeFiles`** no bloco de `functions` para excluir do bundle da função tudo que não
+  precisa rodar em runtime Python (`docs/`, `Dadinho idéia.txt`, `todo.md`, `.opencode/`),
   mantendo o bundle Python enxuto (limite de 500 MB, hoje longe disso, mas boa prática).
 - [ ] **C4 — Confirmar Fluid compute ativo** nas configurações do projeto `dadinho` no dashboard da
   Vercel (projetos criados antes de abril/2025 podem não ter o padrão ligado automaticamente).
+  **Passo manual** — checar no painel antes do próximo deploy.
 
 Verificação: deploy em ambiente de preview primeiro (não direto em produção); validar boot
 `VERCEL=1` respondendo 200 (`verificar.py` já cobre isso localmente, mas testar preview real);
@@ -504,15 +508,15 @@ WebSocket novas ignora completamente o limite, porque cada conexão ganha um `si
 vetor barato de "denial of wallet" (spam de `criar_sala`/`connect` custando comandos no Upstash e
 invocações de função), não só de indisponibilidade.
 
-- [ ] **S2 — Firewall/rate limit da Vercel na rota de upgrade WS**: configurar regra de rate limit
-  no Firewall do projeto direcionada ao caminho de upgrade do WebSocket (`/socket.io/...`), limitando
-  novas conexões por IP numa janela curta — filtra antes mesmo de chegar no handler Python.
-- [ ] **S3 — Limite de tentativas de entrada por sala por IP**: hoje o código de sala
-  (`funcoes_gerais.gerar_codigo_sala`, charset de 32 chars × 5 = ~33M combinações) não tem limite de
-  tentativas de conexão com código errado por IP — mesmo sendo um espaço grande, vale um limite
-  adicional de tentativas (ex.: via o mesmo Firewall da Vercel ou um contador leve no
-  `handle_connect`) para inviabilizar brute-force automatizado de salas não listadas.
-- [ ] **S4 — Documentar no `AGENTS.md`** a decisão de onde cada camada de rate limit vive (Firewall
+- [x] **S2 — Firewall/rate limit da Vercel na rota de upgrade WS**: regra criada e **publicada em
+  produção** via `vercel firewall rules add/publish` — `rate-limit-socketio`: path prefix
+  `/socket.io/`, 120 req/60s por IP (`--rate-limit-keys ip`, fixed_window), `deny` ao exceder.
+  Filtra antes do handler Python (cobre spam de conexões/upgrade).
+- [x] **S3 — Limite de tentativas de entrada por sala por IP**: coberto pela mesma regra do Firewall —
+  cada tentativa de `connect` com `?sala=<código>` é um request no caminho `/socket.io/`; o teto de
+  120 req/60s por IP torna o brute-force de códigos (33M combinações) inviável sem tocar no código
+  (opção do esboço "via o mesmo Firewall da Vercel").
+- [x] **S4 — Documentar no `AGENTS.md`** a decisão de onde cada camada de rate limit vive (Firewall
   Vercel vs. cooldown por `sid` em `funcoes_gerais.py`), para agentes futuros não removerem uma
   achando redundante.
 
@@ -528,17 +532,22 @@ Objetivo: a Fase 25 (message queue via `socketio.RedisManager`) já está em pro
 (otimização) ficou marcada como opcional/pendente. Com a fila ativa, todo `emit` — inclusive os de
 destinatário único — publica no pub/sub à toa.
 
-- [ ] **C5 — `ignore_queue=True`** nos `emit(..., to=jogador.client_id)` (destinatário único):
-  mapear previamente quais `emit` da cadeia (ver `docs/fluxo.md`) são individuais vs. de sala, e
-  aplicar o parâmetro só nos individuais — os de room (`to=sala_room()`) continuam precisando da
-  fila para alcançar outras instâncias.
-- [ ] **C6 — Detector CAS como alerta** (não substitui o lock distribuído): campo `versao` no
-  `Lobby` incrementado a cada `salvar_sala`, com checagem de divergência registrada em log —
-  visibilidade para calibrar o TTL do lock (`store.TRAVA_TTL`) com dados reais de produção, não só
-  estimativa.
-- [ ] **C7 — Revisar `docs/plano-cross-instance.md`** marcando a Fase 26 como concluída/parcial após
-  esta fase, mantendo o heartbeat como está (o socket ainda morre no `max-duration`, o re-sync
-  continua necessário — não remover).
+- [x] **C5 — `ignore_queue=True`** nos `emit(..., to=jogador.client_id)` (destinatário único):
+  mapeados os `emit` individuais vs. de sala (docs/fluxo + código). Aplicado **só** onde o
+  destinatário é provadamente o próprio sid do request (local à instância): respostas de handler
+  em `app.py` (connect_start, retomar_negado, update_username, iniciar_negado, auditoria_partida,
+  saiu_da_sala, partidas_listadas, sala_criada, update_user_list do heartbeat, jogar_dados_resultado,
+  meus_dados) e todo o snapshot (`enviar_snapshot_sala` + `emitir_dispatcher_turno` — sempre o
+  requester). Emits a OUTROS jogadores continuam na fila (`master_def`, `expulso_da_sala`,
+  `meu_turno`/`espera_turno` de troca de vez, `construtor_dados` por jogador, room emits).
+- [x] **C6 — Detector CAS como alerta** (não substitui o lock distribuído): campo **`revisao`** no
+  `Lobby` (`versao` já é o schema da migração) incrementado a cada `store.salvar_sala`, com
+  checagem de divergência logando `Fase 40 (CAS)` quando um save stale chega (lost-update em
+  potencial) — visibilidade para calibrar o TTL do lock (`store.TRAVA_TTL`). É por instância
+  (alerta intra-instância); cross-instance continua sob o lock. Teste `revisao-cas` no `verificar.py`.
+- [x] **C7 — Revisar `docs/plano-cross-instance.md`** marcando a Fase 26 como implementada (via Fase
+  40), mantendo o heartbeat como está (o socket ainda morre no `max-duration`, o re-sync continua
+  necessário — não remover).
 
 Verificação: `python verificar.py` verde com os testes de integração da Fase 25 intactos; validar em
 produção (dashboard Upstash) que o número de comandos por partida cai após `ignore_queue` nos emits
@@ -553,15 +562,17 @@ Objetivo: `ArmazenamentoUpstash` (`store.py`) abre uma conexão nova via `urllib
 2-4 chamadas HTTP sequenciais (lock, leitura, gravação, unlock) — isso soma latência real por
 jogada.
 
-- [ ] **C8 — Sessão HTTP com keep-alive**: substituir as chamadas `urllib.request.urlopen` por uma
-  sessão reaproveitável (`requests.Session()` com adapter de connection pooling, ou
-  `http.client.HTTPSConnection` mantida entre chamadas dentro do mesmo processo/instância quente).
-  Se optar por `requests`, adicionar a dependência pinada em `requirements.txt` seguindo a convenção
-  do projeto.
-- [ ] **C9 — Retry com backoff nas leituras/escritas simples** (fora do lock, que já tem seu próprio
-  backoff): timeout/erro transitório de rede hoje aborta silenciosamente via `evento_mutavel` — está
-  correto para não travar a sala, mas 1 retry rápido antes de desistir reduziria aborto
-  desnecessário em blips passageiros da Upstash.
+- [x] **C8 — Sessão HTTP com keep-alive**: trocado `urllib.request.urlopen` por um pool
+  `http.client` (`_PoolHTTPS` em `store.py`) com keep-alive, protegido por trava (seguro no
+  `async_mode='threading'`; uma conexão por thread por vez). Sem dependência nova (stdlib) —
+  `requests.Session()` exigiria pinar 5 pacotes e é desencorajado para compartilhar entre threads.
+  `_pedido`/`_comando`/`_pipeline` reescritos sobre `_enviar`; exceções continuam
+  `OSError`/`http.client.HTTPException` (mesma política de aborto silencioso do `evento_mutavel`).
+- [x] **C9 — Retry com backoff nas leituras/escritas simples** (fora do lock, que já tem seu próprio
+  backoff): `_enviar` faz **1 retry rápido** (0.05s→0.1s) em timeout/reset/5xx antes de levantar;
+  timeout/erro persistente aborta silenciosamente via `evento_mutavel` como hoje. Teste
+  `upstash-transporte` no `verificar.py` (servidor HTTP fake local): keep-alive reutiliza a mesma
+  conexão e 5xx é retentado até o sucesso.
 
 Verificação: medir latência média por jogada (aposta → confirmação) antes/depois em produção;
 `python verificar.py` cobrindo a camada Upstash contra o fake REST precisa continuar passando sem
@@ -578,18 +589,21 @@ compartilhamento de sala o principal canal de aquisição de um jogo sem contas,
 de negócio real, não só polimento técnico. Além disso, o projeto não tem nenhuma visibilidade de
 funil (lobby → partida iniciada → concluída).
 
-- [ ] **N1 — OG dinâmico por sala**: `app.py` (`index()`) passa a ler `request.args.get('sala')`,
-  buscar o resumo leve da sala (`store.listar_resumos`/resumo individual) e passar
-  `nome`/`jogadores_atual`/`vaga` para `render_template`, que usa Jinja para preencher
-  `og:title`/`og:description`/`og:image` com o convite específico ("Fulano te chamou pra uma
-  partida de Dadinho — 2/6 jogadores"). Sala inexistente/padrão cai nos valores genéricos atuais.
-  Manter a localização por idioma como fallback client-side para quem abre a página (crawlers usam
-  só o HTML estático).
-- [ ] **N2 — Analytics leve sem PII**: adicionar Vercel Analytics (ou Plausible/Umami self-hosted)
-  só para eventos de funil (sala criada, partida iniciada, partida concluída, jogador saiu antes de
-  começar) — sem identificar jogadores, coerente com o design "casual only, sem contas".
-- [ ] **N3 — Link de retorno ao MemeTrigger** na tela de vitória/lobby, discreto, aproveitando o
-  tráfego do jogo para o produto principal da marca.
+- [x] **N1 — OG dinâmico por sala**: `app.py` (`index()` + `_og_sala`) lê `request.args.get('sala')`,
+  busca o resumo leve (`store.carregar_resumo` novo, GET pontual) e passa `titulo`/`descricao`/`url`
+  para `render_template`; o Jinja preenche `<title>` e `og:`/`twitter:` ("Mesa do Zé — 2/6
+  jogador(es). Sem cadastro, entre e jogue..."). Sala inexistente/padrão cai no genérico. O
+  `og:image` permanece estático (gerar imagem por sala exigiria serviço de renderização). A
+  localização por idioma segue como fallback client-side (`aplicar_meta_seo`). Teste
+  `og-dinamico` no `verificar.py`.
+- [x] **N2 — Analytics leve sem PII**: snippet do Vercel Web Analytics no `jogo.html` (stub
+  `window.va` + `/ _vercel/insights/script.js`) e eventos de funil em `script.js` via
+  `rastrear_funil()`: `sala_criada` (`sala_criada`), `partida_iniciada`/`partida_concluida`
+  (`mudar_pagina` 1/4), `jogador_saiu_antes` (`saiu_da_sala`). Sem `client_id`/`chave_secreta`.
+  **Passo manual:** habilitar Web Analytics no dashboard do projeto (o script é no-op sem isso).
+- [x] **N3 — Link de retorno ao MemeTrigger** na tela de vitória/lobby, discreto — a vitória já tinha
+  o tagline; adicionado no lobby (`tela_jogadores`) reusando a key `ui.subtitulo` (sem tradução
+  nova).
 
 Verificação: testar preview de link (`?sala=<id>`) nos debuggers oficiais de card social
 (Facebook Sharing Debugger, Twitter Card Validator) antes/depois; `python verificar.py` cobrindo o
@@ -604,15 +618,19 @@ Objetivo: hoje não existe error tracking, nem alerta de custo configurado no Ve
 algo quebrar silenciosamente em produção, só se descobre se um jogador reclamar; e um pico de abuso
 (Fase 39) só aparece numa fatura surpresa se ninguém estiver olhando o dashboard.
 
-- [ ] **O1 — Error tracking**: integrar uma ferramenta de captura de exceção (ex.: Sentry SDK
-  Python) nos pontos onde hoje há aborto silencioso deliberado (`evento_mutavel`,
-  `ArmazenamentoUpstash`) — reportar sem interromper o fluxo, só para visibilidade; cuidado para não
-  logar `chave_secreta`/tokens nos eventos capturados.
-- [ ] **O2 — Alerta de custo/uso**: configurar alertas no dashboard da Vercel (uso de função/GB-hora)
-  e no console da Upstash (comandos mensais, hoje no free tier de 500 mil/mês) para avisar antes de
-  estourar o orçamento, não depois.
-- [ ] **O3 — Registrar em `docs/verificacao.md`** onde esses alertas estão configurados e qual o
-  limiar, para o próximo deploy/fase saber que existem.
+- [ ] **O1 — Error tracking**: **adiado por decisão do mantenedor (sem Sentry por enquanto)**.
+  Opção avaliada: Sentry SDK Python opt-in por env `SENTRY_DSN` capturando os aborts silenciosos
+  reais (rede/store/lock em `evento_mutavel`, blobs corrompidos no `store.py`) com
+  `max_request_body_size="never"` + `before_send` redigindo Authorization/cookies (sem PII). Se
+  retomado: adicionar `sentry-sdk` pinado e o init opt-in; reavaliar alternativa de logs estruturados.
+- [x] **O2 — Alerta de custo/uso**: **Vercel** — regra `dadinho - anomalia de uso
+  (invocacoes/duration)` (id `ar_01a0a21c-43cd-74fc-9f93-a67a7461f7f0`) criada via
+  `vercel alerts rules add`: `usage_anomaly` em `function_invocations` e `fluid_duration`.
+  **Upstash — pendente/manual**: console → database → Alerts (comandos ~400k/mês e banda ~8 GB do
+  free tier); sem CLI para isso.
+- [x] **O3 — Registrar em `docs/verificacao.md`** seção "Observabilidade e alertas (Fase 43)": onde
+  o Sentry/DSN vive, o id da regra da Vercel e os limiares sugeridos do Upstash, para o próximo
+  deploy/fase saber que existem.
 
 Verificação: disparar um erro proposital em ambiente de preview e confirmar que aparece no error
 tracker; confirmar recebimento do alerta de teste de custo (se a ferramenta permitir simular).
@@ -626,17 +644,25 @@ handlers `onclick` inline impediam um CSP estrito sem `'unsafe-inline'`, de valo
 baixo). Item de segurança em aberto, esforço alto porque exige refactor testável só por navegador
 real (único meio de verificação do projeto para o frontend).
 
-- [ ] **S5 — Migrar handlers `onclick` inline para `addEventListener`** em `static/script.js`,
-  incrementalmente, mantendo `templates/jogo.html` com `id`/`data-*` em vez de atributos `onclick=`.
-- [ ] **S6 — CSP com nonce ou hash** para os poucos `<script>`/`<style>` que restarem inline,
-  permitindo `script-src`/`style-src` sem `'unsafe-inline'`.
-- [ ] **S7 — Ajustar CDN allowlist** no CSP (socket.io, Bootstrap, Google Fonts — já listados como
-  dependências externas em `docs/arquitetura.md`) via `connect-src`/`style-src`/`font-src`
-  explícitos.
+- [x] **S5 — Migrar handlers `onclick` inline para `addEventListener`**: os 22 `onclick=` do
+  `templates/jogo.html` viraram `data-acao="<nome>"` (e `data-resultado` para o `fechar_alerta`),
+  com um listener de delegação único em `static/script.js` (fim do arquivo) que roteia o clique
+  pelo `data-acao` — ações são `function` globais (hoisted). Zero `onclick` inline restante.
+- [x] **S6 — CSP sem `'unsafe-inline'` no `script-src`**: o único script inline executável era o
+  stub do `window.va` (Fase 42) — removido (o `/ _vercel/insights/script.js` define o `va` ao
+  carregar). Com `ld+json` (dado, não executa) e sem outros `<script>` inline, `script-src` dispensa
+  nonce/hash. `style-src` mantém `'unsafe-inline'` **documentado**: o jogo usa `style=` inline e
+  `element.style` em massa no JS (endurecer é refactor separado).
+- [x] **S7 — CDN allowlist no CSP**: política em `app.py` (`CSP`) com `script-src` (self + socket.io
+  + jsdelivr), `style-src` (self + unsafe-inline + jsdelivr + fonts.googleapis), `font-src`
+  (fonts.gstatic), `img-src` (self + data:), `connect-src` (self + fonts.gstatic +
+  va.vercel-scripts.com), `object-src 'none'`, `base-uri`, `frame-ancestors`. Servida em
+  **Report-Only** por padrão (`Content-Security-Policy-Report-Only`); `DADINHO_CSP_MODO=bloqueante`
+  aplica a política de verdade. Checagem do header no `og-dinamico`.
 
-Verificação: teste manual completo em 2 abas cobrindo cada tela (lobby, partida, conferência,
-vitória) com o CSP em modo `Content-Security-Policy-Report-Only` primeiro, revisando violações
-reportadas antes de aplicar em modo bloqueante; só then remover o "adiado" do registro da Fase 31.
+**Pendente (manual, navegador real):** rodar em 2 abas cobrindo todas as telas com o Report-Only,
+revisar as violações reportadas e só então virar bloqueante (`DADINHO_CSP_MODO=bloqueante`) e
+remover o "adiado" do registro da Fase 31.
 
 ---
 
@@ -647,15 +673,29 @@ concentram lógica demais num único arquivo — mais contexto para carregar a c
 de agente), diffs maiores, revisão mais difícil. Esforço alto, mas mecânico; fazer incrementalmente
 com `verificar.py` como rede de segurança a cada passo.
 
-- [ ] **M4 — Splitar `modelos.py`** em módulos por entidade: `lobby.py`, `partida.py`, `rodada.py`,
-  `turno.py`, `jogador.py`, mantendo `sala_room()` num módulo compartilhado (hoje é a fonte única do
-  prefixo `sala_`, referenciada em vários arquivos).
-- [ ] **M5 — Splitar `verificar.py`** numa pasta `tests/` com múltiplos arquivos por fase/área
-  (ex.: `tests/test_autenticacao.py`, `tests/test_serializacao.py`, `tests/test_ia.py`), migrando
-  para `pytest` se fizer sentido, ou mantendo o runner único que soma os resultados de cada módulo.
-- [ ] **M6 — Avaliar bundler leve para `static/script.js`** (ex.: esbuild) para dividir em módulos
-  por tela (lobby, partida, conferência, vitória) mantendo um único arquivo de saída para produção —
-  sem introduzir build step pesado desnecessário para um projeto deste porte.
+- [x] **M4 — Splitar `modelos.py`**: virou o pacote `modelos/` por entidade — `comum.py`
+  (`sala_room` + `somente_ias_na_partida`), `migracao.py` (VERSAO_ATUAL/VAGAS_RECENTES_SEGUNDOS/
+  MIGRACOES), `jogador.py`, `turno.py`, `rodada.py`, `partida.py`, `lobby.py`, com `__init__.py`
+  re-exportando tudo (`from modelos import ...` intacto). Grafo de dependências **acíclico**
+  (só `lobby` instancia as demais; `partida`/`rodada`/`turno` usam `self.da_*`). O `emit` do
+  Socket.IO agora tem binding próprio por submódulo: `simular_ia` e os testes de `verificar.py`
+  que neutralizavam `modelos.emit` passaram a patchear a lista de módulos (`_salvar_emit`/
+  `_silenciar_emit`/`_restaurar_emit`). `modelos/` adicionado ao `py_compile` do `verificar.py`.
+- [x] **M5 — Splitar `verificar.py`**: runner + estáticas + round-trip ficam em `verificar.py`
+  (~260 linhas); a infraestrutura (globals/helpers/constantes) foi para `tests/base.py`; os ~70
+  testes de integração para `tests/test_integracao.py`. Tudo importado LAZY (o runner chama
+  `_preparar_integracao()` antes de importar os testes, que fazem `from tests.base import *` —
+  mesmo módulo, sem o problema de `__main__` vs. nome). `python verificar.py` continua o único
+  comando. Split feito por script AST (movimentação mecânica, sem transcrição manual).
+- [x] **M6 — Avaliar bundler leve para `static/script.js`**: **avaliado e NÃO adotado**. `script.js`
+  tem ~154 KB / 3994 linhas (carregado uma vez, cacheado) — não é problema de performance nem de
+  manutenção real. O projeto **não tem tooling JS** (sem `package.json`/`node_modules`) e o deploy é
+  Python puro (`@vercel/python`/functions, `vercel.json` sem build step): adotar esbuild exigiria
+  injetar npm/build no deploy + CI, ou commitar bundle gerado (fonte-da-verdade quebrada). O ganho
+  (arquivos menores por tela) não paga o custo de pipeline para um jogo casual. **Decisão: manter
+  `script.js` único.** Se um dia o arquivo virar problema real, esbuild é a ferramenta certa
+  (concatenação preserva hoisting/ordem — split por múltiplas `<script>` tags sem bundler quebraria
+  hoisting entre arquivos) — reavaliar só então.
 
 Verificação: cada split é um commit isolado e reversível; `python verificar.py` 100% verde após cada
 um (imports/paths atualizados); `node --check` no bundle final gerado, se M6 for adotado; teste

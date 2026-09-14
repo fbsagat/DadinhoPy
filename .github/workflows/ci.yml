@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  verificacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: verificar.py
+        run: python verificar.py
+
+      - name: node --check (script.js)
+        run: node --check static/script.js
+
+      - name: node --check (i18n.js)
+        run: node --check static/i18n.js
+
+      - name: simular_ia.py (bots headless)
+        run: python simular_ia.py --partidas 20 --dados 3

@@ -317,6 +317,15 @@ function ir_para_sala(codigo) {
     window.location.href = url.toString();
 }
 
+// Fase 42 (N2): eventos de funil no Vercel Web Analytics, SEM PII (nunca
+// client_id/chave_secreta). Guardado por try/catch e pelo stub `window.va` —
+// no-op se o analytics não estiver habilitado no projeto.
+function rastrear_funil(evento, dados) {
+    try {
+        window.va && window.va('event', { name: evento, data: dados || {} });
+    } catch (e) { /* analytics nunca deve quebrar o jogo */ }
+}
+
 function criar_sala() {
     // Fase 9: o código é gerado no servidor (charset sem ambíguos + colisão);
     // ao receber 'sala_criada', o cliente navega para a sala criada.
@@ -325,6 +334,7 @@ function criar_sala() {
 
 socket.on('sala_criada', function (data) {
     if (data && data.sala) {
+        rastrear_funil('sala_criada');
         ir_para_sala(data.sala);
     }
 });
@@ -912,6 +922,7 @@ function atualizar_botao_sair() {
 
 // O espectador escolheu sair: o servidor confirma e voltamos ao menu.
 socket.on('saiu_da_sala', function () {
+    rastrear_funil('jogador_saiu_antes');
     chave_secreta = '';
     sessionStorage.removeItem('dadinho_chave');
     const url = new URL(window.location.href);
@@ -947,6 +958,12 @@ function alternar_pronto() {
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
+    // Fase 42 (N2): funil — partida iniciada (página 1) e concluída (página 4).
+    if (data.pag_numero === 1) {
+        rastrear_funil('partida_iniciada');
+    } else if (data.pag_numero === 4) {
+        rastrear_funil('partida_concluida');
+    }
     // Fase 21: contador da jogada automática segue o ciclo de páginas.
     // - Entrou na rolagem (1): mantém o contador (a rolagem acabou de ser
     //   armada pelo `construtor_dados`).
@@ -3954,6 +3971,22 @@ async function render_auditoria(data) {
 
 socket.on('auditoria_partida', function (data) {
     render_auditoria(data);
+});
+
+// Fase 44 (S5): delegação de cliques — o HTML usa `data-acao` em vez de
+// `onclick` inline (que o CSP estrito sem 'unsafe-inline' bloquearia). As ações
+// são `function` globais (hoisted); `fechar_alerta` lê o `data-resultado`.
+document.addEventListener('click', function (evento) {
+    if (!evento.target || typeof evento.target.closest !== 'function') return;
+    const alvo = evento.target.closest('[data-acao]');
+    if (!alvo) return;
+    const acao = alvo.dataset.acao;
+    if (acao === 'fechar_alerta') {
+        fechar_alerta(alvo.dataset.resultado === 'true');
+        return;
+    }
+    const funcao = window[acao];
+    if (typeof funcao === 'function') funcao();
 });
 
 // Fase 33 (M2): na primeira carga o lobby já pode estar visível — constrói os

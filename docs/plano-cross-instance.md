@@ -183,20 +183,25 @@ ação. Heartbeat (leitura) intocado. Free tier 500K comandos/mês → folga par
 
 ---
 
-## Fase 26 (opcional) — Otimização pós-métricas
+## Fase 26 (opcional) — Otimização pós-métricas — ✅ implementada via Fase 40 do `todo.md`
 
-Fazer **somente depois** de alguns dias em produção e leitura do dashboard (comandos, conexões,
-banda). Ideias, em ordem de retorno:
+Implementada (Fase 40), com ajustes em relação ao esboço abaixo:
 
-1. `ignore_queue=True` em emits de destinatário único (`to=<sid>`) — hoje até um emit
-   individual publica na fila (`pubsub_manager.py:65`). Auditoria prévia: mapear quais `emit`
-   da cadeia são `to=sid`.
-2. Detector CAS/version-token como **alerta** (não substitui o lock): campo `versao` no Lobby +
-   checagem no `salvar_sala` registra divergência — visibilidade para calibrar o TTL do lock.
-3. Fundir demanda de comandos: aproveitar `_pipeline`/lotes onde o lock e o `salvar_resumo`
-   disputarem a mesma janela (ganho pequeno; só se o número apertar).
+1. **`ignore_queue=True` em emits `to=<sid>`** — aplicado **só** onde o destinatário é
+   provadamente o próprio sid do request (`to=request.sid` / `jogador` local): respostas de
+   handler em `app.py` (connect_start, retomar, apelido, iniciar_negado, auditoria, sair, busca,
+   criar_sala, heartbeat e rolagem) e todo o snapshot (`enviar_snapshot_sala` +
+   `emitir_dispatcher_turno`, que só recebem o requester). Emits a OUTROS jogadores (ex.:
+   `master_def`, `expulso_da_sala`, `meu_turno` para o da vez, `construtor_dados` por jogador)
+   continuam na fila — o sid deles pode estar em outra instância.
+2. **Detector CAS como alerta** — campo **`revisao`** no `Lobby` (o `versao` já é o schema da
+   migração), incrementado a cada `store.salvar_sala`; se um save chega com revisão menor que a
+   última salva na instância, loga `Fase 40 (CAS)` — lost-update em potencial. É por instância
+   (alerta intra-instância); o cross-instance continua sob o lock distribuído.
+3. **Fundir demanda de comandos** (`_pipeline`/lotes) — **não feito**; só se o número de comandos
+   apertar (ver dashboard Upstash). Manter sob observação.
 
-Não consolidar/remover o heartbeat: o socket continua morrendo no `max-duration`, o re-sync
+O heartbeat **não foi removido**: o socket continua morrendo no `max-duration`, o re-sync
 continua necessário.
 
 ---
