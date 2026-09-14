@@ -34,11 +34,14 @@ def _cache_estaticos(resposta):
     """
     Fase 27 (I6): os estáticos de /static/ passam pelo catch-all do Flask sem
     header de cache (a Vercel não os serve como arquivo estático com o builder
-    @vercel/python). Cache moderado de 1 dia — sem fingerprint nos URLs, um
-    max-age longo serviria JS/CSS velhos após um deploy.
+    @vercel/python). Sem fingerprint nos URLs, um max-age longo fazia navegador
+    e CDN (Cloudflare à frente do domínio) servirem JS/CSS velhos até 24h após
+    um deploy — HTML novo + estático velho = página quebrada. `no-cache,
+    must-revalidate` força revalidação por ETag (304) a cada carga: conteúdo do
+    deploy atual sempre, sem custo.
     """
     if request.path.startswith('/static/'):
-        resposta.headers['Cache-Control'] = 'public, max-age=86400'
+        resposta.headers['Cache-Control'] = 'public, no-cache, must-revalidate'
     return resposta
 
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
