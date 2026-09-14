@@ -159,6 +159,16 @@ def contar_suporte(dados, face, coringa):
     return total
 
 
+def _aposta_garantida(suporte, ultimo):
+    """
+    Anti-burrice óbvia: True quando os dados do PRÓPRIO jogador já garantem a
+    última aposta (suporte >= quantidade apostada). Como os dados dos outros só
+    podem somar, a contagem real na mesa é >= suporte — desconfiar nesse cenário
+    é perda certa, nunca blefe defensivo. A decisão vira aposta obrigatória.
+    """
+    return ultimo is not None and suporte >= ultimo.dado_qtd
+
+
 def probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa):
     """
     P(total de dados que apoiam `face` >= `quantidade`), tratando os dados
@@ -211,6 +221,20 @@ def decidir(jogador, rodada, nivel):
     risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
     agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     ultimo = rodada.turnos[-1] if rodada.turnos else None
+    coringa = rodada.com_coringa
+    meus = list(jogador.dados)
+
+    # Anti-burrice óbvia: vale para qualquer nível e roda antes de qualquer traço
+    # de personalidade. Se os próprios dados do bot já garantem a última aposta,
+    # desconfiar nunca é uma opção — segue direto para uma aposta legal (jamais
+    # deixa o impulso aleatório ou o ruído virar desconfiança).
+    suporte_ultimo = contar_suporte(meus, ultimo.dado_face, coringa) if ultimo is not None else 0
+    if _aposta_garantida(suporte_ultimo, ultimo):
+        aposta = _escolher_aposta(rodada, jogador, nivel)
+        if aposta is None:
+            return _sem_aposta(ultimo)
+        face, quantidade = aposta
+        return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
     # Nível 1: sem raciocínio — aposta aleatória e desconfia por acaso.
     if nivel == 1:
@@ -228,14 +252,11 @@ def decidir(jogador, rodada, nivel):
             face, quantidade = secrets.choice(apostas)
         return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
-    coringa = rodada.com_coringa
-    meus = list(jogador.dados)
     desconhecidos = max(0, total_dados_ativos(rodada) - len(meus))
     probabilidade = None
     if ultimo is not None:
-        suporte = contar_suporte(meus, ultimo.dado_face, coringa)
         probabilidade = probabilidade_verdade(
-            ultimo.dado_face, ultimo.dado_qtd, suporte, desconhecidos, coringa
+            ultimo.dado_face, ultimo.dado_qtd, suporte_ultimo, desconhecidos, coringa
         )
 
     limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco, agressividade)
