@@ -342,16 +342,22 @@ canvas {
     flex-shrink: 0;
 }
 
-/* Fase 35 (mobile): no celular o narrador e as dicas viram um toast temporário
-   acima do painel de jogada (onde aparece "É a sua vez") — só a última fala,
-   some sozinho (JS). Fica em fluxo dentro do `#rodape_acao`, nunca bloqueia o
-   toque (`pointer-events: none`) e não incomoda os dados/botões da jogada. */
+/* Fase 35/55 (mobile): no celular o narrador e as dicas viram um toast
+   temporário — só a última fala, some sozinho (JS). Vive no body (fora da
+   `#tela_partida`, que é `display:none` fora da página 2) e fica fixo no topo,
+   abaixo dos botões fixos (☰ / sair), onde antes ficava o painel de dicas.
+   Nunca bloqueia o toque (`pointer-events: none`) e não incomoda o rodapé de
+   ação (dados + Apostar/Desconfiar). */
 .toast-mobile {
     display: none;
     justify-content: center;
     align-items: center;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 70;
     width: min(92vw, 420px);
-    margin: 0 auto 6px;
     padding: 8px 12px;
     background-color: rgba(0, 20, 45, 0.94);
     border: 1px solid #0dcaf0;

@@ -117,6 +117,10 @@
 
 <body>
     <canvas id="fireworks"></canvas>
+    <!-- Fase 55 (M4): o toast do mobile (narrador + dicas) mora no body, fora da
+         `#tela_partida` — antes ficava dentro dela, que é `display:none` fora da
+         página 2, e as dicas nunca apareciam no celular. Position fixed no mobile. -->
+    <div id="toast_mobile" class="toast-mobile" role="status" aria-live="polite"></div>
 
     <div class="barra-topo-desktop position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end"
         style="z-index: 50;">
@@ -559,10 +563,6 @@
         </div>
 
         <div id="rodape_acao">
-        <!-- Fase 35 (mobile): no celular o narrador e as dicas viram um toast
-             temporário acima do painel de jogada (onde aparece "É a sua vez") —
-             só a última fala, some sozinho. Desktop não usa. -->
-        <div id="toast_mobile" class="toast-mobile" role="status" aria-live="polite"></div>
         <!-- Fase 33 (M3): contador da jogada automática mora no rodapé; no
              desktop a CSS o devolve ao topo (`position: fixed`). -->
         <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"

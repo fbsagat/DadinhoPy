@@ -1209,12 +1209,24 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     return col;
 }
 
+// Fase 55: guardas da rolagem NO CLIENTE para a rodada corrente. O servidor
+// continua idempotente (reenvia o resultado se o evento se perder), mas o
+// cliente não re-dispara o `jogar_dados` nem reinicia a animação a cada clique
+// — antes, cliques repetidos re-rolavam visualmente os dados. `rolagem_pedida`
+// trava o emit; `rolagem_animada` impede a animação de recomeçar num reenvio
+// idempotente do servidor. O `construtor_dados` rearma ambos a cada rodada.
+let rolagem_pedida = false;
+let rolagem_animada = false;
+
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
     const espectador = data.espectador;
     // Fase 30: quem entra assistindo (vaga perdida/busca) também vê o botão.
     eh_espectador = espectador === true;
     atualizar_botao_sair();
+    // Nova rodada/partida: rearma a rolagem do cliente.
+    rolagem_pedida = false;
+    rolagem_animada = false;
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
     tela_jogar_dados.innerHTML = ""
@@ -1972,6 +1984,12 @@ socket.on("update_username", function (data) {
 
 socket.on("jogar_dados_resultado", function (data) {
     parar_timer_jogada(); // Fase 21: já rolou (manual ou automático), zera o contador.
+    // Fase 55: reenvio idempotente do servidor (segundo clique perdido, rede)
+    // não reinicia a animação desta rodada — só o primeiro recebimento anima.
+    if (rolagem_animada) {
+        return;
+    }
+    rolagem_animada = true;
     const dados_lista = data.dados_jogador;
     const dados_qtd = dados_lista.length;
 
@@ -3413,11 +3431,14 @@ window.addEventListener('pointerdown', desbloquear_audio, { once: true });
 window.addEventListener('keydown', desbloquear_audio, { once: true });
 
 function jogar_dados() {
-    // Fase 22: não desabilita o botão nem encerra o contador do autojogar — o
-    // servidor deduplica pela flag `joguei_dados`, e travar aqui deixaria o
-    // jogador preso na rolagem se o evento fosse perdido (cooldown, rede). Ele
-    // precisa poder tentar de novo; o `jogar_dados_resultado` é quem encerra o
-    // contador quando a rolagem confirma.
+    // Fase 55: trava o emit no cliente para ESTA rodada — um segundo clique
+    // não re-dispara o `jogar_dados` (que parecia rolar de novo). O servidor
+    // continua idempotente para o caso de o evento se perder (cooldown/rede);
+    // o `construtor_dados` rearma a flag a cada rodada.
+    if (rolagem_pedida) {
+        return;
+    }
+    rolagem_pedida = true;
     socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
 }
@@ -3605,11 +3626,14 @@ const CORES_FOGOS = ['#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33a8', '#00
 
 function createFirework(x, y, cor) {
     const base = cor || CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)];
-    const quantidade = eh_celular ? 40 + Math.floor(Math.random() * 25) : 90 + Math.floor(Math.random() * 70);
+    // Fase 55 (P7): no celular os fogos ficam mais enxutos (menos partículas e
+    // menor velocidade) — a tela de comemoração travava em aparelhos de CPU/GPU
+    // limitados com o render de centenas de partículas a 60fps.
+    const quantidade = eh_celular ? 22 + Math.floor(Math.random() * 13) : 90 + Math.floor(Math.random() * 70);
     const preenchido = Math.random() < 0.35;
     for (let i = 0; i < quantidade; i++) {
         const angulo = (Math.PI * 2 * i) / quantidade + (Math.random() - 0.5) * 0.25;
-        let velocidade = eh_celular ? 1.2 + Math.random() * 3.2 : 1.6 + Math.random() * 4.6;
+        let velocidade = eh_celular ? 1.0 + Math.random() * 2.6 : 1.6 + Math.random() * 4.6;
         if (preenchido) {
             velocidade *= 0.35 + Math.random() * 0.65;
         }
@@ -3634,8 +3658,8 @@ function criar_confete(no_topo) {
         y: no_topo ? -20 - Math.random() * 60 : Math.random() * altura_canvas,
         vx: (Math.random() - 0.5) * 1.6,
         vy: 1.8 + Math.random() * 3.4,
-        w: eh_celular ? 4 + Math.random() * 4 : 6 + Math.random() * 7,
-        h: eh_celular ? 6 + Math.random() * 6 : 9 + Math.random() * 10,
+        w: eh_celular ? 3 + Math.random() * 3 : 6 + Math.random() * 7,
+        h: eh_celular ? 5 + Math.random() * 4 : 9 + Math.random() * 10,
         rot: Math.random() * Math.PI * 2,
         vrot: (Math.random() - 0.5) * 0.35,
         cor: CORES_FOGOS[Math.floor(Math.random() * CORES_FOGOS.length)],
@@ -3647,19 +3671,21 @@ function criar_confete(no_topo) {
 function iniciar_celebracao() {
     celebrando = true;
     if (confetes.length === 0) {
-        const quantidade = eh_celular ? 70 : 180;
+        // Fase 55 (P7): menos confetes no celular — 70 ~ 35 (cada um paga um
+        // save/translate/rotate/fillRect/restore por frame no canvas).
+        const quantidade = eh_celular ? 35 : 180;
         for (let i = 0; i < quantidade; i++) {
             confetes.push(criar_confete(true));
         }
     }
     garantir_loop_animacao(); // P1: liga o loop de animação (parado ocioso).
     if (!intervalo_fogos) {
-        disparar_fogos(eh_celular ? 2 : 3);
+        disparar_fogos(eh_celular ? 1 : 3);
         intervalo_fogos = setInterval(function () {
             if (celebrando) {
                 disparar_fogos(eh_celular ? 1 : 2);
             }
-        }, eh_celular ? 1300 : 900);
+        }, eh_celular ? 1800 : 900);
     }
     // Evita fogos/confetes rodando sem parar caso o jogador não clique em Ok.
     clearTimeout(iniciar_celebracao._timer);
