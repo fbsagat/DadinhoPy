@@ -1,10 +1,13 @@
 """
 Jogadores controlados por IA (Fase 11).
 
-Três responsabilidades:
+Quatro responsabilidades:
 - Motor de decisão puro (probabilidade binomial + perfis por nível), sem I/O;
 - Leitura de oponentes (Fase 36): memória, só dentro da partida atual, de como
   cada adversário jogou nas rodadas já fechadas;
+- Medo e coragem (Fase 37): instinto ligado a quantos dados restam — não é
+  personalidade fixa, é o "estado de espírito" da rodada, e vale pra qualquer
+  nível;
 - Orquestrador `processar(lobby)`, que roda dentro do request que mudou o estado
   e faz as IAs agirem em sequência (rolagem, apostas, desconfiança, conferência
   e vitória). Nada de threads/timers: serverless-safe.
@@ -18,7 +21,9 @@ Isso NÃO se estende às rodadas já fechadas (`partida.rodadas[:-1]`): o
 resultado delas (quem blefou, quem desconfiou certo) já foi mostrado a todo
 mundo na tela de conferência, então é informação tão pública quanto a memória
 de um humano prestando atenção na mesa. É exatamente isso que a seção
-"Leitura de oponentes" usa — nunca a rodada corrente.
+"Leitura de oponentes" usa — nunca a rodada corrente. A quantidade de dados
+de cada jogador (`jogador.dados_qtd`, usada pelo medo/coragem) também é
+sempre pública — aparece na tela pra todo mundo o jogo inteiro.
 """
 
 import math
@@ -50,14 +55,24 @@ LIMITE_ACOES_PROCESSAR = 10000
 AMOSTRA_MINIMA_LEITURA = 3
 PESO_LEITURA_MESTRE = 0.35
 PESO_LEITURA_PERITO = 0.18
+
+# Medo/coragem (Fase 37): instinto de sobrevivência ligado à quantidade de
+# dados na mesa — não é personalidade fixa (isso continua sendo
+# ia_risco/ia_agressividade), é o "estado de espírito" da rodada, e vale para
+# qualquer nível (até o Novato sente o aperto de jogar com um dado só). Medo é
+# comum: todo bot carrega uma pitada natural de cautela. Coragem "do nada" é
+# rara — um lampejo ocasional de audácia sem motivo. PESO_MEDO_CORAGEM limita
+# o quanto isso desloca risco/agressividade só nesta decisão: nunca troca a
+# personalidade do bot, só a inclina pro mais cauteloso ou pro mais ousado.
+MEDO_NATURAL_BASE = 0.10
+CHANCE_CORAGEM_NATURAL = 8       # % de chance por decisão
+IMPULSO_CORAGEM_NATURAL = 0.35
+PESO_MEDO_CORAGEM = 0.35
 AJUSTE_PISO_MAXIMO = 0.15
 
 # Apelidos dos bots: sorteados a cada criação, misturando designações
 # robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
 # A unicidade fica a cargo de Lobby.verificar_apelido.
-# O nome completo do bot (`🤖 apelido`) segue o limite de 8 caracteres do
-# nome de jogador: o marcador + espaço consomem 2, então o apelido cabe até 6.
-LIMITE_APELIDO_BOT = 6
 NOMES_ROBOTICOS = [
     'Chip', 'Bolt', 'Neo', 'Zeta', 'Vex', 'Kilo', 'Orb', 'Pino', 'Byte',
     'Hex', 'Volt', 'Nix', 'Zen', 'Dado', 'Asimo', 'Teco', 'Bino',
@@ -66,14 +81,10 @@ NOMES_ROBOTICOS = [
 PREFIXOS_ROBO = ['XJ', 'R2', 'C3', 'TK', 'ZX', 'QB', 'MK', 'AX', 'NV', 'IO',
                  'BOT', 'UNIT', 'NULL']
 
-# Nomes humanos em "leet" (algumas letras trocadas por números/símbolos
-# parecidos — 4 por A, 1 por I, 0 por O, 8 por B e afins). Todos os apelidos
-# ficam em até 6 caracteres para o nome completo (`🤖 apelido`) seguir o
-# limite de 8 do nome de jogador.
 NOMES_HUMANOS = [
-    '4n4', 'B14', '8runo', 'C4rl4', 'D4v1', '3l1s4', 'F4b10', 'G4b1',
-    'H31t0r', '1g0r', 'J04n4', 'K3lly', 'Luc4s', 'M4r1n4', 'N4nd0',
-    '0l1v1a', 'P3dr0', 'R4f4', '50f1a', 'T4t1', 'V1t0r', 'Z3c4',
+    'Ana', 'Bia', 'Bruno', 'Carla', 'Davi', 'Elisa', 'Fábio', 'Gabi',
+    'Heitor', 'Igor', 'Joana', 'Kelly', 'Lucas', 'Marina', 'Nando',
+    'Olívia', 'Pedro', 'Rafa', 'Sofia', 'Tati', 'Vitor', 'Zeca',
 ]
 
 PREFIXOS_HIBRIDOS = ['Robô', 'Cyber', 'Mega', 'Nano', 'Proto', 'Auto']
@@ -103,18 +114,9 @@ def _nome_hibrido():
 
 
 def gerar_nome():
-    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖.
-
-    Obedece ao limite de 8 caracteres do nome de jogador: `🤖 ` consome 2, então
-    o apelido cabe até 6. Sorteios que estourem o limite são refeitos; se
-    cair (quase impossível), usa um apelido curto garantido.
-    """
-    for _ in range(4):
-        apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
-        if len(apelido) <= LIMITE_APELIDO_BOT:
-            return f"🤖 {apelido}"
-    # Fallback: os apelidos robóticos têm no máximo 5 caracteres.
-    return f"🤖 {secrets.choice(NOMES_ROBOTICOS)}"
+    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖."""
+    apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
+    return f"🤖 {apelido}"
 
 
 def sorteiar_personalidade(jogador):
@@ -287,6 +289,57 @@ def leitura_desafio(partida, alvo):
     return _taxa_confiavel(perfil['desafios_certos'], perfil['desafios'])
 
 
+# ---------------------------------------------------------------------------
+# Medo e coragem (Fase 37)
+# ---------------------------------------------------------------------------
+
+def _pressao_situacional(rodada, jogador):
+    """
+    Medo/coragem que vem da SITUAÇÃO na mesa, não do temperamento: poucos
+    dados assustam (perto de ser eliminado, joga mais brando), dados de
+    sobra encorajam (a queda não dói tanto, dá pra arriscar mais). Compara
+    com o máximo de dados permitido nesta partida e com os adversários ainda
+    na mesa. Devolve algo entre ~-1 (medo máximo) e ~+1 (coragem máxima).
+    """
+    partida = rodada.da_partida
+    meus = jogador.dados_qtd
+    maximo = max(1, int(getattr(partida, 'dados_qtd', meus) or meus))
+    outros = [j.dados_qtd for j in partida.jogadores if j is not jogador]
+
+    escassez = 1.0 - (meus - 1) / max(1, maximo - 1)  # 0 (no máximo) .. 1 (só 1 dado)
+    medo = escassez
+    if outros and sum(1 for o in outros if o > meus) > len(outros) / 2:
+        medo = min(1.0, medo + 0.25)  # a maioria da mesa já tem mais dados que eu
+
+    coragem = 0.0
+    if outros and sum(1 for o in outros if o < meus) > len(outros) / 2:
+        coragem += 0.5  # tenho mais dados que a maioria
+    if meus >= maximo:
+        coragem += 0.5  # ainda no máximo permitido pela partida — não perdi nenhum
+    coragem = min(1.0, coragem)
+
+    return coragem - medo
+
+
+def _fator_medo_coragem(rodada, jogador):
+    """
+    Combina o medo natural (sempre presente, em pouca dose — é o comum), um
+    lampejo raro de coragem sem motivo situacional nenhum, e a leitura da
+    mesa (quantos dados sobram, os meus e os dos outros). Quanto mais
+    coragem no resultado, menor a barra de probabilidade que o bot topa
+    aceitar como razoável (jogadas mais arriscadas); quanto mais medo, maior
+    essa barra (jogadas mais brandas). Resultado aproximado entre -1 e +1.
+    """
+    medo = MEDO_NATURAL_BASE
+    coragem = IMPULSO_CORAGEM_NATURAL if secrets.randbelow(100) < CHANCE_CORAGEM_NATURAL else 0.0
+    situacional = _pressao_situacional(rodada, jogador)
+    if situacional >= 0:
+        coragem += situacional
+    else:
+        medo += -situacional
+    return max(-1.0, min(1.0, coragem - medo))
+
+
 def gerar_apostas_validas(rodada):
     """Todas as apostas (face, quantidade) legais para o próximo turno da rodada."""
     turno_ant = rodada.turnos[-1] if rodada.turnos else None
@@ -312,7 +365,10 @@ def decidir(jogador, rodada, nivel):
     inclusive de quem vai responder à própria aposta).
     Cada bot carrega uma personalidade (ia_risco/ia_agressividade, 0-1) que
     desloca desconfiança, altura das apostas e impulsividade — e um pouco de
-    ruído mantém o mesmo bot imprevisível lance a lance.
+    ruído mantém o mesmo bot imprevisível lance a lance. Por cima disso, todo
+    nível sente medo/coragem conforme os dados que restam: com poucos dados
+    joga mais brando, com dados de sobra (ou ainda no máximo da partida)
+    arrisca mais — instinto, não cálculo, então vale até pro Novato.
     """
     try:
         nivel = int(nivel)
@@ -325,20 +381,27 @@ def decidir(jogador, rodada, nivel):
     agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     ultimo = rodada.turnos[-1] if rodada.turnos else None
 
+    # Fase 37: medo/coragem é instinto de sobrevivência (quantos dados
+    # restam), não personalidade — desloca risco/agressividade só para esta
+    # decisão, pra qualquer nível.
+    fator = _fator_medo_coragem(rodada, jogador)
+    risco_efetivo = max(0.0, min(1.0, risco + fator * PESO_MEDO_CORAGEM))
+    agressividade_efetiva = max(0.0, min(1.0, agressividade + fator * PESO_MEDO_CORAGEM))
+
     # Nível 1: sem raciocínio — aposta aleatória e desconfia por acaso.
     if nivel == 1:
         # Ousadia e agressividade mudam o apetite: cautelosos desconfiam mais,
         # agressivos preferem atacar a apostar na defensiva.
-        chance_desconfiar = max(0, 6 + int(risco * 20) - int(agressividade * 8))
+        chance_desconfiar = max(0, 6 + int(risco_efetivo * 20) - int(agressividade_efetiva * 8))
         if ultimo is not None and secrets.randbelow(100) < chance_desconfiar:
             return {'acao': 'desconfiar'}
         apostas = gerar_apostas_validas(rodada)
         if not apostas:
             return _sem_aposta(ultimo)
-        if agressividade > 0.7 and ultimo is not None and secrets.randbelow(100) < 30:
+        if agressividade_efetiva > 0.7 and ultimo is not None and secrets.randbelow(100) < 30:
             face, quantidade = _aposta_mais_alta(apostas)
         else:
-            face, quantidade = _aposta_por_intuicao(apostas, ultimo, risco)
+            face, quantidade = _aposta_por_intuicao(apostas, ultimo, risco_efetivo)
         return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
     coringa = rodada.com_coringa
@@ -356,19 +419,22 @@ def decidir(jogador, rodada, nivel):
         # sempre.
         probabilidade = _ler_probabilidade(rodada, ultimo, probabilidade, nivel)
 
-    limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco, agressividade)
+    limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco_efetivo, agressividade_efetiva)
     desconfia = probabilidade is not None and probabilidade < limiar
     # Nível 2 é imperfeito: mesmo achando a aposta ruim, às vezes deixa passar.
     if nivel == 2 and desconfia and secrets.randbelow(100) < 35:
         desconfia = False
     # Impulso de imprevisibilidade: às vezes desconfia sem ter a certeza do
-    # cálculo (ou se furta a desconfiar quando deveria). Ousados chamam mais.
+    # cálculo (ou se furta a desconfiar quando deveria). É um tique da
+    # personalidade fixa (ousados chamam mais por impulso) — usa o risco
+    # original, não o efetivo: medo/coragem já atuou no limiar acima e na
+    # aposta escolhida, não deveria também inflar esse impulso aleatório.
     if not desconfia and ultimo is not None and secrets.randbelow(100) < int(risco * 12):
         desconfia = True
     if desconfia:
         return {'acao': 'desconfiar'}
 
-    aposta = _escolher_aposta(rodada, jogador, nivel)
+    aposta = _escolher_aposta(rodada, jogador, nivel, risco_efetivo, agressividade_efetiva)
     if aposta is None:
         return _sem_aposta(ultimo)
     face, quantidade = aposta
@@ -423,12 +489,10 @@ def _limiar_desconfianca(rodada, nivel, ultimo, risco=0.5, agressividade=0.5):
     return base
 
 
-def _escolher_aposta(rodada, jogador, nivel):
+def _escolher_aposta(rodada, jogador, nivel, risco=0.5, agressividade=0.5):
     apostas = gerar_apostas_validas(rodada)
     if not apostas:
         return None
-    risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
-    agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     if nivel == 2:
         return _aposta_heuristica(apostas, agressividade)
     if nivel == 3:
