@@ -18,6 +18,11 @@ let sou_master = false;
 let contexto_min_aposta = null;
 // Fase 30: se o cliente está assistindo (espectador) — mostra o botão de sair.
 let eh_espectador = false;
+// Fase D: enquanto retoma identidade, o chave_secreta não corresponde ao
+// servidor — ações mutáveis seriam rejeitadas silenciosamente. A flag
+// bloqueia cliques até a retomada completar (segundo connect_start) ou
+// ser descartada (retomar_negado / sala nova sem chave_resumo).
+let chave_confirmada = true;
 
 // Imagens dos dados (1-6): constante global reutilizada na animação de rolagem.
 const diceImages = [
@@ -1921,6 +1926,12 @@ socket.on('espectador', function (data) {
 
 // Lógica para enviar a aposta (chamada pelo botão e pela tecla Enter).
 function apostar() {
+    // Fase D: identidade ainda não confirmada (retomada em andamento) — o
+    // servidor rejeitaria a chave placeholder. Não para o timer: o `autojogar`
+    // (sem guarda) continua como rede de segurança.
+    if (!chave_confirmada) {
+        return;
+    }
     parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const quantidade = document.getElementById('quantidade').value;
 
@@ -1942,6 +1953,10 @@ document.getElementById('apostar').addEventListener('click', apostar);
 
 // Lógica para enviar a desconfiança (chamada pelo botão e pela tecla Enter).
 function desconfiar() {
+    // Fase D: mesma guarda de `apostar` (ver lá).
+    if (!chave_confirmada) {
+        return;
+    }
     parar_timer_jogada(); // Fase 21: agiu dentro do tempo, encerra o contador.
     const data = {
         chave: chave_secreta,
@@ -1996,9 +2011,17 @@ socket.on("connect_start", function (data) {
     // Fase D: com uma sessão anterior guardada, retoma a identidade logo após
     // o connect (uma vez por conexão). O servidor troca o placeholder pela
     // identidade real e reemite o connect_start + snapshot.
-    if (chave_resumo && data && data.sala && !retomar_enviado) {
+    if (retomar_enviado) {
+        // Segundo connect_start (pós-retomada): chave_secreta já é a real.
+        chave_confirmada = true;
+    } else if (chave_resumo && data && data.sala) {
         retomar_enviado = true;
+        // Placeholder: chave_secreta é temporária, ação mutável agora falharia.
+        chave_confirmada = false;
         socket.emit('retomar_identidade', { chave: chave_resumo });
+    } else {
+        // Sem retomada (sala nova / home): a chave já corresponde ao servidor.
+        chave_confirmada = true;
     }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
@@ -2024,6 +2047,9 @@ socket.on('retomar_negado', function (data) {
         : t('msg.retomar_outra_sala');
     mostrar_alerta(motivo, 'aviso');
     if (chave_secreta) {
+        // O placeholder vira a identidade definitiva: chave_secreta volta a
+        // corresponder ao servidor, então as ações mutáveis já podem fluir.
+        chave_confirmada = true;
         chave_resumo = chave_secreta;
         sessionStorage.setItem('dadinho_chave', chave_secreta);
     }
@@ -2041,6 +2067,8 @@ socket.on('connect', function () {
     // rearmar `retomar_enviado` faz o `connect_start` seguinte reemitir a
     // `retomar_identidade` e destravar o snapshot pra este cliente.
     retomar_enviado = false;
+    // Segura ações mutáveis até o connect_start seguinte validar a chave.
+    chave_confirmada = false;
 });
 
 socket.on('disconnect', function () {
@@ -3507,6 +3535,12 @@ window.addEventListener('pointerdown', desbloquear_audio, { once: true });
 window.addEventListener('keydown', desbloquear_audio, { once: true });
 
 function jogar_dados() {
+    // Fase D: identidade ainda não confirmada (retomada em andamento) — o
+    // emit cairia na chave placeholder. Sem tocar em `rolagem_pedida`/botão,
+    // pra não travar o re-clique quando a retomada completar.
+    if (!chave_confirmada) {
+        return;
+    }
     // Fase 55: trava o emit no cliente para ESTA rodada — um segundo clique
     // não re-dispara o `jogar_dados` (que parecia rolar de novo). O servidor
     // continua idempotente para o caso de o evento se perder (cooldown/rede);
@@ -4162,6 +4196,13 @@ document.addEventListener('click', function (evento) {
     const acao = alvo.dataset.acao;
     if (acao === 'fechar_alerta') {
         fechar_alerta(alvo.dataset.resultado === 'true');
+        return;
+    }
+    // Ações de leitura/UI caem direto; as mutáveis esperam a identidade ser
+    // confirmada (senão o servidor rejeita a chave placeholder silenciosamente).
+    const acoes_nao_mutaveis = ['abrir_busca', 'fechar_busca', 'buscar_partidas',
+        'copiar_link_sala', 'fechar_tutorial', 'fechar_dica', 'criar_sala'];
+    if (!chave_confirmada && !acoes_nao_mutaveis.includes(acao)) {
         return;
     }
     const funcao = window.Dadinho[acao];
