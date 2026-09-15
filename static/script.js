@@ -23,6 +23,11 @@ let eh_espectador = false;
 // bloqueia cliques até a retomada completar (segundo connect_start) ou
 // ser descartada (retomar_negado / sala nova sem chave_resumo).
 let chave_confirmada = true;
+// Fase D3: sid da conexão cujo `connect_start` já foi processado. O socket.io
+// pode disparar o `connect` local DEPOIS de processar a primeira mensagem do
+// servidor (o `connect_start`) na mesma conexão; sem isso, o `connect`
+// clobberaria a decisão do `connect_start` e travaria os botões para sempre.
+let sid_ultimo_connect_start = null;
 
 // Imagens dos dados (1-6): constante global reutilizada na animação de rolagem.
 const diceImages = [
@@ -1971,6 +1976,9 @@ document.getElementById('desconfiar').addEventListener('click', desconfiar);
 // Funções após conectar
 let retomar_enviado = false;
 socket.on("connect_start", function (data) {
+    // Fase D3: registra a conexão atendida — o `connect` local pode chegar
+    // depois (ver a guarda no handler de `connect`).
+    sid_ultimo_connect_start = socket.id;
     // Facilidade: nova conexão, a config salva pode ser reaplicada numa sala nova.
     _config_local_aplicada = false;
     // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
@@ -2066,9 +2074,18 @@ socket.on('connect', function () {
     // guardada — o placeholder foi criado com snapshot ADIADO (`tem_chave=1`);
     // rearmar `retomar_enviado` faz o `connect_start` seguinte reemitir a
     // `retomar_identidade` e destravar o snapshot pra este cliente.
-    retomar_enviado = false;
-    // Segura ações mutáveis até o connect_start seguinte validar a chave.
-    chave_confirmada = false;
+    //
+    // Fase D3: o `connect` local pode disparar DEPOIS do `connect_start` da
+    // MESMA conexão (o socket.io processa a primeira mensagem do servidor antes
+    // de emitir o `connect`). Só rearmamos o estado de retomada quando a
+    // conexão é realmente nova (sid ainda não atendido por um `connect_start`) —
+    // senão o `connect` clobberaria a decisão do `connect_start` (identidade já
+    // confirmada voltaria a false e nenhum botão mutável responderia).
+    if (sid_ultimo_connect_start !== socket.id) {
+        retomar_enviado = false;
+        // Segura ações mutáveis até o connect_start seguinte validar a chave.
+        chave_confirmada = false;
+    }
 });
 
 socket.on('disconnect', function () {
