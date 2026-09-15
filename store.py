@@ -39,6 +39,18 @@ import urllib.parse
 
 from modelos import Lobby
 
+# Fase 46: as falhas do redis-py (ConnectionError, TimeoutError, ResponseError)
+# herdam de RedisError, não de OSError — exposto aqui para o `evento_mutavel`
+# do app.py abortar silenciosamente num blip do Redis local da VPS (mesma
+# política da Fase B aplicada à REST da Upstash). O pacote é lazy no
+# `ArmazenamentoRedis`; o alias só existe para referência do wrapper.
+try:
+    import redis as _redis_pacote
+    RedisError = _redis_pacote.exceptions.RedisError
+except ImportError:  # pragma: no cover — redis é dep pinada em requirements.
+    class RedisError(Exception):
+        """Fallback para quando o pacote redis não está instalado (dev parcial)."""
+
 
 _log = logging.getLogger(__name__)
 
@@ -145,7 +157,7 @@ def trancar_sala_distribuida(sala_id):
     Liberar: DELEX dadinho:lock:<sala_id> IFEQ <token> (compare-and-del, único
     comando REST). Na memória, vira um yield puro.
     """
-    if not isinstance(armazenamento, ArmazenamentoUpstash):
+    if not isinstance(armazenamento, (ArmazenamentoUpstash, ArmazenamentoRedis)):
         yield
         return
     token = secrets.token_hex(8)
@@ -549,6 +561,218 @@ class ArmazenamentoUpstash:
         self._comando("DEL", self._chave_sid(client_id))
 
 
+class ArmazenamentoRedis:
+    """
+    Persiste o estado num Redis TCP local (deploy na VPS, Fase 46). Mesma
+    interface e mesmo layout de chaves do `ArmazenamentoUpstash`, mas falando
+    com um Redis acessível por TCP (`DADINHO_REDIS_URL`, ex. `redis://redis:6379/0`)
+    via redis-py — sem depender da REST da Upstash.
+
+    Usa TTL idêntico aos do Upstash (sala/resumo 7 dias, sid 1 dia) e, como o
+    host Redis também é usado como message queue (`DADINHO_MESSAGE_QUEUE`
+    apontando para a mesma URL), o lock distribuído (`trancar_sala_distribuida`)
+    funciona nativamente: SET NX/EX adquire e um script Lua DELEX-IFEQ libera
+    com compare-and-del atômico.
+    """
+
+    PREFIXO_SALA = "dadinho:sala:"
+    PREFIXO_RESUMO = "dadinho:resumo:"
+    PREFIXO_SID = "dadinho:sid:"
+    CHAVE_SEQUENCIA = "dadinho:lobby_seq"
+    CHAVE_RESUMOS = "dadinho:resumos"
+    TTL_SALA = 7 * 24 * 3600
+    TTL_RESUMO = 7 * 24 * 3600
+    TTL_SID = 24 * 3600
+
+    _LUA_DELEX = (
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+        "return redis.call('DEL', KEYS[1]) else return 0 end"
+    )
+
+    def __init__(self, url):
+        import redis as pacote_redis
+        # Timeouts curtos (Fase 46): um Redis que aceita TCP mas não responde
+        # não pode segurar uma thread do gunicorn/request para sempre — falha
+        # rápido e vira `redis.exceptions.RedisError`, aborto silencioso
+        # (mesma política da Fase B aplicada ao Upstash).
+        self._redis = pacote_redis.Redis.from_url(
+            url, decode_responses=True,
+            socket_timeout=5, socket_connect_timeout=5, retry_on_timeout=False)
+        self._script_delex = self._redis.register_script(self._LUA_DELEX)
+
+    @classmethod
+    def _chave_sala(cls, sala_id):
+        return f"{cls.PREFIXO_SALA}{sala_id}"
+
+    @classmethod
+    def _chave_resumo(cls, sala_id):
+        return f"{cls.PREFIXO_RESUMO}{sala_id}"
+
+    @classmethod
+    def _chave_sid(cls, client_id):
+        return f"{cls.PREFIXO_SID}{client_id}"
+
+    def carregar_sala(self, sala_id):
+        bloco = self._redis.get(self._chave_sala(sala_id))
+        if not bloco:
+            return None
+        try:
+            return Lobby.de_dict(json.loads(bloco))
+        except (ValueError, TypeError, KeyError):
+            # Mesma política da Fase 28 (H1): bloco corrompido não derruba o
+            # handler — a sala é tratada como inexistente e recriada no GC.
+            return None
+
+    def salvar_sala(self, lobby):
+        bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
+        self._redis.set(self._chave_sala(lobby.sala_id), bloco, ex=self.TTL_SALA)
+
+    def remover_sala(self, sala_id):
+        self._redis.delete(self._chave_sala(sala_id))
+
+    def listar_lobbys(self):
+        lobbys = []
+        for chave in self._redis.scan_iter(match=f"{self.PREFIXO_SALA}*"):
+            bloco = self._redis.get(chave)
+            if not bloco:
+                continue
+            try:
+                lobbys.append(Lobby.de_dict(json.loads(bloco)))
+            except (ValueError, TypeError, KeyError):
+                continue
+        return lobbys
+
+    def proximo_numero(self):
+        return self._redis.incr(self.CHAVE_SEQUENCIA)
+
+    def salvar_resumo(self, sala_id, resumo):
+        bloco = json.dumps(resumo, ensure_ascii=False)
+        # Grava o resumo e inscreve a sala no índice num único pipeline.
+        with self._redis.pipeline() as pipe:
+            pipe.set(self._chave_resumo(sala_id), bloco, ex=self.TTL_RESUMO)
+            pipe.sadd(self.CHAVE_RESUMOS, sala_id)
+            pipe.execute()
+
+    def remover_resumo(self, sala_id):
+        with self._redis.pipeline() as pipe:
+            pipe.delete(self._chave_resumo(sala_id))
+            pipe.srem(self.CHAVE_RESUMOS, sala_id)
+            pipe.execute()
+
+    def carregar_resumo(self, sala_id):
+        bloco = self._redis.get(self._chave_resumo(sala_id))
+        if not bloco:
+            return None
+        try:
+            return json.loads(bloco)
+        except (ValueError, TypeError):
+            return None
+
+    def listar_resumos(self):
+        # Caminho rápido: SMEMBERS no índice + MGET nos resumos; fallback de
+        # varredura (scan_iter) quando o índice está vazio (deploy antigo).
+        ids = list(self._redis.smembers(self.CHAVE_RESUMOS))
+        if not ids:
+            ids = [c[len(self.PREFIXO_RESUMO):]
+                   for c in self._redis.scan_iter(match=f"{self.PREFIXO_RESUMO}*")]
+            for lote in self._lotes(ids, 100):
+                self._redis.sadd(self.CHAVE_RESUMOS, *lote)
+            if not ids:
+                return []
+        resumos = []
+        mortos = []
+        for lote in self._lotes(ids, 100):
+            valores = self._redis.mget(*[self._chave_resumo(i) for i in lote])
+            for sala_id, bloco in zip(lote, valores):
+                if not bloco:
+                    mortos.append(sala_id)
+                    continue
+                try:
+                    resumos.append(json.loads(bloco))
+                except (ValueError, TypeError):
+                    continue
+        if mortos:
+            # Resumos expirados (TTL) saem do índice na próxima listagem.
+            self._redis.srem(self.CHAVE_RESUMOS, *mortos)
+        return resumos
+
+    @staticmethod
+    def _lotes(lista, tamanho):
+        for inicio in range(0, len(lista), tamanho):
+            yield lista[inicio:inicio + tamanho]
+
+    def registrar_sid(self, client_id, sala_id):
+        self._redis.set(self._chave_sid(client_id), sala_id, ex=self.TTL_SID)
+
+    def sala_do_sid(self, client_id):
+        return self._redis.get(self._chave_sid(client_id))
+
+    def desregistrar_sid(self, client_id):
+        self._redis.delete(self._chave_sid(client_id))
+
+    def _comando(self, *args):
+        """
+        Tradutor de comandos no formato usado pelo lock distribuído
+        (`trancar_sala_distribuida`): SET NX/EX adquire, DELEX IFEQ libera com
+        compare-and-del atômico (script Lua). Devolve `{"result": ...}` no mesmo
+        formato da REST da Upstash, para o contexto do lock não mudar.
+        """
+        op = args[0]
+        if op == "SET":
+            chave, valor = args[1], args[2]
+            restantes = args[3:]
+            nx = "NX" in restantes
+            ex = None
+            if "EX" in restantes:
+                ex = int(restantes[restantes.index("EX") + 1])
+            ok = self._redis.set(chave, valor, nx=nx, ex=ex)
+            return {"result": "OK" if ok else None}
+        if op == "DELEX":
+            chave, token = args[1], args[3]
+            removido = self._script_delex(keys=[chave], args=[token])
+            return {"result": removido}
+        if op == "GET":
+            return {"result": self._redis.get(args[1])}
+        if op == "DEL":
+            return {"result": self._redis.delete(*args[1:])}
+        if op == "INCR":
+            return {"result": self._redis.incr(args[1])}
+        if op == "SADD":
+            return {"result": self._redis.sadd(args[1], *args[2:])}
+        if op == "SMEMBERS":
+            return {"result": list(self._redis.smembers(args[1]))}
+        if op == "SREM":
+            return {"result": self._redis.srem(args[1], *args[2:])}
+        if op == "MGET":
+            return {"result": list(self._redis.mget(args[1:]))}
+        if op == "EXPIRE":
+            return {"result": self._redis.expire(args[1], int(args[2]))}
+        return {"result": None}
+
+    def _pipeline(self, comandos):
+        """Executa uma sequência de comandos (formato `_comando`) num pipeline."""
+        resultados = []
+        with self._redis.pipeline() as pipe:
+            for comando in comandos:
+                op = comando[0]
+                if op == "SET":
+                    restantes = comando[3:]
+                    pipe.set(comando[1], comando[2], nx="NX" in restantes,
+                             ex=int(restantes[restantes.index("EX") + 1]) if "EX" in restantes else None)
+                elif op == "DEL":
+                    pipe.delete(*comando[1:])
+                elif op == "SADD":
+                    pipe.sadd(comando[1], *comando[2:])
+                elif op == "SREM":
+                    pipe.srem(comando[1], *comando[2:])
+                else:
+                    resultados.append(self._comando(*comando).get("result"))
+                    continue
+                resultados.append(None)
+            pipe.execute()
+        return {"result": resultados}
+
+
 def _selecionar_armazenamento():
     if os.environ.get("DADINHO_STORE", "").strip().lower() == "memoria":
         return ArmazenamentoMemoria()
@@ -556,6 +780,9 @@ def _selecionar_armazenamento():
     token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
     if url and token:
         return ArmazenamentoUpstash(url, token)
+    url_redis = os.environ.get("DADINHO_REDIS_URL", "").strip()
+    if url_redis:
+        return ArmazenamentoRedis(url_redis)
     # Fase 27 (I2): sem o store configurado, o app caía em ArmazenamentoMemoria()
     # sem nenhum sinal — em serverless cada cold start vira um store vazio e todo
     # o estado some sem aviso. Em produção o fallback é proibido: falha no boot.
@@ -563,6 +790,8 @@ def _selecionar_armazenamento():
         raise RuntimeError(
             "Store não configurado em produção: defina UPSTASH_REDIS_REST_URL e "
             "UPSTASH_REDIS_REST_TOKEN (ou DADINHO_STORE=memoria apenas em dev). "
+            "DADINHO_REDIS_URL (Redis TCP) é só para o deploy na VPS — um Redis "
+            "local não é alcançável do runtime serverless da Vercel. "
             "Sem isso a Vercel rodaria em memória e todo o estado sumiria no cold start."
         )
     return ArmazenamentoMemoria()

@@ -38,6 +38,39 @@
 - **Proteção de deploy (Vercel Authentication):** o projeto tem `ssoProtection` = `all_except_custom_domains`. Os domínios registrados (`dadinho.memetrigger.com` e `dadinho-hazel.vercel.app`) são isentos e servem o jogo; os aliases `.vercel.app` não-registrados (ex.: `dadinho-git-master-fbsagats-projects.vercel.app`) caem na tela de login/proteção da Vercel — não é outra versão do deploy.
 - **Segredos:** `DADINHO_SECRET_KEY`/tokens Upstash vêm de env vars — não comitar. Não subir `.env*`/`.vercel` (OIDC token) para a Vercel.
 
+## Publicar na VPS (Fase 46 — API própria em processo persistente)
+
+Cenário: a Vercel sozinha não garante a persistência dos processos (serverless recicla a
+função e derruba o socket). Com uma VPS, a **API** (Socket.IO) roda como processo
+persistente em Docker; o **frontend continua na Vercel** (só a API na VPS).
+
+1. **Repositório:** o `Dockerfile`/`docker-compose.yml` na raiz sobem a API (gunicorn
+   `threading` + simple-websocket, `-w 1` obrigatório — sem sticky session no gunicorn)
+   e um Redis local com AOF (`redis:7-alpine`).
+
+2. **Variáveis de ambiente no `.env` da VPS** (ou no ambiente):
+   - `DADINHO_REDIS_URL=redis://redis:6379/0` — estado do jogo (`store.ArmazenamentoRedis`).
+   - `DADINHO_MESSAGE_QUEUE=redis://redis:6379/0` — emits entre instâncias no mesmo Redis.
+   - `DADINHO_SECRET_KEY` — string longa aleatória (`secrets.token_hex(32)`).
+   - `DADINHO_CORS_ORIGINS` — origens do frontend (Vercel). Ex.:
+     `https://dadinho.memetrigger.com,https://dadinho-hazel.vercel.app`, ou `*` (casual).
+   - `DADINHO_PERMITIR_WEBSOCKET=true`.
+
+3. **Frontend apontando para a VPS:** na Vercel, setar `DADINHO_API_URL` (ex.:
+   `https://api.dadinho.memetrigger.com`). O servidor injeta essa URL no `<meta
+   name="dadinho-api-url">` e o `script.js` conecta o `io()` na VPS (CSP `connect-src`
+   já cobre). Vazio = mesmo host (regressão zero).
+
+4. **Subir:** `docker compose up -d` (na VPS). Validar com 2+ abas/navegadores conectando
+   na VPS (a página vem da Vercel, o socket vai para a VPS).
+
+5. **Proxy/TLS:** colocar nginx/Caddy na frente do container (porta 8000) para HTTPS +
+   `ip_hash` se escalar para múltiplas instâncias de API atrás do mesmo domínio.
+   **Obrigatório:** a página vem da Vercel em HTTPS; se `DADINHO_API_URL` apontar para
+   `http://` (sem TLS), o browser bloqueia o socket (mixed content) e ninguém conecta.
+   `DADINHO_REDIS_URL`/`DADINHO_MESSAGE_QUEUE` são para a VPS — a Vercel não alcança um
+   Redis local (e o boot com `VERCEL=1` segue exigindo o Upstash).
+
 ## Observabilidade e alertas (Fase 43)
 
 - **Error tracking:** adiado — o mantenedor decidiu não usar Sentry por enquanto. Se retomado, a

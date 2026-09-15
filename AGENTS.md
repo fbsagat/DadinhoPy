@@ -8,13 +8,14 @@
 ## Constraints para código novo
 
 - **Alvo: Vercel (serverless).** Sem pressupostos de servidor único, sem estado em memória entre requests — o estado de jogo vive no store distribuído (`store.py`). Sem threads/timers no servidor (`ia.processar` roda dentro do request).
+- **Modo VPS (Fase 46):** a API também pode rodar como processo persistente na VPS (Docker + gunicorn, `Dockerfile`/`docker-compose.yml` na raiz) com o frontend na Vercel. Estado via `DADINHO_REDIS_URL` (`store.ArmazenamentoRedis`, Redis TCP local) e message queue no mesmo Redis. O código continua serverless-safe — o modo VPS é um deploy alternativo, não um caminho paralelo.
 - **Múltiplas salas existem:** sala = `?sala=<id>`; cada sala é uma room `sala_<id>` com seu próprio `Lobby`. Nunca hard-code um lobby único.
 - **Casual only:** sem contas, ranking ou leaderboard. Identidade = `request.sid`; estado reseta por partida.
 
 ## Commands
 
-- Rodar o servidor: `python app.py` (com o `.venv`, da raiz do repo). Sobe em http://localhost:5000. Dev local — produção é a Vercel.
-- Verificação: `python verificar.py` (Fase 10; `.venv`, da raiz) — `py_compile`, `node --check` de `static/*.js`, cobertura i18n, boot `VERCEL=1` 200, serialização/migração, integração `flask_socketio.test_client` (Fases 6/7 + `retomar_identidade` + `heartbeat-espera-fresco`). Bots headless: `python simular_ia.py --partidas 20 --dados 3`. Complementar sempre com o teste manual em dois browser tabs.
+- Rodar o servidor: `python app.py` (com o `.venv`, da raiz do repo). Sobe em http://localhost:5000. Dev local — produção é a Vercel (ou a VPS: `docker compose up -d`).
+- Verificação: `python verificar.py` (Fase 10; `.venv`, da raiz) — `py_compile`, `node --check` de `static/*.js`, cobertura i18n, boot `VERCEL=1` 200, serialização/migração, integração `flask_socketio.test_client` (Fases 6/7 + `retomar_identidade` + `heartbeat-espera-fresco` + `store Redis TCP`/`lock Redis`, Fase 46). Bots headless: `python simular_ia.py --partidas 20 --dados 3`. Complementar sempre com o teste manual em dois browser tabs.
 - **CI (Fase 37):** `.github/workflows/ci.yml` roda os mesmos comandos (setup Python 3.12 + `pip install -r requirements.txt`; `verificar.py`; `node --check` dos estáticos; `simular_ia.py --partidas 20 --dados 3`) em todo push/PR para `master` — é a segunda linha de verificação além do teste manual em 2 abas. Todo PR deve estar com o CI verde antes do merge.
 - Deploy: seguir `docs/verificacao.md`.
 

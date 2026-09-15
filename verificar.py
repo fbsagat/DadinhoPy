@@ -120,6 +120,7 @@ def verificar_store_producao():
         "os.environ.pop('DADINHO_STORE', None);"
         "os.environ.pop('UPSTASH_REDIS_REST_URL', None);"
         "os.environ.pop('UPSTASH_REDIS_REST_TOKEN', None);"
+        "os.environ.pop('DADINHO_REDIS_URL', None);"
         "import store;"
     )
     resultado = subprocess.run(

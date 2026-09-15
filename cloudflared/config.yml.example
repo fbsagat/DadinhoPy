@@ -1,0 +1,10 @@
+# Cloudflare Tunnel — config de ingress (Fase 46/VPS).
+# Copie para `cloudflared/config.yml` e preencha com o ID do seu tunnel
+# (o mesmo ID que aparece no TUNNEL_TOKEN — decodifique o JWT ou veja no
+# painel Zero Trust). O arquivo real `cloudflared/config.yml` é específico
+# da instalação e não deve ser commitado (ver .gitignore).
+tunnel: <tunnel-id>
+ingress:
+  - hostname: dadinho-api.memetrigger.com
+    service: http://localhost:8000
+  - service: http_status:404

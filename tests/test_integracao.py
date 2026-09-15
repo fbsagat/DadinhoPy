@@ -1489,6 +1489,120 @@ def teste_mq_wiring():
             (resultado.stderr or resultado.stdout).strip()[-500:])
 
 
+def teste_redis_store_wiring():
+    """
+    Fase 46 (VPS): com DADINHO_REDIS_URL (Redis TCP local) e sem o Upstash, o
+    store seleciona ArmazenamentoRedis e o lock distribuído não é no-op (usa o
+    Redis local). Sem a env, regressão zero (cai no Upstash ou memória).
+    """
+    codigo = (
+        "import os;"
+        "os.environ['DADINHO_STORE']='';"
+        "os.environ.pop('VERCEL', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_URL', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_TOKEN', None);"
+        "os.environ['DADINHO_REDIS_URL']='redis://localhost:6379/0';"
+        "import store;"
+        "assert type(store.armazenamento).__name__=='ArmazenamentoRedis', type(store.armazenamento).__name__;"
+        "print('REDIS_OK')"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo], cwd=RAIZ,
+        capture_output=True, text=True, timeout=60,
+    )
+    _checar("store Redis TCP (VPS) selecionado por DADINHO_REDIS_URL",
+            resultado.returncode == 0 and "REDIS_OK" in resultado.stdout,
+            (resultado.stderr or resultado.stdout).strip()[-500:])
+
+
+def teste_redis_lock_fake():
+    """
+    Fase 46: o lock distribuído também funciona sobre o ArmazenamentoRedis
+    (SET NX/EX + DELEX IFEQ via script Lua). Usa um cliente Redis fake
+    (redis-py duck-typed) para validar o tradutor `_comando` sem precisar de
+    servidor Redis no CI.
+    """
+    import threading
+    import time as _time
+
+    class ClienteFake:
+        """Mínimo de redis-py que o ArmazenamentoRedis usa (set/delete/get/script)."""
+
+        def __init__(self):
+            self._dados = {}
+            self._trava = threading.Lock()
+
+        def set(self, chave, valor, nx=False, ex=None, **kwargs):
+            with self._trava:
+                if nx and chave in self._dados:
+                    return False
+                self._dados[chave] = valor
+            return True
+
+        def get(self, chave):
+            with self._trava:
+                return self._dados.get(chave)
+
+        def delete(self, *chaves):
+            with self._trava:
+                n = sum(1 for c in chaves if c in self._dados)
+                for c in chaves:
+                    self._dados.pop(c, None)
+                return n
+
+        def register_script(self, script):
+            return lambda keys, args: self._delex(keys[0], args[0])
+
+        def _delex(self, chave, token):
+            with self._trava:
+                if self._dados.get(chave) == token:
+                    self._dados.pop(chave, None)
+                    return 1
+                return 0
+
+    original = modulo_store.armazenamento
+    tts, espera = modulo_store.TRAVA_TENTATIVAS, modulo_store.TRAVA_ESPERA_BASE
+    modulo_store.TRAVA_TENTATIVAS = 2
+    modulo_store.TRAVA_ESPERA_BASE = 0.01
+    try:
+        arm = modulo_store.ArmazenamentoRedis("redis://fake:6379/0")
+        arm._redis = ClienteFake()
+        arm._script_delex = arm._redis.register_script(modulo_store.ArmazenamentoRedis._LUA_DELEX)
+        modulo_store.armazenamento = arm
+        chave = modulo_store.PREFIXO_TRAVA + "s-redis"
+        # Release com token errado é no-op (compare-and-del).
+        assert arm._comando("SET", chave, "tokA", "NX", "EX", 120)["result"] == "OK"
+        assert arm._comando("DELEX", chave, "IFEQ", "tokErrado")["result"] == 0
+        assert arm._comando("GET", chave)["result"] == "tokA", \
+            "token errado não pode apagar"
+        assert arm._comando("DELEX", chave, "IFEQ", "tokA")["result"] == 1
+        assert arm._comando("GET", chave)["result"] is None, \
+            "release correto deve liberar"
+        # Exclusão mútua via o context manager + contenda -> TravaIndisponivel.
+        with modulo_store.trancar_sala_distribuida("s-redis"):
+            try:
+                with modulo_store.trancar_sala_distribuida("s-redis"):
+                    raise AssertionError("segunda instância não pode adquirir lock ocupado")
+            except modulo_store.TravaIndisponivel:
+                pass
+        with modulo_store.trancar_sala_distribuida("s-redis"):
+            pass
+        # Serialização round-trip no ArmazenamentoRedis (mesmo formato Upstash).
+        import modelos
+        lobby = modelos.Lobby(sala_id="s-redis", lobby_numero=7)
+        jogador = modelos.Jogador(client_id="cli1")
+        jogador.username = "Ana"
+        lobby.adicionar_jogador(jogador)
+        arm.salvar_sala(lobby)
+        recarregado = arm.carregar_sala("s-redis")
+        assert recarregado is not None and recarregado.jogadores[0].username == "Ana"
+    finally:
+        modulo_store.TRAVA_TENTATIVAS = tts
+        modulo_store.TRAVA_ESPERA_BASE = espera
+        modulo_store.armazenamento = original
+    _ok("lock distribuído + round-trip sobre ArmazenamentoRedis (fake)")
+
+
 def teste_resumo_dedup():
     class Espiao:
         def __init__(self):
@@ -2615,6 +2729,10 @@ def verificar_integracao():
     testes_fase25 = [
         ("mq-wiring", teste_mq_wiring),
     ]
+    testes_fase46 = [
+        ("redis-store-wiring", teste_redis_store_wiring),
+        ("redis-lock-fake", teste_redis_lock_fake),
+    ]
     testes_fase29 = [
         ("H2-aposta-max", teste_h2_aposta_irrespondivel_clampeada),
         ("H3-cap-placeholder", teste_h3_cap_placeholder_nao_burla_limite),
@@ -2635,8 +2753,8 @@ def verificar_integracao():
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
-                           + testes_fase23 + testes_fase25 + testes_fase29
-                           + testes_fase30):
+                           + testes_fase23 + testes_fase25 + testes_fase46
+                           + testes_fase29 + testes_fase30):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

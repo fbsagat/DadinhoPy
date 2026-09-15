@@ -98,6 +98,16 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 - `api/index.py` exporta `application = app.wsgi_app` (middleware Socket.IO); `vercel.json` usa builder `@vercel/python` com rota catch-all. `app.secret_key` vem de `DADINHO_SECRET_KEY` (fallback dev `supersecretkey`).
 - Transporte: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `true`; `=0` desliga o upgrade). O cliente pede `['websocket', 'polling']` (`static/script.js`) — Vercel suporta WebSocket nativamente desde jun/2026; o WS prende a conexão numa instância; o long-polling quebrava porque cada request de poll caía numa instância sem a sessão Engine.IO (`Invalid session`).
 
+## Deploy na VPS (Fase 46)
+
+**Cenário:** a Vercel não garante a persistência dos processos (serverless recicla a função e derruba o socket). Com uma VPS, a API vira um **processo persistente** (Docker + gunicorn) e o frontend continua na Vercel. Detalhes operacionais em `docs/verificacao.md`.
+
+- **Topologia:** "só a API na VPS" — a Vercel continua servindo a página (`/`, estáticos, `/tema.mid`, robots/sitemap); o `io()` do cliente conecta **cross-origin** na VPS. A URL da API é injetada no template pelo servidor: `DADINHO_API_URL` → `<meta name="dadinho-api-url">` → `static/script.js` (`io(api_url || undefined, {...})`). Vazio = mesmo host (regressão zero no deploy 100% Vercel).
+- **CORS:** `DADINHO_CORS_ORIGINS` (lista separada por vírgula ou `*`) no `SocketIO(...)`; vazio = same-origin (comportamento atual). O CSP `connect-src` inclui a origem da API quando `DADINHO_API_URL` está definida.
+- **Estado:** `store.py` ganhou `ArmazenamentoRedis` (Redis TCP local via redis-py, mesmo layout/TTL do Upstash) selecionado por `DADINHO_REDIS_URL` (ex.: `redis://redis:6379/0` no docker-compose). O lock distribuído (`trancar_sala_distribuida`) também funciona sobre ele (SET NX/EX + DELEX IFEQ via script Lua). A message queue (`DADINHO_MESSAGE_QUEUE`) usa o MESMO Redis local (`redis://`) para emits entre instâncias.
+- **Execução:** `Dockerfile` + `docker-compose.yml` sobem `api` (gunicorn `-w 1 --threads 100`, async_mode `threading` + simple-websocket = WebSocket OK) e `redis:7-alpine` com AOF. `-w 1` é obrigatório: o load balancer do gunicorn não faz sticky session (escala = múltiplas instâncias atrás de um nginx + message queue).
+- **Diferença vs. serverless:** na VPS o heartbeat/re-sync entre instâncias continua funcionando (harmless), mas a instância única + message queue local eliminam o gap de tempo real da partida que existia entre instâncias da Vercel.
+
 ## Limitação conhecida (parcialmente mitigada)
 
 Rooms/emits do Socket.IO vivem em memória **por instância**; dois jogadores podem cair em instâncias diferentes e não ver os emits um do outro (o estado persiste no Upstash e é reidratado no reconnect).

@@ -31,10 +31,14 @@ const diceImages = [
 // Fase D2: vira `let` para `retomar_negado` adotar a chave do placeholder —
 // reincidência (reconnect com sid novo) tenta retomar com a chave certa.
 let chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
+// Fase 46 (VPS): URL pública da API de socket.io lida do `<meta
+// name="dadinho-api-url">` (injetado pelo servidor). Quando a API roda na VPS
+// separada do frontend, o io() conecta na origem dela; vazio = mesmo host.
+const api_url = (document.querySelector('meta[name="dadinho-api-url"]') || {}).content || '';
 // WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
 // request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
 // entra em loop de reconexão). O polling fica só como fallback de rede.
-const socket = io({
+const socket = io(api_url || undefined, {
     autoConnect: true,
     transports: ['websocket', 'polling'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },

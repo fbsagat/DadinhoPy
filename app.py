@@ -136,8 +136,9 @@ padrao_permitir_websocket = "true"
 permitir_websocket = os.environ.get("DADINHO_PERMITIR_WEBSOCKET", padrao_permitir_websocket).strip().lower() \
     not in ("0", "false", "nao", "no")
 # Fase 25: message queue opt-in por env. Com DADINHO_MESSAGE_QUEUE (URL
-# rediss:// do Upstash) os emits alcançam clientes de qualquer instância via
-# pub/sub; sem a env, mantém o GerenciadorThreadSeguro atual (regressão zero).
+# rediss:// do Upstash, ou redis:// de um Redis TCP local na VPS) os emits
+# alcançam clientes de qualquer instância via pub/sub; sem a env, mantém o
+# GerenciadorThreadSeguro atual (regressão zero).
 url_mq = os.environ.get("DADINHO_MESSAGE_QUEUE", "").strip()
 if url_mq:
     opcoes_redis = {"ssl_cert_reqs": "required"} if url_mq.startswith("rediss://") else {}
@@ -145,11 +146,21 @@ if url_mq:
                                          redis_options=opcoes_redis)
 else:
     gerenciador = GerenciadorThreadSeguro()
+# Fase 46 (VPS): quando a API roda na VPS separada do frontend (que fica na
+# Vercel), o browser conecta cross-origin no /socket.io da VPS. O Socket.IO
+# só aceita a mesma origem por padrão — `DADINHO_CORS_ORIGINS` lista as origens
+# permitidas (separadas por vírgula, ou `*`). Vazio mantém o comportamento atual
+# (same-origin, regressão zero no deploy 100% Vercel).
+_cors_env = os.environ.get("DADINHO_CORS_ORIGINS", "").strip()
+cors_permitidos = None
+if _cors_env:
+    cors_permitidos = [o.strip() for o in _cors_env.split(",") if o.strip()]
 socketio = SocketIO(
     app,
     async_mode=async_mode,
     client_manager=gerenciador,
     allow_upgrades=permitir_websocket,
+    cors_allowed_origins=cors_permitidos,
     ping_interval=15,
     ping_timeout=20,
     http_compression=False,
@@ -390,7 +401,12 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                     # Fase B: falhas de rede/IO do store distribuído (Upstash) também
                     # abortam silenciosamente — sem elas, um blip de rede estoura o
                     # handler, loga traceback e perde o estado do read-modify-write.
-                    OSError, http.client.HTTPException):
+                    OSError, http.client.HTTPException,
+                    # Fase 46: o ArmazenamentoRedis (VPS) fala com o Redis via
+                    # redis-py, cujas falhas (ConnectionError, TimeoutError,
+                    # ResponseError) herdam de RedisError, não de OSError — o
+                    # blip do Redis local aborta como o do Upstash.
+                    store.RedisError):
                 # Aborto no meio de uma mutação: o objeto vivo do cache de re-sync
                 # pode ter sido poluído — descarta para a próxima leitura recarregar.
                 if sala_id is not None:
@@ -458,6 +474,13 @@ OG_GENERICO = {
                   'em tempo real no navegador. Sem cadastro — crie uma sala e jogue com os amigos.'),
 }
 
+# Fase 46 (VPS): URL pública da API (socket.io). Quando a API roda numa VPS
+# separada do frontend (Vercel), o template injeta essa URL para o `io()` do
+# cliente conectar na VPS. Vazio = mesmo host (regressão zero no deploy 100%
+# Vercel e no dev local).
+API_URL = os.environ.get("DADINHO_API_URL", "").strip().rstrip("/")
+
+
 # Fase 44 (S6/S7): Content Security Policy. Com os `onclick` inline migrados
 # para `data-acao` (S5) e o stub do `window.va` removido, não resta script
 # inline executável (o ld+json é dado, não executa) — `script-src` dispensa
@@ -465,13 +488,17 @@ OG_GENERICO = {
 # `style=` inline e `element.style` em massa no JS (endurecer isso é refactor
 # separado). Default: **Report-Only** (não bloqueia; revisar violações no
 # navegador antes de virar bloqueante com `DADINHO_CSP_MODO=bloqueante`).
+# Fase 46: com a API na VPS (cross-origin), o connect-src precisa da origem
+# dela para o WebSocket/polling do socket.io não ser bloqueado em modo
+# bloqueante. Sem DADINHO_API_URL, mantém o 'self' (regressão zero).
+_origem_api_csp = f" {API_URL}" if API_URL else ""
 CSP = (
     "default-src 'self'; "
     "script-src 'self' https://cdn.socket.io https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
-    "connect-src 'self' https://fonts.gstatic.com https://va.vercel-scripts.com; "
+    f"connect-src 'self'{_origem_api_csp} https://fonts.gstatic.com https://va.vercel-scripts.com; "
     "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
 )
 
@@ -512,7 +539,7 @@ def index():
     sala_id = normalizar_sala(request.args.get('sala'))
     if sala_id != SALA_PADRAO:
         og = _og_sala(sala_id, request.url)
-    resposta = make_response(render_template("jogo.html", og=og))
+    resposta = make_response(render_template("jogo.html", og=og, api_url=API_URL))
     # Fase 44: CSP em Report-Only por padrão; `DADINHO_CSP_MODO=bloqueante`
     # aplica a política de verdade (depois de revisar as violações no browser).
     if os.environ.get("DADINHO_CSP_MODO", "").strip().lower() == "bloqueante":
@@ -681,10 +708,11 @@ def handle_connect():
                 # o connect destrava o fluxo.
                 if ia.processar(lobby):
                     salvar_sala(lobby)
-        except store.TravaIndisponivel:
-            # Lock distribuído ocupado/indisponível: aborta o connect. O cliente
-            # reconecta com backoff e o heartbeat re-sincroniza da mesma forma que
-            # hoje em dia com um blip de rede.
+        except (store.TravaIndisponivel, store.RedisError):
+            # Lock distribuído ocupado/indisponível, ou falha do Redis local da
+            # VPS (Fase 46): aborta o connect. O cliente reconecta com backoff e
+            # o heartbeat re-sincroniza da mesma forma que hoje em dia com um
+            # blip de rede.
             return
 
 
@@ -826,10 +854,11 @@ def handle_disconnect():
                 else:
                     remover_sala(lobby.sala_id)
                     sala_esvaziou = True
-        except store.TravaIndisponivel:
-            # Lock distribuído indisponível no disconnect: aborta silenciosamente —
-            # o ID do jogador continua indexado (TTL limpa) e a limpeza segue na
-            # próxima batida ou no GC, mesmo comportamento de hoje com blip de rede.
+        except (store.TravaIndisponivel, store.RedisError):
+            # Lock distribuído indisponível, ou falha do Redis local da VPS
+            # (Fase 46): aborta silenciosamente — o ID do jogador continua
+            # indexado (TTL limpa) e a limpeza segue na próxima batida ou no GC,
+            # mesmo comportamento de hoje com blip de rede.
             return
     # Depois de soltar o lock (evita corrida com um connect novo da mesma sala).
     if sala_esvaziou:

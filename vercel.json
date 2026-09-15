@@ -2,7 +2,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
-      "excludeFiles": "docs/**,Dadinho idéia.txt,todo.md,.opencode/**"
+      "excludeFiles": "docs/**,Dadinho idéia.txt,todo.md,.opencode/**,Dockerfile,docker-compose.yml,.dockerignore"
     }
   },
   "rewrites": [

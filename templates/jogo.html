@@ -9,6 +9,10 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
     <meta name="theme-color" content="#001125">
+    <!-- Fase 46 (VPS): URL pública da API de socket.io (quando separada do
+         frontend). Vazio = mesmo host. O script.js lê este meta para conectar
+         o io() na VPS; evita script inline (CSP estrita). -->
+    <meta name="dadinho-api-url" content="{{ api_url }}">
     <title>{{ og.titulo }}</title>
 
     <!-- SEO: descrição/canonical (o `<title>` e o OG dinâmico por sala vêm do
