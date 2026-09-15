@@ -18,7 +18,7 @@ LIMITE_RESUMO_PARADO_SEGUNDOS = 150
 # Fase 9: código de sala gerado no servidor, com charset sem caracteres
 # ambíguos (sem 0/o, 1/l/i) e checagem de colisão contra o store.
 CARACTERES_SALA = "abcdefghjkmnpqrstuvwxyz23456789"
-TAMANHO_CODIGO_SALA = 5
+TAMANHO_CODIGO_SALA = 6
 
 # Fase 9: janela de reconexão (segundos) para quem cai no meio da partida
 # voltar via chave_secreta antes de ser removido da sala.

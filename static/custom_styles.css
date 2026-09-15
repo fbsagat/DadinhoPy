@@ -304,6 +304,20 @@ canvas {
     font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
+/* Rótulos dos selects do card de configuração com altura reservada para duas
+   linhas: em telas estreitas "Máximo de jogadores" quebra linha e empurra o
+   select para baixo em relação ao "Dados por jogador". Reservando as 2 linhas
+   e ancorando o texto na base, os dois selects ficam sempre alinhados na
+   mesma linha vertical, em qualquer idioma/device. */
+#painel_config label[for="config_dados"],
+#painel_config label[for="config_max"] {
+    min-height: 2.75rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    margin-bottom: 0.25rem;
+}
+
 #lista_partidas {
     max-height: 55vh;
     overflow-y: auto;
