@@ -92,8 +92,77 @@ jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
    - `DADINHO_REDIS_URL`/`DADINHO_MESSAGE_QUEUE` são para a VPS — a Vercel não alcança um
      Redis local (o boot com `VERCEL=1` segue exigindo o Upstash).
    - Logs/estado: `docker compose logs -f api`, `docker compose ps` (em `/opt/dadinho`).
-   - Atualizar a VPS após novo push: re-copiar o código para `/opt/dadinho` e
-     `docker compose up -d --build api` (não há auto-deploy do Dadinho).
+   - Não há auto-deploy do Dadinho na VPS — toda atualização é manual.
+
+## Atualizar a VPS após um push (fluxo manual, passo a passo)
+
+**Não existe auto-deploy na VPS.** Vercel publica sozinha no push; a VPS precisa da
+cópia do código + rebuild. Procedimento validado em 2026-09-15.
+
+Pré-requisitos: acesso SSH à VPS (deploy atual usa o usuário `ubuntu`, chave
+`memetrigger-vps.key`, acesso já configurado) e o código local atualizado
+(`git pull` + verificação local antes).
+
+### Opção A — script automático (recomendado)
+
+Na raiz do repo:
+
+```powershell
+.\atualizar_vps.ps1 -Chave "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key"
+```
+
+O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API, recreate do
+tunnel se `docker-compose.yml` mudou, smoke test local e público). Params opcionais:
+`-HostVps` (padrão `167.126.27.4`) e `-Usuario` (padrão `ubuntu`).
+
+### Opção B — manual (equivalente ao script)
+
+1. **Copiar o código** preservando o que é específico da instalação (`.env` e
+   `cloudflared/config.yml` — ambos gitignored, NÃO estão no repo):
+
+   ```powershell
+   tar -czf - `
+     --exclude='.git' --exclude='.venv' --exclude='.idea' --exclude='__pycache__' `
+     --exclude='*.pyc' --exclude='.vercel' --exclude='.env*' --exclude='material' `
+     --exclude='cloudflared/config.yml' `
+     -C C:\Users\wwwfa\PycharmProjects\DadinhoPy . |
+     ssh -i "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key" `
+       -o StrictHostKeyChecking=no ubuntu@167.126.27.4 `
+       "cd /opt/dadinho && sudo tar -xzf -"
+   ```
+
+   ⚠️ **Nunca** rodar `rm -rf /opt/dadinho/*` antes de copiar — apaga o
+   `cloudflared/config.yml` (ingress do tunnel) e o `.env` está oculto (glob `*` não
+   pega dotfile, mas o `config.yml` é perdido). Tar com excludes preserva os dois.
+
+2. **Rebuild da API** (só a api muda no push normal; redis/tunnel ficam):
+
+   ```bash
+   cd /opt/dadinho && sudo docker compose up -d --build api
+   ```
+
+3. **Tunnel** — recriar apenas se `docker-compose.yml` mudou (o ingress do
+   `cloudflared/config.yml` vive só na VPS; se editar manualmente por lá, recrie
+   também):
+
+   ```bash
+   cd /opt/dadinho && sudo docker compose up -d --force-recreate tunnel
+   ```
+
+4. **Smoke test:**
+
+   ```bash
+   # local (loopback)
+   curl -s -o /dev/null -w 'robots:%{http_code}\n' http://127.0.0.1:8000/robots.txt
+   curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling'
+   # público (pelo tunnel)
+   curl -s -o /dev/null -w 'robots:%{http_code}\n' https://dadinho-api.memetrigger.com/robots.txt
+   curl -s 'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=polling'
+   ```
+
+   O handshake deve responder `0{"sid":"...","upgrades":["websocket"],...}` (200,
+   `robots:<200>`). Depois validar com 2+ abas/navegadores: página da Vercel, socket
+   para a VPS.
 
 ## Observabilidade e alertas (Fase 43)
 

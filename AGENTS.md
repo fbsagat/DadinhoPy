@@ -14,7 +14,7 @@
 
 ## Commands
 
-- Rodar o servidor: `python app.py` (com o `.venv`, da raiz do repo). Sobe em http://localhost:5000. Dev local — produção é a Vercel (ou a VPS: em `/opt/dadinho`, `docker compose up -d`). Não há auto-deploy do Dadinho na VPS: após novo push, re-copiar o código para `/opt/dadinho` e `docker compose up -d --build api`.
+- Rodar o servidor: `python app.py` (com o `.venv`, da raiz do repo). Sobe em http://localhost:5000. Dev local — produção é a Vercel (ou a VPS: em `/opt/dadinho`, `docker compose up -d`). Não há auto-deploy do Dadinho na VPS: após novo push, rodar `.\atualizar_vps.ps1 -Chave <caminho>` (copia com tar preservando `.env`/`cloudflared/config.yml`, rebuilda a api, recrea o tunnel só se `docker-compose.yml` mudou e faz smoke test) — procedimento detalhado em `docs/verificacao.md`.
 - Verificação: `python verificar.py` (Fase 10; `.venv`, da raiz) — `py_compile`, `node --check` de `static/*.js`, cobertura i18n, boot `VERCEL=1` 200, serialização/migração, integração `flask_socketio.test_client` (Fases 6/7 + `retomar_identidade` + `heartbeat-espera-fresco` + `store Redis TCP`/`lock Redis`, Fase 46). Bots headless: `python simular_ia.py --partidas 20 --dados 3`. Complementar sempre com o teste manual em dois browser tabs.
 - **CI (Fase 37):** `.github/workflows/ci.yml` roda os mesmos comandos (setup Python 3.12 + `pip install -r requirements.txt`; `verificar.py`; `node --check` dos estáticos; `simular_ia.py --partidas 20 --dados 3`) em todo push/PR para `master` — é a segunda linha de verificação além do teste manual em 2 abas. Todo PR deve estar com o CI verde antes do merge.
 - Deploy: seguir `docs/verificacao.md`.
