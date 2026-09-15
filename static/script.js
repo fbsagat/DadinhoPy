@@ -1767,7 +1767,11 @@ socket.on('cards_conferencia', function (data) {
     const cardContainer = document.getElementById("cards_conferencia");
     const texto_v_d = document.getElementById("texto_vitoria_derrota")
     cardContainer.innerHTML = ''
-    texto_v_d.innerText = texto_conferencia(data);
+    const texto_conf = texto_conferencia(data);
+    texto_v_d.innerText = texto_conf;
+    if (texto_conf) {
+        narrador_linha(texto_conf);
+    }
 
     nomes.forEach((nome, index) => {
         // Criação do card
