@@ -1250,6 +1250,11 @@ def jogar_dados(dados, lobby, jogador):
         return
     # Fase 7 (A6): idempotência explícita por rodada — já rolou não rola de novo.
     if jogador.joguei_dados:
+        # Reenvio idempotente: se o jogador já rolou mas perdeu o resultado
+        # (cooldown/rede), o re-clique reentrega o `jogar_dados_resultado` em
+        # vez de abortar em silêncio — destrava a rolagem (Fase 22).
+        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+             to=jogador.client_id, ignore_queue=True)
         return
     jogador.joguei_dados = True
     # Fase 22: mostra em tempo real quem já rolou e quem ainda falta.

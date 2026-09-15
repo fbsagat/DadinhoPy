@@ -237,7 +237,7 @@ def teste_a3_a6_chave_e_idempotencia():
 
     c1.emit("jogar_dados", {"chave": cs1["chave_secreta"]})
     eventos = c1.get_received()
-    assert _contar_eventos(eventos, "jogar_dados_resultado") == 0, "segundo jogar_dados deve ser ignorado (A6)"
+    assert _contar_eventos(eventos, "jogar_dados_resultado") == 1, "segundo jogar_dados reentrega o resultado (A6/reenvio idempotente)"
     lobby = modulo_store.carregar_sala(SALA)
     ana = next(j for j in lobby.jogadores if j.username == "Ana")
     assert ana.dados == dados_apos, "dados não podem mudar num re-rolar (A6)"

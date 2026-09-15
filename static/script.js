@@ -3370,11 +3370,13 @@ window.addEventListener('pointerdown', desbloquear_audio, { once: true });
 window.addEventListener('keydown', desbloquear_audio, { once: true });
 
 function jogar_dados() {
-    parar_timer_jogada(); // Fase 21: rolou manualmente, encerra o contador.
+    // Fase 22: não desabilita o botão nem encerra o contador do autojogar — o
+    // servidor deduplica pela flag `joguei_dados`, e travar aqui deixaria o
+    // jogador preso na rolagem se o evento fosse perdido (cooldown, rede). Ele
+    // precisa poder tentar de novo; o `jogar_dados_resultado` é quem encerra o
+    // contador quando a rolagem confirma.
     socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
-    const dadobt = document.getElementById('dadobotao');
-    dadobt.disabled = true; // Desativa o input
 }
 
 // Fase 22: marca visualmente que o jogador já clicou no "Ok" (as fichas de
