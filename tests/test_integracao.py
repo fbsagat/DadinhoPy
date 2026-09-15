@@ -2709,6 +2709,38 @@ def teste_sair_da_sala_eliminado():
     _ok("eliminado sai da partida e jogador ativo segue no-op (Fase 30)")
 
 
+def teste_lobby_lotado_so_quando_lotar():
+    """
+    Fase 57: `lobby_lotado` (o mobile volta o carrossel ao card "Jogadores")
+    só é emitido para o master quando os bots LOTARAM a sala — nunca quando
+    ainda sobram vagas. "Completar vagas" preenche todas as restantes; um
+    "Adicionar IA" que não enche a sala não dispara o evento.
+    """
+    _limpar()
+
+    # "Completar vagas" numa sala com 1 humano e max=6: lota e avisa o master.
+    c1, cs1, _ = _conectar()
+    c1.emit("completar_com_ias", {"chave": cs1["chave_secreta"], "nivel": 2})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 6, \
+        f"completar tem de encher a sala, len={len(lobby.jogadores)}"
+    assert _achar_evento(c1.get_received(), "lobby_lotado") is not None, \
+        "sala lotada deve avisar o master com lobby_lotado"
+    c1.disconnect()
+    _limpar()
+
+    # "Adicionar IA" que não enche a sala: sem lobby_lotado.
+    c2, cs2, _ = _conectar()
+    c2.emit("adicionar_ia", {"chave": cs2["chave_secreta"], "nivel": 2, "quantidade": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len(lobby.jogadores) == 2, f"sala deve ter 2 jogadores, len={len(lobby.jogadores)}"
+    assert "lobby_lotado" not in [e["name"] for e in c2.get_received()], \
+        "sala com vaga restante não pode emitir lobby_lotado"
+    c2.disconnect()
+    _limpar()
+    _ok("lobby_lotado só é emitido quando as vagas acabam (Fase 57)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -2830,6 +2862,7 @@ def verificar_integracao():
         ("sair-da-sala-lobby", teste_sair_da_sala_lobby),
         ("sair-da-sala-eliminado", teste_sair_da_sala_eliminado),
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
+        ("lobby-lotado", teste_lobby_lotado_so_quando_lotar),
     ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15

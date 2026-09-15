@@ -342,18 +342,19 @@ canvas {
     flex-shrink: 0;
 }
 
-/* Fase 35/55 (mobile): no celular o narrador e as dicas viram um toast
+/* Fase 35/55/57 (mobile): no celular o narrador e as dicas viram um toast
    temporário — só a última fala, some sozinho (JS). Vive no body (fora da
-   `#tela_partida`, que é `display:none` fora da página 2) e fica fixo no topo,
-   abaixo dos botões fixos (☰ / sair), onde antes ficava o painel de dicas.
-   Nunca bloqueia o toque (`pointer-events: none`) e não incomoda o rodapé de
-   ação (dados + Apostar/Desconfiar). */
+   `#tela_partida`, que é `display:none` fora da página 2). Fase 57: durante a
+   partida flutua por cima da mesa, na área vazia logo acima do rodapé de ação
+   ("É a sua vez"/"Aguarde a sua vez") — o bottom exato vem do JS, que mede a
+   altura do `#rodape_acao` a cada exibição. Nunca bloqueia o toque
+   (`pointer-events: none`) e some sozinho após alguns segundos. */
 .toast-mobile {
     display: none;
     justify-content: center;
     align-items: center;
     position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 70;

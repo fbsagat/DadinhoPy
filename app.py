@@ -1029,6 +1029,7 @@ def adicionar_ia(dados, lobby, jogador):
         return
     if ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1)):
         atualizar_lista_usuarios(lobby)
+        _avisar_lobby_lotado(lobby, jogador)
 
 
 @socketio.on('completar_com_ias')
@@ -1040,6 +1041,7 @@ def completar_com_ias(dados, lobby, jogador):
         return
     if ia.completar_bots(lobby, dados.get('nivel', 2)):
         atualizar_lista_usuarios(lobby)
+        _avisar_lobby_lotado(lobby, jogador)
 
 
 @socketio.on('remover_ia')
@@ -1051,6 +1053,19 @@ def remover_ia(dados, lobby, jogador):
         return
     if ia.remover_bots(lobby, dados.get('nivel')) > 0:
         atualizar_lista_usuarios(lobby)
+
+
+def _avisar_lobby_lotado(lobby, jogador):
+    """
+    Avisa o master quando a sala de espera lotou com os bots recém-adicionados
+    (Fase 57): no mobile o cliente usa o `lobby_lotado` para voltar o carrossel
+    do lobby ao card "Jogadores" — só volta quando TODAS as vagas foram
+    preenchidas, não a cada bot adicionado. Só dispara se o limite foi
+    atingido; quem ainda tem vaga não recebe o evento.
+    """
+    limite = int(lobby.config.get('max_jogadores', 6))
+    if len(lobby.jogadores) >= limite:
+        emit('lobby_lotado', {}, to=jogador.client_id, ignore_queue=True)
 
 
 @socketio.on('expulsar_jogador')

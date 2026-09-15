@@ -169,12 +169,17 @@ const PADROES_CLIENTE = {
 //   completo  -> histórico de falas (padrão)
 //   ultima    -> mostra só a última fala
 //   desligado -> painel escondido
+// No mobile "completo" equivale a "ultima" (Fase 56).
 const NARRADOR_MODOS = {
     completo: { icone: '🎙️', titulo: 'js.narrador.modo.completo', classe: 'btn-outline-info' },
     ultima: { icone: '💬', titulo: 'js.narrador.modo.ultima', classe: 'btn-outline-warning' },
     desligado: { icone: '🔕', titulo: 'js.narrador.modo.desligado', classe: 'btn-outline-secondary' },
 };
 const NARRADOR_CICLO = ['completo', 'ultima', 'desligado'];
+// Fase 56: no mobile o narrador vira um toast que mostra só a última fala,
+// então "todas as falas" e "só a última" são a mesma coisa — o botão do menu
+// sandwich oferece apenas "só a última" e "desligado".
+const NARRADOR_CICLO_MOBILE = ['ultima', 'desligado'];
 let narrador_modo = localStorage.getItem('dadinho_narrador');
 if (!NARRADOR_MODOS[narrador_modo]) {
     narrador_modo = PADROES_CLIENTE.narrador;
@@ -186,11 +191,17 @@ function eh_mobile() {
     return window.matchMedia('(max-width: 768px)').matches;
 }
 
+// Fase 56: no mobile o painel é escondido e cada fala vira um toast, logo o
+// modo "completo" se comporta como "ultima" — o modo efetivo normaliza isso.
+function narrador_modo_efetivo() {
+    return eh_mobile() && narrador_modo === 'completo' ? 'ultima' : narrador_modo;
+}
+
 function aplicar_estado_narrador() {
     const botao = document.getElementById('botao_narrador');
     const botao_menu = document.getElementById('menu_narrador');
     const painel = document.getElementById('narrador');
-    const cfg = NARRADOR_MODOS[narrador_modo];
+    const cfg = NARRADOR_MODOS[narrador_modo_efetivo()];
     if (botao) {
         botao.textContent = cfg.icone;
         botao.title = t(cfg.titulo);
@@ -222,8 +233,14 @@ function aplicar_estado_narrador() {
 }
 
 function alternar_narrador() {
-    const pos = NARRADOR_CICLO.indexOf(narrador_modo);
-    narrador_modo = NARRADOR_CICLO[(pos + 1) % NARRADOR_CICLO.length];
+    // Fase 56: no mobile o ciclo pula a opção "todas as falas" (idêntica à
+    // "só a última" no toast) e alterna entre "só a última" e "desligado".
+    const ciclo = eh_mobile() ? NARRADOR_CICLO_MOBILE : NARRADOR_CICLO;
+    let pos = ciclo.indexOf(narrador_modo_efetivo());
+    if (pos === -1) {
+        pos = 0;
+    }
+    narrador_modo = ciclo[(pos + 1) % ciclo.length];
     localStorage.setItem('dadinho_narrador', narrador_modo);
     aplicar_estado_narrador();
 }
@@ -295,10 +312,13 @@ function limpar_narrador() {
     esconder_pensando();
 }
 
-// Fase 35 (mobile): toast temporário acima do painel de jogada (onde aparece
+// Fase 35/57 (mobile): toast temporário acima do painel de jogada (onde aparece
 // "É a sua vez"). Serve de "última fala" para o narrador e de aviso para as
 // dicas; some sozinho após alguns segundos. Fica em fluxo no `#rodape_acao` e
-// nunca bloqueia o toque (`pointer-events: none`).
+// nunca bloqueia o toque (`pointer-events: none`). Fase 57: em vez de fixo no
+// topo da tela, flutua na área vazia logo acima do rodapé de ação (a altura
+// do `#rodape_acao` é medida a cada exibição, pois o rodapé cresce quando é a
+// vez do jogador — badge + dados + Apostar/Desconfiar — e encolhe no aguarde).
 const toast_mobile = document.getElementById('toast_mobile');
 
 function esconder_toast_mobile() {
@@ -309,16 +329,37 @@ function esconder_toast_mobile() {
     toast_mobile.classList.remove('visivel');
 }
 
+// Reposiciona o toast na área vazia logo acima do rodapé de ação. É chamado a
+// cada exibição e sempre que o rodapé muda de tamanho (menu de jogada abre/
+// fecha em `meu_turno`/`espera_turno`, jogador vira espectador, resize).
+function posicionar_toast_mobile() {
+    if (!eh_mobile() || !toast_mobile || !toast_mobile.classList.contains('visivel')) {
+        return;
+    }
+    const rodape = document.getElementById('rodape_acao');
+    if (!rodape || rodape.offsetParent === null) {
+        return;
+    }
+    const topo_rodape = rodape.getBoundingClientRect().top;
+    toast_mobile.style.bottom = Math.max(0, window.innerHeight - topo_rodape + 8) + 'px';
+}
+
 function mostrar_toast_mobile(texto, duracao) {
     if (!eh_mobile() || !toast_mobile) {
         return;
     }
     toast_mobile.textContent = texto;
     toast_mobile.classList.add('visivel');
+    posicionar_toast_mobile();
     clearTimeout(mostrar_toast_mobile._timer);
     mostrar_toast_mobile._timer = setTimeout(function () {
         toast_mobile.classList.remove('visivel');
     }, duracao || 4500);
+}
+
+if (window.addEventListener) {
+    window.addEventListener('resize', posicionar_toast_mobile);
+    window.addEventListener('orientationchange', posicionar_toast_mobile);
 }
 
 socket.on('narracao', function (data) {
@@ -919,6 +960,15 @@ function remover_ias() {
     socket.emit('remover_ia', { chave: chave_secreta });
 }
 
+// Fase 57: quando "Adicionar IA" ou "Completar vagas" LOTAR a sala de espera,
+// o servidor avisa o master (`lobby_lotado`). No mobile o carrossel do lobby
+// volta ao card "Jogadores"; quem ainda não completou todas as vagas não
+// recebe o evento e permanece no painel de IA. No desktop não há carrossel,
+// então a navegação é ignorada.
+socket.on('lobby_lotado', function () {
+    rolar_para_slide(0);
+});
+
 socket.on('jogador_substituido_por_ia', function (data) {
     const painel = document.getElementById('motivo_iniciar');
     if (painel && data && data.nome) {
@@ -1516,6 +1566,9 @@ socket.on('meu_turno', function (data) {
         painel_jogada.style.display = "block"; // Mostra o painel de jogada
         painel_aguarde.style.display = "none"; // Oculta painel aguarde
     }
+    // Fase 57: o menu de jogada cresce o rodapé — o toast (se visível) sobe
+    // para continuar na área vazia, sem cobrir os dados/Apostar/Desconfiar.
+    posicionar_toast_mobile();
 
     if (turno_num > 0) {
         const botao = document.getElementById('desconfiar');
@@ -1548,6 +1601,9 @@ socket.on('espera_turno', function (data) {
     limpar_selecao_dado();
     painel_jogada.style.display = "none"; // Oculta o painel de jogada
     painel_aguarde.style.display = "block"; // Mostra painel aguarde
+    // Fase 57: sem o menu de jogada o rodapé encolhe — o toast desce para
+    // ficar onde antes ficava o rodapé alto.
+    posicionar_toast_mobile();
 })
 
 // Função que atualiza cada rodada, executa a cada inicio de rodada
@@ -1843,6 +1899,7 @@ socket.on('espectador', function (data) {
     bot_confe_fim.style.display = 'none';
     painel_aguarde.style.display = 'none';
     painel_jogada.style.display = 'none';
+    posicionar_toast_mobile();
 
 })
 
