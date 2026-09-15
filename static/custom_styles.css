@@ -168,6 +168,10 @@ canvas {
        canvas fica sobre o conteúdo estático, mas transparente e com
        `pointer-events: none` — não bloqueia cliques; os painéis (z-index 55+)
        seguem na frente. */
+    /* Fase 57: ocioso fica display:none — sem camada de composição fullscreen
+       empilhada no mobile. O JS (`garantir_loop_animacao`) o traz de volta
+       quando há festa e o esconde quando o loop para. */
+    display: none;
     z-index: 0;
     pointer-events: none;
 }
@@ -206,6 +210,17 @@ canvas {
     }
 }
 
+/* Fase 57: preferência por movimento reduzido (acessibilidade + aparelhos
+   fracos) — título aparece sem reveal/glow. O reveal termina em opacity 1, por
+   isso o estado final é garantido via !important. */
+@media (prefers-reduced-motion: reduce) {
+    #h1_vencedor {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+    }
+}
+
 /* Fase 4 + Fase 11: ajustes de exibição em telas pequenas (mobile/tablet).
    Os estilos inline de dimensões (JS/HTML) são sobrescritos via !important. */
 @media (max-width: 768px) {
@@ -221,6 +236,10 @@ canvas {
 
     #h1_vencedor {
         font-size: 2rem !important;
+        /* Fase 57: sem o glow infinito no mobile — animar text-shadow
+           re-rasteriza o texto a cada frame e disputa GPU com o canvas da
+           comemoração. */
+        animation: reveal 2s ease-out forwards;
     }
 
     #quantidade,

@@ -3676,9 +3676,10 @@ const eh_celular = window.matchMedia('(max-width: 768px)').matches;
 function ajustar_canvas() {
     largura_canvas = window.innerWidth;
     altura_canvas = window.innerHeight;
-    // No celular o canvas fica em 1x (fogos/confetes não precisam de nitidez);
-    // no desktop mantém até 2x.
-    const escala = eh_celular ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    // Fase 57: sub-amostragem 0.75x no celular — fogos/confetes não precisam de
+    // nitidez e o fill do canvas cai ~44% (o clearRect/viewport é o custo fixo
+    // de cada frame). No desktop mantém até 2x.
+    const escala = eh_celular ? 0.75 : Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.floor(largura_canvas * escala);
     canvas.height = Math.floor(altura_canvas * escala);
     canvas.style.width = largura_canvas + 'px';
@@ -3845,6 +3846,9 @@ function drawParticles() {
 }
 
 let _loop_animacao_ativo = false;
+// Fase 57: intervalo mínimo entre desenhos — 30fps no celular, 60 no desktop.
+const INTV_FRAME = eh_celular ? 33.33 : 16.67;
+let _ultimo_frame_ts = 0;
 
 // P1: liga o loop de animação sob demanda. Antes, `animate()` rodava para
 // sempre e `drawParticles` fazia `clearRect` do viewport inteiro a cada frame
@@ -3852,19 +3856,35 @@ let _loop_animacao_ativo = false;
 function garantir_loop_animacao() {
     if (!_loop_animacao_ativo) {
         _loop_animacao_ativo = true;
+        // Fase 57: traz o canvas de volta (ocioso fica display:none no CSS).
+        canvas.style.display = 'block';
         requestAnimationFrame(animate);
     }
 }
 
-function animate() {
-    if (celebrando || particles.length > 0 || confetes.length > 0) {
-        updateParticles();
-        drawParticles();
+function animate(agora) {
+    const ativo = celebrando || particles.length > 0 || confetes.length > 0;
+    if (ativo) {
+        // Fase 57: trava a 30fps no celular — o rAF pode pedir 60+, e cada
+        // frame paga física + fill do canvas. Só desenha quando passa INTV_FRAME;
+        // frames pulados não rodam update/draw.
+        if (!_ultimo_frame_ts) {
+            _ultimo_frame_ts = agora;
+        }
+        const atraso = agora - _ultimo_frame_ts;
+        if (atraso >= INTV_FRAME) {
+            _ultimo_frame_ts = agora - (atraso % INTV_FRAME); // sem deriva acumulada
+            updateParticles();
+            drawParticles();
+        }
         requestAnimationFrame(animate);
     } else {
         // Sem festa: para o loop (a próxima celebração o religa).
         _loop_animacao_ativo = false;
+        _ultimo_frame_ts = 0;
         ctx.clearRect(0, 0, largura_canvas, altura_canvas);
+        // Fase 57: esconde o canvas ocioso (remove a camada de composição).
+        canvas.style.display = 'none';
     }
 }
 
