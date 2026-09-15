@@ -1,4 +1,5 @@
 """Modelo do Lobby (Fase 45, M4)."""
+import hmac
 from datetime import datetime
 from flask_socketio import emit
 
@@ -807,13 +808,13 @@ class Lobby:
         identidade em um refresh/reconexão sem depender do sid antigo).
         :param chave_secreta: A chave do jogador (vinda de sessionStorage).
         """
-        if not chave_secreta:
+        if not chave_secreta or not isinstance(chave_secreta, str):
             return None
         for jogador in self.jogadores:
-            if jogador.chave_secreta == chave_secreta:
+            if jogador.chave_secreta and hmac.compare_digest(jogador.chave_secreta, chave_secreta):
                 return jogador
         for espectador in self.espectadores:
-            if espectador.chave_secreta == chave_secreta:
+            if espectador.chave_secreta and hmac.compare_digest(espectador.chave_secreta, chave_secreta):
                 return espectador
         return None
 

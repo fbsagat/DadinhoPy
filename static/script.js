@@ -1,3 +1,11 @@
+// Fase 53: namespacing — o arquivo inteiro roda dentro de um IIFE para não
+// vazar dezenas de globals (`indiceAtual`, `chave_secreta`, `sala_atual`, ...)
+// que poluem `window` e podem colidir com bibliotecas de terceiros. Estado,
+// socket e handlers ficam fechados no escopo do IIFE; só as ações do
+// `data-acao` (que a delegação de cliques resolve por nome) são expostas em
+// `window.Dadinho` (ver fim do arquivo). Sem `"use strict"`: o arquivo é
+// clássico (sloppy) e o strict poderia quebrar comportamento existente.
+(function () {
 let indiceAtual = 0;
 let chave_secreta = '';
 let nome_jogador = '';
@@ -55,11 +63,26 @@ socket.connect();
 const INTERVALO_HEARTBEAT_ESPERA = 20000;
 const INTERVALO_HEARTBEAT_PARTIDA = 60000;
 
+// Fase 53: timer único guardado — o `agendar_heartbeat` recursivo antigo podia
+// (a) morrer em silêncio se o callback lançasse erro antes de re-agendar (o
+// `socket.emit` ou um acesso a estado com exceção) e (b) duplicar timers se a
+// função fosse chamada duas vezes (spam de heartbeat no servidor). Agora há no
+// máximo UM `setTimeout` pendente (`_timer_heartbeat`), o callback está em
+// `try/catch` (o erro nunca derruba a batida seguinte) e o re-agendamento é
+// garantido mesmo com exceção.
+let _timer_heartbeat = null;
+
 function agendar_heartbeat() {
+    if (_timer_heartbeat !== null) return;
     const intervalo = indiceAtual === 0 ? INTERVALO_HEARTBEAT_ESPERA : INTERVALO_HEARTBEAT_PARTIDA;
-    setTimeout(function () {
-        if (socket.connected && chave_secreta) {
-            socket.emit('heartbeat', { chave: chave_secreta, pagina: indiceAtual, vez: vez_atual_nome });
+    _timer_heartbeat = setTimeout(function () {
+        _timer_heartbeat = null;
+        try {
+            if (socket.connected && chave_secreta) {
+                socket.emit('heartbeat', { chave: chave_secreta, pagina: indiceAtual, vez: vez_atual_nome });
+            }
+        } catch (erro) {
+            console.error('Erro ao bater o heartbeat', erro);
         }
         agendar_heartbeat();
     }, intervalo);
@@ -77,13 +100,24 @@ const _onevent_original = socket.onevent.bind(socket);
 const fila_eventos = [];
 let processando_eventos = false;
 
+// Fase 53: a fila preserva a ordem e insere as pausas de "pensamento" dos bots.
+// Se o servidor manda muitos eventos rápidos (ex.: 4 bots jogando em sequência),
+// as pausas acumulam e a UI fica com "lag" crescente. Aqui o ATRASO é limitado:
+// quando já há `MAX_ATRASO_FILA` ms de pausa pendente na fila, os próximos
+// eventos entram com atraso 0 (processa na hora) — a ORDEM é preservada e
+// nenhum evento é descartado, só as pausas extras são puladas.
+const MAX_ATRASO_FILA = 4000;
+let atraso_pendente_total = 0;
+
 function _processar_fila_eventos() {
     if (fila_eventos.length === 0) {
         processando_eventos = false;
+        atraso_pendente_total = 0;
         esconder_pensando();
         return;
     }
     const item = fila_eventos.shift();
+    atraso_pendente_total = Math.max(0, atraso_pendente_total - item.atraso);
     if (item.ia_nome) {
         mostrar_pensando(item.ia_nome, item.atraso);
     }
@@ -104,6 +138,11 @@ socket.onevent = function (packet) {
     let atraso = 0;
     if (payload && typeof payload === 'object' && Number.isFinite(Number(payload.atraso))) {
         atraso = Math.max(0, Math.floor(Number(payload.atraso)));
+    }
+    if (atraso_pendente_total >= MAX_ATRASO_FILA) {
+        atraso = 0;
+    } else {
+        atraso_pendente_total += atraso;
     }
     const ia_nome = (nome === 'narracao' && payload && payload.is_ia) ? (payload.jogador || 'Bot') : null;
     fila_eventos.push({ packet: packet, atraso: atraso, ia_nome: ia_nome });
@@ -3981,7 +4020,8 @@ socket.on('auditoria_partida', function (data) {
 
 // Fase 44 (S5): delegação de cliques — o HTML usa `data-acao` em vez de
 // `onclick` inline (que o CSP estrito sem 'unsafe-inline' bloquearia). As ações
-// são `function` globais (hoisted); `fechar_alerta` lê o `data-resultado`.
+// são expostas em `window.Dadinho` (Fase 53); `fechar_alerta` lê o
+// `data-resultado`.
 document.addEventListener('click', function (evento) {
     if (!evento.target || typeof evento.target.closest !== 'function') return;
     const alvo = evento.target.closest('[data-acao]');
@@ -3991,10 +4031,23 @@ document.addEventListener('click', function (evento) {
         fechar_alerta(alvo.dataset.resultado === 'true');
         return;
     }
-    const funcao = window[acao];
+    const funcao = window.Dadinho[acao];
     if (typeof funcao === 'function') funcao();
 });
 
 // Fase 33 (M2): na primeira carga o lobby já pode estar visível — constrói os
 // dots/setas do carrossel (no desktop são `display:none`, então é no-op).
 atualizar_carrossel();
+
+// Fase 53: expõe as ações do `data-acao` sob um único global (nada mais vaza do
+// IIFE). Se adicionar um novo `data-acao` em `jogo.html`, exportar a função
+// aqui também — senão o clique não faz nada.
+window.Dadinho = {
+    sair_da_sala, criar_sala, abrir_busca, copiar_link_sala,
+    enviar_apelido, alternar_pronto, iniciar_partida,
+    adicionar_ia, completar_com_ias, remover_ias,
+    buscar_partidas, fechar_busca,
+    conferencia_final, vencedor_final,
+    fechar_tutorial, fechar_alerta, fechar_dica,
+};
+})();

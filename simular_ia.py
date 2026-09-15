@@ -14,6 +14,7 @@ import argparse
 import funcoes_gerais
 import ia
 import modelos
+import store
 from modelos import Jogador, Lobby
 
 
@@ -49,6 +50,12 @@ def montar_partida(niveis, dados_qtd, com_coringa):
 
 def jogar(niveis, dados_qtd, com_coringa, rodadas_max=400):
     """Roda uma partida inteira e devolve o nível do vencedor (ou None)."""
+    # Fase 52: o simulador cria um Lobby NOVO por partida com o mesmo sala_id
+    # 'sim' — o rastreador de revisão (CAS) da instância precisaria continuar a
+    # numeração entre partidas, mas o blob não persiste aqui (cada `montar_partida`
+    # recomeça do 1). `remover_sala` zera o rastreador para a revisão recomeçar,
+    # como aconteceria numa sala real criada do zero.
+    store.remover_sala('sim')
     lobby = montar_partida(niveis, dados_qtd, com_coringa)
     for _ in range(rodadas_max):
         ia.processar(lobby)

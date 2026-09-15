@@ -249,6 +249,7 @@ def main():
     # import modulo_store, ...` captura o valor na hora do import).
     _preparar_integracao()
     from tests.test_integracao import verificar_integracao
+    from tests.test_cross_instance import rodar as verificar_cross_instance
     inicio = time.time()
     verificar_py_compile()
     verificar_node()
@@ -256,6 +257,7 @@ def main():
     verificar_store_producao()
     verificar_roundtrip()
     verificar_integracao()
+    verificar_cross_instance()
     print()
     if _falhas:
         print(f"FALHAS ({len(_falhas)}): " + ", ".join(_falhas))

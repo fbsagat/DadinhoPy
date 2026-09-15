@@ -398,6 +398,11 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                         return func(*args, **kwargs)
             except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError,
                     store.TravaIndisponivel,
+                    # Fase 52: save de um lobby stale (possível lost-update) —
+                    # aborta a operação em vez de sobrescrever (corrupção
+                    # silenciosa). `invalidar_cache_sala` abaixo garante que a
+                    # próxima leitura recarregue fresco do store.
+                    store.ConflitoDeEstado,
                     # Fase B: falhas de rede/IO do store distribuído (Upstash) também
                     # abortam silenciosamente — sem elas, um blip de rede estoura o
                     # handler, loga traceback e perde o estado do read-modify-write.
@@ -708,11 +713,12 @@ def handle_connect():
                 # o connect destrava o fluxo.
                 if ia.processar(lobby):
                     salvar_sala(lobby)
-        except (store.TravaIndisponivel, store.RedisError):
-            # Lock distribuído ocupado/indisponível, ou falha do Redis local da
-            # VPS (Fase 46): aborta o connect. O cliente reconecta com backoff e
-            # o heartbeat re-sincroniza da mesma forma que hoje em dia com um
-            # blip de rede.
+        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.RedisError,
+                OSError, http.client.HTTPException):
+            # Lock distribuído ocupado/indisponível, save stale (Fase 52), ou
+            # falha do Redis local da VPS (Fase 46): aborta o connect. O cliente
+            # reconecta com backoff e o heartbeat re-sincroniza da mesma forma
+            # que hoje em dia com um blip de rede.
             return
 
 
@@ -854,11 +860,12 @@ def handle_disconnect():
                 else:
                     remover_sala(lobby.sala_id)
                     sala_esvaziou = True
-        except (store.TravaIndisponivel, store.RedisError):
-            # Lock distribuído indisponível, ou falha do Redis local da VPS
-            # (Fase 46): aborta silenciosamente — o ID do jogador continua
-            # indexado (TTL limpa) e a limpeza segue na próxima batida ou no GC,
-            # mesmo comportamento de hoje com blip de rede.
+        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.RedisError,
+                OSError, http.client.HTTPException):
+            # Lock distribuído indisponível, save stale (Fase 52), ou falha do
+            # Redis local da VPS (Fase 46): aborta silenciosamente — o ID do
+            # jogador continua indexado (TTL limpa) e a limpeza segue na próxima
+            # batida ou no GC, mesmo comportamento de hoje com blip de rede.
             return
     # Depois de soltar o lock (evita corrida com um connect novo da mesma sala).
     if sala_esvaziou:
@@ -999,10 +1006,14 @@ def revelar_seed(dados, lobby, jogador):
 
 
 @socketio.on('solicitar_auditoria')
-@evento_mutavel
+@evento_leitura
 @autenticar()
 def solicitar_auditoria(dados, lobby, jogador):
-    """Reenvia o payload de auditoria da partida atual (ex.: reconexão na tela 4)."""
+    """
+    Reenvia o payload de auditoria da partida atual (ex.: reconexão na tela 4).
+    Fase 52: somente-leitura — não adquire o lock distribuído (evento_leitura),
+    só o cooldown, como `listar_partidas`/`criar_sala`.
+    """
     partida = jogador.partida_atual
     if partida is None or not partida.seed_info:
         return
@@ -1101,7 +1112,7 @@ def sair_da_sala(dados, lobby, jogador):
     if jogador in lobby.espectadores:
         lobby.espectadores.remove(jogador)
     elif jogador.partida_atual is None or jogador not in jogador.partida_atual.jogadores:
-        if jogador.chave_secreta != dados.get('chave', ''):
+        if not hmac.compare_digest(jogador.chave_secreta, str(dados.get('chave', '') or '')):
             return
         _remover_jogador_da_sala(lobby, jogador)
         # Fase 30: saída explícita não é "vaga perdida por inatividade" (como na
@@ -1125,7 +1136,7 @@ def listar_partidas(dados):
     Retorna a listagem de partidas públicas (com filtros) para a tela de busca.
     Responde apenas ao cliente que pediu (to=client_id).
     """
-    dados = dados or {}
+    dados = dados if isinstance(dados, dict) else {}
     client_id = request.sid
     filtros = dados.get('filtros', {})
     sala_atual = dados.get('sala_atual')

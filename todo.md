@@ -711,83 +711,72 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 
 ## Índice das fases propostas
 
-- **Fase 50** — Segurança: Timing Attacks e Validação de Payloads. Prioridade crítica, esforço baixo.
-- **Fase 51** — Performance: Cache de Leitura no Store e Tratamento de Erros. Prioridade alta, esforço médio.
-- **Fase 52** — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização. Prioridade alta, esforço médio.
-- **Fase 53** — Frontend: Namespacing e Robustez do Heartbeat. Prioridade média, esforço alto.
-- **Fase 54** — Testes: Integração Cross-Instance. Prioridade baixa, esforço médio.
+- **Fase 50** — Segurança: Timing Attacks e Validação de Payloads. Prioridade crítica, esforço baixo. ✅ concluída
+- **Fase 51** — Performance: Cache de Leitura no Store e Tratamento de Erros. Prioridade alta, esforço médio. ✅ concluída
+- **Fase 52** — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização. Prioridade alta, esforço médio. ✅ concluída
+- **Fase 53** — Frontend: Namespacing e Robustez do Heartbeat. Prioridade média, esforço alto. ✅ concluída
+- **Fase 54** — Testes: Integração Cross-Instance. Prioridade baixa, esforço médio. ✅ concluída
 
 ---
 
-## Fase 50 — Segurança: Timing Attacks e Validação de Payloads
+## Fase 50 — Segurança: Timing Attacks e Validação de Payloads ✅ concluída
 
 Objetivo: Eliminar vulnerabilidades de comparação de strings e garantir que payloads malformados nunca causem exceções não tratadas (crash do worker serverless).
 
-- [ ] **Auditoria de Comparações (`app.py` e handlers)** — Substituir TODAS as comparações de `chave_secreta` ou `chave` que usam `==` ou `!=` por `hmac.compare_digest()`. A análise inicial encontrou múltiplos pontos onde `==` é usado (ex: validação de `retomar_identidade`, `desistir`, `expulsar`), o que expõe o servidor a *timing attacks*.
-- [ ] **Validação Defensiva de Payloads** — Garantir que *todos* os handlers do Socket.IO (`@socketio.on`) usem o padrão de "aborto silencioso" no início da função:
-```python
-  if not isinstance(data, dict) or 'chave' not in data:
-      return
-  chave = data.get('chave')
-  if not isinstance(chave, str):
-      return
-```
-  Isso previne `KeyError` ou `TypeError` quando clientes maliciosos enviam arrays, strings ou null no lugar do objeto esperado.
-- [ ] **Sanitização de Inputs de Texto** — Validar e limitar o tamanho de inputs de texto (apelidos, mensagens de chat) antes de salvá-los no estado do `Lobby` para evitar *memory exhaustion* ou inchaço do JSON no Redis.
+- [x] **Auditoria de Comparações (`app.py` e handlers)** — Toda comparação de `chave_secreta`/`chave` agora usa `hmac.compare_digest()`. `autenticar` (`app.py:463`) já comparava constant-time (Fase 36 S1); faltavam dois pontos com `==`/`!=`: `sair_da_sala` (`app.py:1104`) — recusa sair do lobby com chave errada via `not hmac.compare_digest(...)` — e `Lobby.buscar_jogador_pela_chave` (`modelos/lobby.py:813/816`) — retomada de identidade agora varre com `compare_digest` (guard `isinstance(str)` + skip de chave vazia, comportamento idêntico).
+- [x] **Validação Defensiva de Payloads** — Todos os handlers de Socket.IO abortam silenciosamente com payload não-dict. O padrão `dados = dados if isinstance(dados, dict) else {}` já está centralizado no decorator `autenticar` (coerce para `{}`) e nos handlers sem chave (`retomar_identidade`, `heartbeat`); único vão fechado: `listar_partidas` usava `dados = dados or {}` (string/array truthy vazava `.get` → AttributeError) — trocado pelo mesmo guard.
+- [x] **Sanitização de Inputs de Texto** — Já coberta (auditado, sem mudança): apelidos passam por `validar_input` (regex + `1..12` chars, `app.py:880-881`/`funcoes_gerais.py:494`) e o nome da sala é truncado em 30 chars (`definir_config`, `modelos/lobby.py:414`) — nada de texto entra cru no `Lobby`.
 
-Verificação: `python verificar.py` deve passar; teste manual enviando payloads inválidos (ex: `socket.emit('apostar', "string_em_vez_de_dict")`) não deve gerar traceback no console do servidor.
+Verificação: `python verificar.py` 100% verde (inclui `S1`/`V3` e a integração de `sair_da_sala` com chave errada — Fase 30; comportamento idêntico, só o mecanismo de comparação muda). Teste manual: `socket.emit('apelido', "string_em_vez_de_dict")`/`listar_partidas` com payload inválido não gera traceback no console do servidor.
 
 ---
 
-## Fase 51 — Performance: Cache de Leitura no Store e Tratamento de Erros
+## Fase 51 — Performance: Cache de Leitura no Store e Tratamento de Erros ✅ concluída
 
 Objetivo: Reduzir a latência das chamadas síncronas à API REST do Upstash, que é o maior gargalo no ambiente serverless da Vercel.
 
-- [ ] **Cache de Leitura de Curta Duração (`store.py`)** — Implementar um cache em memória (por instância/processo) para `carregar_sala(sala_id)` com TTL de 2 a 5 segundos.
-  - O estado da sala é lido múltiplas vezes em sequência (ex: `heartbeat`, `ia.processar`, `enviar_snapshot`). Ler do cache local em vez de fazer uma nova requisição HTTP para o Upstash reduz a latência de ~150ms para ~0ms.
-  - O cache deve ser invalidado imediatamente após qualquer chamada a `salvar_sala(sala_id)` na mesma instância.
-- [ ] **Tratamento de Erros de Rede (`store.py`)** — Garantir que falhas de conexão com o Upstash (`http.client.HTTPException`, `TimeoutError`, `OSError`) sejam capturadas e convertidas em `None` ou exceções específicas da aplicação, em vez de estourar o worker da Vercel e causar timeout de 10s/60s no cliente.
-- [ ] **Otimização do Pool HTTP** — Verificar se o `http.client.HTTPConnection` pool (Fase 41) está realmente reutilizando conexões TCP (Keep-Alive) corretamente entre requests da mesma instância. Se não estiver, a latência do TLS handshake é paga a cada chamada.
+- [x] **Cache de Leitura de Curta Duração (`store.py`)** — **já existia** (Fase C, `carregar_sala_leve` + `_cache_salas`): o heartbeat lê do cache tolerante a defasagem (TTL 25s), atualizado a cada `salvar_sala` e descartado em `remover_sala`/aborto — é exatamente o caminho de re-leituras em sequência que o item aponta. **Não** estendeu-se o cache ao `carregar_sala` geral (TTL 0): handlers que mutam leem SEMPRE frescos do store (comentário em `store.py` já registra a decisão) — uma defasagem de 2-5s numa leitura de handler reverteria escrita de outra instância mesmo sob o lock distribuído (regressão de consistência; o aborto CAS é a Fase 52). Hardening novo: **teto do cache** (`CACHE_SALA_MAX` 4096, evicção da entrada mais antiga) para o processo persistente da VPS não acumular salas distintas por dias.
+- [x] **Tratamento de Erros de Rede (`store.py`)** — novo `_ERROS_DE_REDE` (`OSError`, `http.client.HTTPException`, `RedisError`, `TimeoutError`) + `_leitura_segura(funcao, fallback)`: **leituras** do store que falham (Upstash fora/REST, Redis TCP da VPS) devolvem `None`/`[]` com `log.warning` em vez de estourar o worker. Aplicado aos helpers públicos `carregar_sala`, `carregar_resumo`, `listar_resumos`, `listar_lobbys`, `sala_do_sid` e ao miss de `carregar_sala_leve` — a rota do OG (`_og_sala`) não 500 mais num blip, e handlers abortam no guard `lobby is None`. **Escritas continuam levantando** (a política de aborto silencioso de `evento_mutavel` segue valendo). `app.py`: `handle_connect`/`handle_disconnect` passaram a capturar também `OSError`/`http.client.HTTPException` (blip de rede no INCR/gravação do connect/disconnect abortava só `RedisError`/`TravaIndisponivel` antes).
+- [x] **Otimização do Pool HTTP** — **já implementada e testada** (Fase 41 C8/C9): `_PoolHTTPS` com keep-alive (uma conexão por thread por vez, `_enviar` com 1 retry rápido). O teste `upstash-transporte` (servidor HTTP fake local) comprova a reutilização da MESMA conexão entre chamadas e o retry de 5xx.
 
-Verificação: Adicionar logs de tempo de execução em `carregar_sala` e `salvar_sala`. Em uma partida com 4 bots, o número de chamadas HTTP para o Upstash deve cair drasticamente (de ~50 para <10 por rodada).
+Verificação: `python verificar.py` 100% verde — novo teste `leitura-segura-rede` (Fase 51): com `ArmazenamentoUpstash` apontando para porta morta, `carregar_sala`/`carregar_resumo`/`sala_do_sid` devolvem `None` e `listar_resumos`/`listar_lobbys` devolvem `[]` (sem exceção). Regressão zero nas Fases 6/7/15-30/40-46. Em produção: medir latência média por jogada antes/depois; o número de GETs por rodada já é o mesmo (o cache de leitura do heartbeat já evitava os GETs repetidos).
 
 ---
 
-## Fase 52 — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização
+## Fase 52 — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização ✅ concluída
 
 Objetivo: Garantir que o ambiente serverless (múltiplas instâncias processando eventos simultaneamente) não corrompa o estado do jogo.
 
-- [ ] **Abortar em Caso de Lost-Update (`store.py` / `salvar_sala`)** — Atualmente, o `revisao` (CAS) detecta se o estado foi modificado por outra instância entre a leitura e a escrita. Mas o que acontece quando detecta? Se o código apenas loga e sobrescreve, ocorre corrupção silenciosa. O `salvar_sala` deve levantar uma exceção (ex: `ConflitoDeEstado`) ou retornar `False` para que o handler do Socket.IO aborte a operação e notifique o cliente (ex: emitindo `erro_concorrencia`), forçando o cliente a recarregar o snapshot.
-- [ ] **Limpeza de Histórico (Poda)** — Garantir que a poda do histórico de partidas e rodadas (`proxima_partida_num`, migrações) esteja funcionando corretamente. Se o JSON do `Lobby` crescer além de 500KB, a serialização/desserialização no Upstash ficará lenta e pode estourar limites de payload. Adicionar um teste que rode 100 rodadas e verifique o tamanho do JSON resultante.
-- [ ] **Locks Distribuídos (`trancar_sala_distribuida`)** — Auditar se todos os handlers que *mutam* o estado (`iniciar_partida`, `apostar`, `desconfiar`) estão realmente usando o lock distribuído. Handlers que apenas leem (como `heartbeat` ou `solicitar_snapshot`) NÃO devem adquirir o lock, pois isso cria gargalos desnecessários.
+- [x] **Abortar em Caso de Lost-Update (`store.py` / `salvar_sala`)** — o detector de revisão (Fase 40) passou de ALERTA para ABORTO: `store.salvar_sala` agora levanta `ConflitoDeEstado` quando um lobby stale chega para persistir (revisão menor que a última salva na instância), em vez de logar e sobrescrever (corrupção silenciosa). `evento_mutavel` (que já invalida o cache no aborto) e `handle_connect`/`handle_disconnect` capturam `ConflitoDeEstado` e abortam silenciosamente. O rastreador é por instância (como documentado na Fase 40) — a defesa cross-instance continua sendo o lock distribuído; este aborto fecha a janela intra-instância que o lock teria deixado passar. Notificação `erro_concorrencia` ao cliente **não** foi adicionada (decisão registrada): a condição é inalcançável com os locks em ordem (todos os mutadores usam o lock — ver item 3), o heartbeat já re-sincroniza o cliente após um aborto e um evento de frontend novo seria código morto só verificável manualmente em navegador.
+- [x] **Limpeza de Histórico (Poda)** — `resetar_para_lobby` já poda `lobby.partidas` para a última (teste `poda-partidas` existente). Novo teste `json-tamanho-100-rodadas`: roda 100 rodadas REAIS (`construir_rodada`, com turnos típicos) e verifica que o blob serializado do Lobby fica bem abaixo de 500KB e que o round-trip preserva o histórico.
+- [x] **Locks Distribuídos (auditoria)** — auditado: todos os handlers que MUTAM passam por `evento_mutavel` (lock local + `trancar_sala_distribuida`) ou adquirem explicitamente (connect/disconnect). `heartbeat` MUTA (`marcar_visto`, `ia.processar`, `salvar_resumo`) — mantém o lock corretamente. Único ajuste: `solicitar_auditoria` era somente-leitura com `evento_mutavel` (adquiria o lock à toa) — virou `evento_leitura` (só cooldown, como `listar_partidas`/`criar_sala`).
 
-Verificação: Simular dois clientes enviando o evento `apostar` exatamente ao mesmo tempo (usando threads ou asyncio no teste). O servidor deve processar um e rejeitar o outro com erro de concorrência, sem corromper a ordem dos turnos.
+Verificação: `python verificar.py` 100% verde — teste `revisao-cas` atualizado (save stale agora levanta `ConflitoDeEstado`, não sobrescreve, revisão não é bumpada) e `json-tamanho-100-rodadas` novo. `python simular_ia.py --partidas 20 --dados 3` hierarquia 4>3>2>1 preservada (o simulador recria o Lobby `'sim'` por partida no mesmo processo — `store.remover_sala('sim')` zera o rastreador de revisão entre partidas, como numa sala real criada do zero).
 
 ---
 
-## Fase 53 — Frontend: Namespacing e Robustez do Heartbeat
+## Fase 53 — Frontend: Namespacing e Robustez do Heartbeat ✅ concluída
 
 Objetivo: Tornar o `static/script.js` (3994 linhas) mais manutenível e corrigir bugs sutis de estado e conectividade.
 
-- [ ] **Namespacing (IIFEs)** — O arquivo atual polui o escopo global com dezenas de variáveis (`indiceAtual`, `chave_secreta`, `sala_atual`, `sou_master`, `contexto_min_aposta`, `eh_espectador`, `vez_atual_nome`, etc.). Envolver o código em IIFEs (Immediately Invoked Function Expressions) ou criar um objeto global `window.Dadinho` para agrupar o estado e as funções. Isso previne colisões com bibliotecas de terceiros e facilita a depuração.
-- [ ] **Correção do Heartbeat Recursivo** — A função `agendar_heartbeat()` usa `setTimeout` recursivo. Se houver um erro no callback ou se a função for chamada acidentalmente duas vezes, múltiplos heartbeats serão disparados em paralelo, causando spam no servidor.
-  - Solução: Usar `setInterval` com um ID de timer guardado, ou garantir que apenas um timeout esteja pendente por vez. Adicionar `try/catch` dentro do callback para evitar que o heartbeat morra silenciosamente se `socket.emit` falhar.
-- [ ] **Fila de Eventos (`_processar_fila_eventos`)** — A fila serial do cliente (Fase 46) é boa para atrasos de bots, mas se o servidor enviar muitos eventos rápidos (ex: 4 bots jogando em sequência), a fila pode crescer e causar "lag" acumulado na UI. Adicionar um limite máximo de eventos na fila ou um timeout para "pular" animações atrasadas se a fila estiver muito grande.
+- [x] **Namespacing (IIFE)** — `script.js` inteiro roda dentro de um IIFE (`(function () { ... })()`): as dezenas de globals (`indiceAtual`, `chave_secreta`, `sala_atual`, `sou_master`, `contexto_min_aposta`, `eh_espectador`, `vez_atual_nome`, ...) deixaram de vazar para `window`. O `data-acao` depende de funções globais por nome (a delegação usava `window[acao]`), então as 17 ações existentes são expostas num único global `window.Dadinho` e a delegação passou a resolver `window.Dadinho[acao]` — `fechar_alerta` mantém o caso especial com `data-resultado`. Sem `"use strict"` (arquivo clássico/sloppy; strict poderia quebrar comportamento). Decisão de manutenção registrada no código: novo `data-acao` em `jogo.html` exige exportar a função no `window.Dadinho` do fim do arquivo. Verificado que nenhuma referência externa aos globals existia (HTML sem `onclick`/`onload` inline, i18n.js autocontido, nenhum script inline chamando funções do jogo).
+- [x] **Correção do Heartbeat Recursivo** — `agendar_heartbeat()` ganhou um timer único guardado (`_timer_heartbeat`): chamadas duplicadas não criam timers paralelos (spam), o callback está em `try/catch` (uma exceção no `socket.emit`/acesso a estado não mata a batida nem impede o re-agendamento) e o re-agendamento é garantido no `finally` do fluxo (a variável é zerada antes de emitir, então o loop continua sempre com um único timer pendente).
+- [x] **Fila de Eventos** — a fila serial agora limita o ATRASO acumulado (`MAX_ATRASO_FILA` 4000ms): quando já há 4s de pausa pendente (ex.: 4 bots jogando em sequência), os próximos eventos entram com atraso 0 — a ORDEM é preservada e **nenhum evento é descartado**; só as pausas de "pensamento" extras são puladas, evitando o lag acumulado na UI. O contador é debitado a cada evento processado.
 
-Verificação: Abrir o jogo em 5 abas diferentes. Inspecionar o `window` no console do navegador e verificar que não há vazamento de variáveis globais. Deixar o jogo aberto por 1 hora e verificar se o heartbeat continua batendo consistentemente (sem multiplicar).
+Verificação: `node --check static/script.js` e `static/i18n.js` OK + `python verificar.py` 100% verde (cobertura i18n intocada — nenhuma chave trocada). Teste manual em navegador (único meio de verificação do frontend): 5 abas, `window` no console deve ter só `Dadinho` (e `io`/`t`/... externos), clicar nas ações do `data-acao` (menu, config, IA, alertas, tutorial, dicas) e jogar partida completa; deixar 1h aberto e confirmar heartbeat batendo sem multiplicar (uma batida por intervalo por aba, visível no painel do servidor/Upstash).
 
 ---
 
-## Fase 54 — Testes: Integração Cross-Instance
+## Fase 54 — Testes: Integração Cross-Instance ✅ concluída
 
 Objetivo: Validar que a arquitetura serverless (Vercel + Upstash + Redis) funciona corretamente sob condições reais de concorrência.
 
-- [ ] **Simulador de Múltiplas Instâncias** — Criar um script de teste (ex: `tests/test_cross_instance.py`) que instancie dois "clientes" Socket.IO diferentes (simulando duas instâncias da Vercel) conectados à mesma sala.
-- [ ] **Cenários de Teste** — O script deve executar cenários críticos:
-  1. Dois jogadores tentando `ficar_pronto` simultaneamente.
-  2. Dois jogadores tentando `apostar` no mesmo turno.
-  3. Um jogador desconectando e reconectando enquanto a IA está jogando.
-  4. O heartbeat batendo enquanto a sala está sendo modificada.
-- [ ] **Validação de Estado Final** — Após cada cenário, o teste deve carregar o estado do `Lobby` diretamente do store (Redis) e verificar se a integridade dos dados foi mantida (ex: número de turnos, dados dos jogadores, pontuação).
+- [x] **Simulador de Múltiplas Instâncias** — novo `tests/test_cross_instance.py` (standalone `python tests/test_cross_instance.py` e rodado no fim do `verificar.py`). Duas "instâncias" são simuladas por threads disputando a MESMA sala contra um store compartilhado: `store.armazenamento` é trocado por um `ArmazenamentoUpstash` cujos `_comando`/`_pedido`/`_pipeline` apontam para um `_FakeRedis` em memória (sufixo completo: get/set/del/incr/scan/sadd/smembers/srem/mget + pipeline + **SET NX/EX e DELEX IFEQ do lock distribuído**, com URL-decode das chaves). Assim o lock distribuído fica ATIVO (não é no-op como no modo memória), cada handler deserializa um Lobby NOVO do blob (como entre instâncias reais) e o aborto CAS da Fase 52 vigora. O lock de processo também serializa (teste mais estrito, nunca menos).
+- [x] **Cenários de Teste** — os 4 cenários do plano, com o final validado lendo o Lobby direto do store compartilhado:
+  1. Dois jogadores `ficar_pronto` simultâneos (barreira de threads) → AMBOS aplicados, revisão avançou.
+  2. Dois jogadores `apostar` no mesmo turno (o da vez aposta válido; o outro aposta inválido em paralelo) → exatamente **1 turno** criado, do jogador da vez, ninguém perde dado.
+  3. Desconexão de um humano no meio da partida com IA jogando → fica na graça, o jogo segue, reconexão por chave (`retomar_identidade`) limpa a graça e restaura a identidade no meio da partida.
+  4. Heartbeat batendo enquanto a sala é modificada (apelidos em paralelo) → estado final consistente (apelido aplicado, jogadores intactos).
+- [x] **Validação de Estado Final** — cada cenário carrega `store.carregar_sala` do fake (fonte da verdade) e verifica integridade: jogadores, prontidão, turnos, `dados_qtd`, janela de graça, revisão monotônica.
 
-Verificação: `python tests/test_cross_instance.py` deve passar sem erros de concorrência ou timeouts.
+Verificação: `python tests/test_cross_instance.py` passa sem erros de concorrência/timeouts (o fake local é determinístico); `python verificar.py` 100% verde incluindo os 4 novos `[OK]` cross-instance. O que não é coberto (registrado): a fila de mensagens (`DADINHO_MESSAGE_QUEUE`) entre duas instâncias REAIS continua validada em produção com 2 navegadores, conforme `docs/plano-cross-instance.md` — o lock distribuído e o re-sync do heartbeat são exatamente o que este teste cobre localmente.

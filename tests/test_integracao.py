@@ -1022,6 +1022,54 @@ def teste_poda_partidas():
     _ok("poda de partidas antigas")
 
 
+def teste_json_tamanho_bounded():
+    """
+    Fase 52: a poda do histórico (`resetar_para_lobby` mantém só a última
+    partida) + o tamanho por rodada mantêm o JSON persistido longe do limite de
+    payload da Upstash. Roda 100 rodadas REAIS (motor `construir_rodada`, com
+    turnos típicos) e verifica que o blob fica bem abaixo de 500KB e que o
+    round-trip de serialização segue válido com o histórico acumulado.
+    """
+    import json as _json
+    import modelos
+    emit_salvo = _salvar_emit()
+    _silenciar_emit()
+    try:
+        lobby = modelos.Lobby(sala_id="tamanho", lobby_numero=1)
+        for cid, nome in (("a", "A"), ("b", "B")):
+            jogador = modelos.Jogador(client_id=cid)
+            jogador.username = nome
+            lobby.adicionar_jogador(jogador)
+        lobby.jogadores[0].master = True
+        partida = lobby.construir_partida(dados_qtd=3)
+        partida.construir_rodada()  # rodada 1
+        perdedor, vencedor = partida.jogadores
+        for _ in range(99):
+            ultima = partida.rodadas[-1]
+            ultima.perdedor = perdedor
+            ultima.vencedor = vencedor
+            perdedor.dados_qtd = 3  # recompõe o dado perdido: nunca elimina
+            partida.construir_rodada()
+        assert len(partida.rodadas) == 100, "deve acumular 100 rodadas"
+        # Turnos típicos (poucos por rodada, como numa partida real) para o blob
+        # refletir tamanho de jogo, não só a rolagem.
+        for rodada in partida.rodadas:
+            for i, jogador in enumerate(partida.jogadores):
+                rodada.turnos.append(modelos.Turno(
+                    da_rodada=rodada, dado=(i % 6) + 1, jogador=jogador,
+                    dado_qtd=2, turno_numero=i + 1))
+        blob = lobby.para_dict()
+        tamanho = len(_json.dumps(blob, ensure_ascii=False).encode("utf-8"))
+        assert tamanho < 500_000, \
+            f"JSON do Lobby com 100 rodadas deve ficar < 500KB (tinha {tamanho} bytes)"
+        copia = modelos.Lobby.de_dict(blob)
+        assert len(copia.partidas[0].rodadas) == 100, \
+            "round-trip deve preservar o histórico acumulado"
+    finally:
+        _restaurar_emit(emit_salvo)
+    _ok("JSON do Lobby limitado com 100 rodadas (Fase 52)")
+
+
 def teste_commit_reveal():
     import seed
 
@@ -1296,10 +1344,11 @@ def teste_trava_distribuida():
 
 def teste_revisao_cas():
     """
-    Fase 40 (C6): detector CAS de lost-update como ALERTA (não substitui o lock
-    distribuído). `store.salvar_sala` incrementa `Lobby.revisao` a cada gravação
-    e loga um aviso quando um lobby STALE (revisão menor que a última salva na
-    instância) é persistido — visibilidade para calibrar o `TRAVA_TTL`. A
+    Fase 40 (C6) + Fase 52: o detector CAS de lost-update é um ABORTO — não
+    apenas um alerta. `store.salvar_sala` incrementa `Lobby.revisao` a cada
+    gravação e, se um lobby STALE (revisão menor que a última salva na
+    instância) chegar para persistir, levanta `ConflitoDeEstado` em vez de
+    sobrescrever o estado (a Fase 40 logava e corrompia em silêncio). A
     revisão sobrevive ao round-trip e `remover_sala` zera o rastreador.
     """
     import logging
@@ -1330,15 +1379,21 @@ def teste_revisao_cas():
     captura = _Captura()
     logger_store = logging.getLogger('store')
     logger_store.addHandler(captura)
+    abortou = False
     try:
         # Save de um lobby stale (revisão regredida = carregado antes do último
-        # save) dispara o alerta de lost-update.
+        # save) ABORTA com ConflitoDeEstado em vez de sobrescrever.
         lobby.revisao = 1
-        modulo_store.salvar_sala(lobby)
+        try:
+            modulo_store.salvar_sala(lobby)
+        except modulo_store.ConflitoDeEstado:
+            abortou = True
     finally:
         logger_store.removeHandler(captura)
-    assert any("Fase 40 (CAS)" in m for m in captura.registros), \
-        "save stale deve logar alerta de lost-update"
+    assert abortou, "save stale deve abortar com ConflitoDeEstado"
+    assert any("Fase 52 (CAS)" in m for m in captura.registros), \
+        "save stale deve logar o alerta de lost-update"
+    assert lobby.revisao == 1, "estado stale não deve ser sobrescrito nem a revisão bumpada"
 
     # remover_sala limpa o rastreador: recriação recomeça do 1.
     modulo_store.remover_sala(SALA)
@@ -1346,7 +1401,7 @@ def teste_revisao_cas():
     modulo_store.salvar_sala(lobby2)
     assert lobby2.revisao == 2, "após remoção a revisão recomeça"
     _limpar()
-    _ok("detector CAS (revisão + alerta de lost-update)")
+    _ok("detector CAS aborta save stale (Fase 52)")
 
 
 def teste_upstash_transporte():
@@ -1421,6 +1476,31 @@ def teste_upstash_transporte():
         thread.join(timeout=5)
         servidor.server_close()
     _ok("transporte Upstash (keep-alive + retry)")
+
+
+def teste_leitura_segura_falha_de_rede():
+    """
+    Fase 51: leitura do store com o servidor distribuído fora do ar não estoura
+    o worker — os helpers de leitura devolvem None/[] (aborto silencioso) em vez
+    de propagar OSError/http.client.HTTPException para a rota do OG ou handlers.
+    """
+    original = modulo_store.armazenamento
+    import logging as _logging
+    logger = _logging.getLogger("store")
+    nivel_original = logger.level
+    logger.setLevel(_logging.CRITICAL)
+    try:
+        modulo_store.armazenamento = modulo_store.ArmazenamentoUpstash(
+            "http://127.0.0.1:1", "tok")
+        assert modulo_store.carregar_sala("x") is None
+        assert modulo_store.carregar_resumo("x") is None
+        assert modulo_store.sala_do_sid("x") is None
+        assert modulo_store.listar_resumos() == []
+        assert modulo_store.listar_lobbys() == []
+    finally:
+        modulo_store.armazenamento = original
+        logger.setLevel(nivel_original)
+    _ok("leitura segura devolve None/[] em falha de rede (Fase 51)")
 
 
 def teste_index_og_dinamico():
@@ -2686,10 +2766,12 @@ def verificar_integracao():
         ("B6-resumo", teste_resumo_malformado_nao_quebra_busca),
         ("B8-cooldown", teste_cooldown_expurga_antigos),
         ("poda-partidas", teste_poda_partidas),
+        ("json-tamanho-100-rodadas", teste_json_tamanho_bounded),
         ("upstash-indice", teste_upstash_indice_resumos),
         ("trava-distribuida", teste_trava_distribuida),
         ("revisao-cas", teste_revisao_cas),
         ("upstash-transporte", teste_upstash_transporte),
+        ("leitura-segura-rede", teste_leitura_segura_falha_de_rede),
         ("og-dinamico", teste_index_og_dinamico),
         ("resumo-dedup", teste_resumo_dedup),
         ("H1-blob-corrompido", teste_h1_blob_corrompido),

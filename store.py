@@ -55,6 +55,23 @@ except ImportError:  # pragma: no cover — redis é dep pinada em requirements.
 _log = logging.getLogger(__name__)
 
 
+# Fase 51: falhas de rede do store distribuído (Upstash REST ou Redis TCP da
+# VPS) que as leituras NÃO devem deixar estourar o worker — um blip de rede
+# num GET não pode virar 500 (ex.: rota do OG) nem traceback num handler.
+# `evento_mutavel` já aborta silenciosamente nas ESCRITAS; aqui as leituras
+# são convertidas em None/[] (política de aborto silencioso da Fase B).
+_ERROS_DE_REDE = (OSError, http.client.HTTPException, RedisError, TimeoutError)
+
+
+def _leitura_segura(funcao, fallback):
+    """Executa uma leitura do store; falha de rede vira `fallback` com log."""
+    try:
+        return funcao()
+    except _ERROS_DE_REDE as erro:
+        _log.warning("Fase 51: leitura do store falhou (aborto silencioso): %r", erro)
+        return fallback
+
+
 _travas_salas = {}
 _travas_guard = threading.Lock()
 
@@ -146,6 +163,14 @@ class TravaIndisponivel(Exception):
     """Lock distribuído não adquirido (contenda ou falha de rede) — aborto silencioso."""
 
 
+class ConflitoDeEstado(Exception):
+    """
+    Save de um lobby STALE (revisão menor que a última salva na instância) —
+    possível lost-update. O handler deve abortar a operação (Fase 52); o estado
+    NÃO é sobrescrito (era corrupção silenciosa na Fase 40, que só logava).
+    """
+
+
 @contextlib.contextmanager
 def trancar_sala_distribuida(sala_id):
     """
@@ -200,9 +225,21 @@ def _chave_trava(sala_id):
 # ---------------------------------------------------------------------------
 CACHE_SALA_TTL_RESYNC = 25.0
 CACHE_SALA_TTL_PADRAO = 0.0  # 0 = cache desligado (leitura sempre fresca)
+# Fase 51: teto de entradas do cache por processo — num deploy VPS (gunicorn
+# persistente, Fase 46) o processo vive dias e salas distintas se acumulariam;
+# acima do teto, evicta a entrada mais antiga (defasagem de 1 entrada é
+# irrelevante para o re-sync — a próxima batida recarrega do store).
+CACHE_SALA_MAX = 4096
 
 _cache_salas = {}
 _cache_salas_guard = threading.Lock()
+
+
+def _armazenar_cache_sala(sala_id, lobby):
+    with _cache_salas_guard:
+        if len(_cache_salas) >= CACHE_SALA_MAX:
+            _cache_salas.pop(min(_cache_salas, key=lambda s: _cache_salas[s][1]), None)
+        _cache_salas[sala_id] = (lobby, time.monotonic())
 
 
 def invalidar_cache_sala(sala_id):
@@ -222,10 +259,9 @@ def carregar_sala_leve(sala_id):
         entrada = _cache_salas.get(sala_id)
         if entrada is not None and (time.monotonic() - entrada[1]) < CACHE_SALA_TTL_RESYNC:
             return entrada[0], True
-    lobby = armazenamento.carregar_sala(sala_id)
+    lobby = _leitura_segura(lambda: armazenamento.carregar_sala(sala_id), None)
     if lobby is not None:
-        with _cache_salas_guard:
-            _cache_salas[sala_id] = (lobby, time.monotonic())
+        _armazenar_cache_sala(sala_id, lobby)
     return lobby, False
 
 
@@ -801,7 +837,7 @@ armazenamento = _selecionar_armazenamento()
 
 
 def carregar_sala(sala_id):
-    return armazenamento.carregar_sala(sala_id)
+    return _leitura_segura(lambda: armazenamento.carregar_sala(sala_id), None)
 
 
 # Detector CAS de lost-update (Fase 40, alerta — NÃO substitui o lock
@@ -816,20 +852,22 @@ _revisoes_guard = threading.Lock()
 
 
 def salvar_sala(lobby):
-    if lobby is not None:
-        with _revisoes_guard:
-            anterior = _revisoes_salvas.get(lobby.sala_id, 0)
-            if anterior and lobby.revisao < anterior:
-                _log.warning(
-                    "Fase 40 (CAS): sala %s salva com revisão %s (última salva: %s) "
-                    "— possível lost-update (lock distribuído deveria ter evitado)",
-                    lobby.sala_id, lobby.revisao, anterior)
-            lobby.revisao = max(lobby.revisao, anterior) + 1
-            _revisoes_salvas[lobby.sala_id] = lobby.revisao
-        armazenamento.salvar_sala(lobby)
-        # Mantém o cache de re-sync do heartbeat com o objeto recém-persistido.
-        with _cache_salas_guard:
-            _cache_salas[lobby.sala_id] = (lobby, time.monotonic())
+    if lobby is None:
+        return
+    with _revisoes_guard:
+        anterior = _revisoes_salvas.get(lobby.sala_id, 0)
+        if anterior and lobby.revisao < anterior:
+            _log.warning(
+                "Fase 52 (CAS): sala %s salva com revisão %s (última salva: %s) "
+                "— possível lost-update; save ABORTADO (lock distribuído deveria "
+                "ter evitado)",
+                lobby.sala_id, lobby.revisao, anterior)
+            raise ConflitoDeEstado(lobby.sala_id)
+        lobby.revisao = max(lobby.revisao, anterior) + 1
+        _revisoes_salvas[lobby.sala_id] = lobby.revisao
+    armazenamento.salvar_sala(lobby)
+    # Mantém o cache de re-sync do heartbeat com o objeto recém-persistido.
+    _armazenar_cache_sala(lobby.sala_id, lobby)
 
 
 def remover_sala(sala_id):
@@ -841,7 +879,7 @@ def remover_sala(sala_id):
 
 
 def listar_lobbys():
-    return armazenamento.listar_lobbys()
+    return _leitura_segura(armazenamento.listar_lobbys, [])
 
 
 def proximo_numero():
@@ -875,11 +913,11 @@ def remover_resumo(sala_id):
 
 
 def listar_resumos():
-    return armazenamento.listar_resumos()
+    return _leitura_segura(armazenamento.listar_resumos, [])
 
 
 def carregar_resumo(sala_id):
-    return armazenamento.carregar_resumo(sala_id)
+    return _leitura_segura(lambda: armazenamento.carregar_resumo(sala_id), None)
 
 
 def registrar_sid(client_id, sala_id):
@@ -887,7 +925,7 @@ def registrar_sid(client_id, sala_id):
 
 
 def sala_do_sid(client_id):
-    return armazenamento.sala_do_sid(client_id)
+    return _leitura_segura(lambda: armazenamento.sala_do_sid(client_id), None)
 
 
 def desregistrar_sid(client_id):
