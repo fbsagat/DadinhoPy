@@ -1459,7 +1459,16 @@ h5,
     #painel_jogada .row.row-cols-3 {
         flex-wrap: nowrap;
         overflow-x: auto;
+        overflow-y: hidden;
         --bs-gutter-x: 0.25rem;
+        /* A escala do dado selecionado estoura a coluna (16.66%) e acionaria a
+           scrollbar nativa cinza no mobile — mantém o scroll por toque sem
+           mostrar a barra (mesmo padrão do .lobby-linha). */
+        scrollbar-width: none;
+    }
+
+    #painel_jogada .row-cols-3::-webkit-scrollbar {
+        display: none;
     }
 
     #painel_jogada .row-cols-3 > .col {
@@ -1470,6 +1479,14 @@ h5,
     #painel_jogada .image-button img {
         width: 42px !important;
         height: 42px !important;
+    }
+
+    /* Fase ajuste: no mobile o scale(1.3) da face selecionada transborda a
+       coluna (e o dado 6 vira o trilho rolável). Aqui a específica #painel_jogada
+       vence o bloco base (linha ~59-99) e reduz o destaque no toque. */
+    #painel_jogada .image-button.selected img,
+    #painel_jogada .image-button.selected img:hover {
+        transform: scale(1.15);
     }
 
     /* Stepper + Apostar/Desconfiar em fileira (~48px). */
@@ -1484,8 +1501,18 @@ h5,
     #apostar {
         width: 92px !important;
         height: 48px;
-        font-size: 0.95rem;
         margin: 0 2px !important;
+    }
+
+    /* O `input { font-size: 16px !important }` acima (anti-zoom iOS) derrotava
+       o 0.95rem destes botões; com o texto em 16px mais o padding do `.btn`
+       (12px laterais) o "Desconfiar" estourava os 92px e a última letra era
+       cortada. Aqui o ID com !important vence o anti-zoom só nos botões e o
+       padding vai a zero (o `#quantidade` mantém o 16px + paddings próprios). */
+    #desconfiar,
+    #apostar {
+        font-size: 0.95rem !important;
+        padding: 0 !important;
     }
 
     #quantidade {
