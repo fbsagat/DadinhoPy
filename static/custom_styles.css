@@ -873,7 +873,11 @@ h5,
    `auto-fit` era usado — na última linha os cards esticavam a largura toda. */
 @media (min-width: 992px) {
     #cards {
-        display: grid;
+        /* `!important` vence o `display: flex !important` do `.d-flex` do
+           Bootstrap (o `#cards` usa a classe no HTML) — sem isto o desktop
+           continuava em flex e o `width: auto !important` das colunas deixava
+           um nome longo alargar o card além dos vizinhos. */
+        display: grid !important;
         grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
         gap: 0.6rem;
         justify-content: center;

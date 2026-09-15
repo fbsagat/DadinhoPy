@@ -1984,6 +1984,9 @@ socket.on("update_username", function (data) {
 
 socket.on("jogar_dados_resultado", function (data) {
     parar_timer_jogada(); // Fase 21: já rolou (manual ou automático), zera o contador.
+    // A rolagem já foi feita (manual, `autojogar` ou reenvio idempotente):
+    // trava o botão "Jogar dados" desta rodada para o jogador não clicar de novo.
+    desativar_botao_dados();
     // Fase 55: reenvio idempotente do servidor (segundo clique perdido, rede)
     // não reinicia a animação desta rodada — só o primeiro recebimento anima.
     if (rolagem_animada) {
@@ -3439,8 +3442,19 @@ function jogar_dados() {
         return;
     }
     rolagem_pedida = true;
+    desativar_botao_dados();
     socket.emit('jogar_dados', { chave: chave_secreta });
     garantir_contexto_audio();
+}
+
+// Desativa o botão "Jogar dados" após a jogada da rodada. O botão é
+// recriado (habilitado) pelo `construtor_dados` a cada rodada, então não
+// precisa de rearmar aqui — só impedir cliques extras durante a rolagem.
+function desativar_botao_dados() {
+    const botao = document.getElementById('dadobotao');
+    if (botao) {
+        botao.disabled = true;
+    }
 }
 
 // Fase 22: marca visualmente que o jogador já clicou no "Ok" (as fichas de
