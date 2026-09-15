@@ -700,3 +700,94 @@ com `verificar.py` como rede de segurança a cada passo.
 Verificação: cada split é um commit isolado e reversível; `python verificar.py` 100% verde após cada
 um (imports/paths atualizados); `node --check` no bundle final gerado, se M6 for adotado; teste
 manual em 2 abas ao final de cada sub-etapa.
+
+---
+
+## Fases 50–54 — Bugs, Segurança e Arquitetura
+
+Continuação do `todo.md` do projeto. Fases focadas em corrigir vulnerabilidades de segurança, melhorar a performance no ambiente serverless (Vercel/Upstash), garantir consistência de estado (CAS) e refatorar o monólito do frontend.
+
+Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
+
+## Índice das fases propostas
+
+- **Fase 50** — Segurança: Timing Attacks e Validação de Payloads. Prioridade crítica, esforço baixo.
+- **Fase 51** — Performance: Cache de Leitura no Store e Tratamento de Erros. Prioridade alta, esforço médio.
+- **Fase 52** — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização. Prioridade alta, esforço médio.
+- **Fase 53** — Frontend: Namespacing e Robustez do Heartbeat. Prioridade média, esforço alto.
+- **Fase 54** — Testes: Integração Cross-Instance. Prioridade baixa, esforço médio.
+
+---
+
+## Fase 50 — Segurança: Timing Attacks e Validação de Payloads
+
+Objetivo: Eliminar vulnerabilidades de comparação de strings e garantir que payloads malformados nunca causem exceções não tratadas (crash do worker serverless).
+
+- [ ] **Auditoria de Comparações (`app.py` e handlers)** — Substituir TODAS as comparações de `chave_secreta` ou `chave` que usam `==` ou `!=` por `hmac.compare_digest()`. A análise inicial encontrou múltiplos pontos onde `==` é usado (ex: validação de `retomar_identidade`, `desistir`, `expulsar`), o que expõe o servidor a *timing attacks*.
+- [ ] **Validação Defensiva de Payloads** — Garantir que *todos* os handlers do Socket.IO (`@socketio.on`) usem o padrão de "aborto silencioso" no início da função:
+```python
+  if not isinstance(data, dict) or 'chave' not in data:
+      return
+  chave = data.get('chave')
+  if not isinstance(chave, str):
+      return
+```
+  Isso previne `KeyError` ou `TypeError` quando clientes maliciosos enviam arrays, strings ou null no lugar do objeto esperado.
+- [ ] **Sanitização de Inputs de Texto** — Validar e limitar o tamanho de inputs de texto (apelidos, mensagens de chat) antes de salvá-los no estado do `Lobby` para evitar *memory exhaustion* ou inchaço do JSON no Redis.
+
+Verificação: `python verificar.py` deve passar; teste manual enviando payloads inválidos (ex: `socket.emit('apostar', "string_em_vez_de_dict")`) não deve gerar traceback no console do servidor.
+
+---
+
+## Fase 51 — Performance: Cache de Leitura no Store e Tratamento de Erros
+
+Objetivo: Reduzir a latência das chamadas síncronas à API REST do Upstash, que é o maior gargalo no ambiente serverless da Vercel.
+
+- [ ] **Cache de Leitura de Curta Duração (`store.py`)** — Implementar um cache em memória (por instância/processo) para `carregar_sala(sala_id)` com TTL de 2 a 5 segundos.
+  - O estado da sala é lido múltiplas vezes em sequência (ex: `heartbeat`, `ia.processar`, `enviar_snapshot`). Ler do cache local em vez de fazer uma nova requisição HTTP para o Upstash reduz a latência de ~150ms para ~0ms.
+  - O cache deve ser invalidado imediatamente após qualquer chamada a `salvar_sala(sala_id)` na mesma instância.
+- [ ] **Tratamento de Erros de Rede (`store.py`)** — Garantir que falhas de conexão com o Upstash (`http.client.HTTPException`, `TimeoutError`, `OSError`) sejam capturadas e convertidas em `None` ou exceções específicas da aplicação, em vez de estourar o worker da Vercel e causar timeout de 10s/60s no cliente.
+- [ ] **Otimização do Pool HTTP** — Verificar se o `http.client.HTTPConnection` pool (Fase 41) está realmente reutilizando conexões TCP (Keep-Alive) corretamente entre requests da mesma instância. Se não estiver, a latência do TLS handshake é paga a cada chamada.
+
+Verificação: Adicionar logs de tempo de execução em `carregar_sala` e `salvar_sala`. Em uma partida com 4 bots, o número de chamadas HTTP para o Upstash deve cair drasticamente (de ~50 para <10 por rodada).
+
+---
+
+## Fase 52 — Concorrência: Tratamento de Lost-Updates (CAS) e Serialização
+
+Objetivo: Garantir que o ambiente serverless (múltiplas instâncias processando eventos simultaneamente) não corrompa o estado do jogo.
+
+- [ ] **Abortar em Caso de Lost-Update (`store.py` / `salvar_sala`)** — Atualmente, o `revisao` (CAS) detecta se o estado foi modificado por outra instância entre a leitura e a escrita. Mas o que acontece quando detecta? Se o código apenas loga e sobrescreve, ocorre corrupção silenciosa. O `salvar_sala` deve levantar uma exceção (ex: `ConflitoDeEstado`) ou retornar `False` para que o handler do Socket.IO aborte a operação e notifique o cliente (ex: emitindo `erro_concorrencia`), forçando o cliente a recarregar o snapshot.
+- [ ] **Limpeza de Histórico (Poda)** — Garantir que a poda do histórico de partidas e rodadas (`proxima_partida_num`, migrações) esteja funcionando corretamente. Se o JSON do `Lobby` crescer além de 500KB, a serialização/desserialização no Upstash ficará lenta e pode estourar limites de payload. Adicionar um teste que rode 100 rodadas e verifique o tamanho do JSON resultante.
+- [ ] **Locks Distribuídos (`trancar_sala_distribuida`)** — Auditar se todos os handlers que *mutam* o estado (`iniciar_partida`, `apostar`, `desconfiar`) estão realmente usando o lock distribuído. Handlers que apenas leem (como `heartbeat` ou `solicitar_snapshot`) NÃO devem adquirir o lock, pois isso cria gargalos desnecessários.
+
+Verificação: Simular dois clientes enviando o evento `apostar` exatamente ao mesmo tempo (usando threads ou asyncio no teste). O servidor deve processar um e rejeitar o outro com erro de concorrência, sem corromper a ordem dos turnos.
+
+---
+
+## Fase 53 — Frontend: Namespacing e Robustez do Heartbeat
+
+Objetivo: Tornar o `static/script.js` (3994 linhas) mais manutenível e corrigir bugs sutis de estado e conectividade.
+
+- [ ] **Namespacing (IIFEs)** — O arquivo atual polui o escopo global com dezenas de variáveis (`indiceAtual`, `chave_secreta`, `sala_atual`, `sou_master`, `contexto_min_aposta`, `eh_espectador`, `vez_atual_nome`, etc.). Envolver o código em IIFEs (Immediately Invoked Function Expressions) ou criar um objeto global `window.Dadinho` para agrupar o estado e as funções. Isso previne colisões com bibliotecas de terceiros e facilita a depuração.
+- [ ] **Correção do Heartbeat Recursivo** — A função `agendar_heartbeat()` usa `setTimeout` recursivo. Se houver um erro no callback ou se a função for chamada acidentalmente duas vezes, múltiplos heartbeats serão disparados em paralelo, causando spam no servidor.
+  - Solução: Usar `setInterval` com um ID de timer guardado, ou garantir que apenas um timeout esteja pendente por vez. Adicionar `try/catch` dentro do callback para evitar que o heartbeat morra silenciosamente se `socket.emit` falhar.
+- [ ] **Fila de Eventos (`_processar_fila_eventos`)** — A fila serial do cliente (Fase 46) é boa para atrasos de bots, mas se o servidor enviar muitos eventos rápidos (ex: 4 bots jogando em sequência), a fila pode crescer e causar "lag" acumulado na UI. Adicionar um limite máximo de eventos na fila ou um timeout para "pular" animações atrasadas se a fila estiver muito grande.
+
+Verificação: Abrir o jogo em 5 abas diferentes. Inspecionar o `window` no console do navegador e verificar que não há vazamento de variáveis globais. Deixar o jogo aberto por 1 hora e verificar se o heartbeat continua batendo consistentemente (sem multiplicar).
+
+---
+
+## Fase 54 — Testes: Integração Cross-Instance
+
+Objetivo: Validar que a arquitetura serverless (Vercel + Upstash + Redis) funciona corretamente sob condições reais de concorrência.
+
+- [ ] **Simulador de Múltiplas Instâncias** — Criar um script de teste (ex: `tests/test_cross_instance.py`) que instancie dois "clientes" Socket.IO diferentes (simulando duas instâncias da Vercel) conectados à mesma sala.
+- [ ] **Cenários de Teste** — O script deve executar cenários críticos:
+  1. Dois jogadores tentando `ficar_pronto` simultaneamente.
+  2. Dois jogadores tentando `apostar` no mesmo turno.
+  3. Um jogador desconectando e reconectando enquanto a IA está jogando.
+  4. O heartbeat batendo enquanto a sala está sendo modificada.
+- [ ] **Validação de Estado Final** — Após cada cenário, o teste deve carregar o estado do `Lobby` diretamente do store (Redis) e verificar se a integridade dos dados foi mantida (ex: número de turnos, dados dos jogadores, pontuação).
+
+Verificação: `python tests/test_cross_instance.py` deve passar sem erros de concorrência ou timeouts.

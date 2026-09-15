@@ -1,15 +1,24 @@
 """
 Jogadores controlados por IA (Fase 11).
 
-Duas responsabilidades:
+Três responsabilidades:
 - Motor de decisão puro (probabilidade binomial + perfis por nível), sem I/O;
+- Leitura de oponentes (Fase 36): memória, só dentro da partida atual, de como
+  cada adversário jogou nas rodadas já fechadas;
 - Orquestrador `processar(lobby)`, que roda dentro do request que mudou o estado
   e faz as IAs agirem em sequência (rolagem, apostas, desconfiança, conferência
   e vitória). Nada de threads/timers: serverless-safe.
 
 Regra de ouro: a IA só enxerga os PRÓPRIOS dados e a informação pública da
-rodada (turnos, quantidade de dados restantes). É proibido ler
-`rodada.todos_os_dados`, que contém os dados de todos.
+RODADA ATUAL (turnos, quantidade de dados restantes). É proibido ler
+`rodada.todos_os_dados`/`rodada.dados_por_jogador` da rodada em andamento
+(`partida.rodadas[-1]`), que contêm os dados reais de todos antes da hora.
+
+Isso NÃO se estende às rodadas já fechadas (`partida.rodadas[:-1]`): o
+resultado delas (quem blefou, quem desconfiou certo) já foi mostrado a todo
+mundo na tela de conferência, então é informação tão pública quanto a memória
+de um humano prestando atenção na mesa. É exatamente isso que a seção
+"Leitura de oponentes" usa — nunca a rodada corrente.
 """
 
 import math
@@ -32,6 +41,16 @@ NOMES_NIVEIS = {
 # quando o jogo acaba. O teto antigo (50) era baixo demais e estacionava jogos
 # longos quando o último humano já tinha sido eliminado.
 LIMITE_ACOES_PROCESSAR = 10000
+
+# Leitura de oponentes (Fase 36): nº mínimo de observações desta partida antes
+# de a IA "confiar" numa leitura sobre um adversário específico — com menos
+# que isso, um humano também não teria formado opinião, então o ajuste fica
+# neutro. PESO_* limita o quanto essa leitura pode mexer na conta pura (nunca
+# substitui a matemática, só a inclina — mantém o range de personalidade).
+AMOSTRA_MINIMA_LEITURA = 3
+PESO_LEITURA_MESTRE = 0.35
+PESO_LEITURA_PERITO = 0.18
+AJUSTE_PISO_MAXIMO = 0.15
 
 # Apelidos dos bots: sorteados a cada criação, misturando designações
 # robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
@@ -159,16 +178,6 @@ def contar_suporte(dados, face, coringa):
     return total
 
 
-def _aposta_garantida(suporte, ultimo):
-    """
-    Anti-burrice óbvia: True quando os dados do PRÓPRIO jogador já garantem a
-    última aposta (suporte >= quantidade apostada). Como os dados dos outros só
-    podem somar, a contagem real na mesa é >= suporte — desconfiar nesse cenário
-    é perda certa, nunca blefe defensivo. A decisão vira aposta obrigatória.
-    """
-    return ultimo is not None and suporte >= ultimo.dado_qtd
-
-
 def probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa):
     """
     P(total de dados que apoiam `face` >= `quantidade`), tratando os dados
@@ -185,6 +194,81 @@ def probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa):
     for k in range(precisam, desconhecidos + 1):
         prob += math.comb(desconhecidos, k) * (p ** k) * ((1.0 - p) ** (desconhecidos - k))
     return prob
+
+
+# ---------------------------------------------------------------------------
+# Leitura de oponentes (memória dentro da partida — Fase 36)
+# ---------------------------------------------------------------------------
+#
+# Só entra aqui o desfecho de rodadas JÁ FECHADAS (`partida.rodadas[:-1]`): a
+# última da lista é sempre a rodada em andamento e nunca é tocada por estas
+# funções. Nada de estado novo pra persistir — é só reler o histórico que a
+# própria Partida já guarda.
+
+def _desfecho(rodada):
+    """
+    De uma rodada encerrada: quem fez a aposta que foi desconfiada, quem
+    desconfiou dela, e se a aposta era verdadeira. Mesma informação exata que
+    a tela de conferência já mostrou a todos os jogadores daquela rodada.
+    None se a rodada (por algum estado defensivo) não chegou a fechar
+    direito — não deveria acontecer para uma rodada que já ficou pra trás.
+    """
+    if not rodada.turnos or rodada.vencedor is None or rodada.perdedor is None:
+        return None
+    apostador = rodada.turnos[-1].do_jogador
+    verdadeira = rodada.vencedor is apostador
+    desafiante = rodada.perdedor if verdadeira else rodada.vencedor
+    return {'apostador': apostador, 'desafiante': desafiante, 'verdadeira': verdadeira}
+
+
+def perfil_oponente(partida, alvo):
+    """
+    Reconstrói, só a partir das rodadas já fechadas desta partida, como
+    `alvo` jogou até agora: quantas vezes a aposta final dele era blefe, e
+    quantas vezes ele acertou ao desconfiar. Recalculado a cada chamada (o
+    histórico é curto — dezenas de rodadas no máximo) em vez de guardado à
+    parte, então não há estado novo para migrar/serializar.
+    """
+    perfil = {'apostas_finais': 0, 'blefes': 0, 'desafios': 0, 'desafios_certos': 0}
+    for rodada_passada in partida.rodadas[:-1]:
+        desfecho = _desfecho(rodada_passada)
+        if desfecho is None:
+            continue
+        if desfecho['apostador'] is alvo:
+            perfil['apostas_finais'] += 1
+            if not desfecho['verdadeira']:
+                perfil['blefes'] += 1
+        if desfecho['desafiante'] is alvo:
+            perfil['desafios'] += 1
+            if not desfecho['verdadeira']:
+                perfil['desafios_certos'] += 1
+    return perfil
+
+
+def _taxa_confiavel(sucessos, total, minimo=AMOSTRA_MINIMA_LEITURA):
+    """
+    Converte uma contagem em taxa (0.0-1.0), ou None sem observações
+    suficientes. Como um humano prestando atenção na mesa, a IA só forma
+    opinião sobre alguém depois de vê-lo jogar algumas vezes — com pouca
+    informação, o ajuste correspondente fica neutro (não mexe em nada).
+    """
+    if total < minimo:
+        return None
+    return sucessos / total
+
+
+def leitura_blefe(partida, alvo):
+    """Com que frequência a aposta final de `alvo` era blefe nesta partida
+    (None sem histórico suficiente)."""
+    perfil = perfil_oponente(partida, alvo)
+    return _taxa_confiavel(perfil['blefes'], perfil['apostas_finais'])
+
+
+def leitura_desafio(partida, alvo):
+    """Com que frequência `alvo` acerta quando desconfia nesta partida
+    (None sem histórico suficiente)."""
+    perfil = perfil_oponente(partida, alvo)
+    return _taxa_confiavel(perfil['desafios_certos'], perfil['desafios'])
 
 
 def gerar_apostas_validas(rodada):
@@ -206,7 +290,10 @@ def decidir(jogador, rodada, nivel):
     - {'acao': 'apostar', 'dado': face, 'quantidade': qtd}
     - {'acao': 'desconfiar'}
 
-    Níveis: 1 = aleatório; 2 = heurístico; 3 = probabilístico; 4 = estratégico.
+    Níveis: 1 = aleatório (com intuição — não chuta jogada implausível);
+    2 = heurístico; 3 = probabilístico (+ leitura leve do adversário);
+    4 = estratégico (probabilístico + leitura do adversário mais confiante,
+    inclusive de quem vai responder à própria aposta).
     Cada bot carrega uma personalidade (ia_risco/ia_agressividade, 0-1) que
     desloca desconfiança, altura das apostas e impulsividade — e um pouco de
     ruído mantém o mesmo bot imprevisível lance a lance.
@@ -221,20 +308,6 @@ def decidir(jogador, rodada, nivel):
     risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
     agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
     ultimo = rodada.turnos[-1] if rodada.turnos else None
-    coringa = rodada.com_coringa
-    meus = list(jogador.dados)
-
-    # Anti-burrice óbvia: vale para qualquer nível e roda antes de qualquer traço
-    # de personalidade. Se os próprios dados do bot já garantem a última aposta,
-    # desconfiar nunca é uma opção — segue direto para uma aposta legal (jamais
-    # deixa o impulso aleatório ou o ruído virar desconfiança).
-    suporte_ultimo = contar_suporte(meus, ultimo.dado_face, coringa) if ultimo is not None else 0
-    if _aposta_garantida(suporte_ultimo, ultimo):
-        aposta = _escolher_aposta(rodada, jogador, nivel)
-        if aposta is None:
-            return _sem_aposta(ultimo)
-        face, quantidade = aposta
-        return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
     # Nível 1: sem raciocínio — aposta aleatória e desconfia por acaso.
     if nivel == 1:
@@ -249,15 +322,23 @@ def decidir(jogador, rodada, nivel):
         if agressividade > 0.7 and ultimo is not None and secrets.randbelow(100) < 30:
             face, quantidade = _aposta_mais_alta(apostas)
         else:
-            face, quantidade = secrets.choice(apostas)
+            face, quantidade = _aposta_por_intuicao(apostas, ultimo, risco)
         return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
+    coringa = rodada.com_coringa
+    meus = list(jogador.dados)
     desconhecidos = max(0, total_dados_ativos(rodada) - len(meus))
     probabilidade = None
     if ultimo is not None:
+        suporte = contar_suporte(meus, ultimo.dado_face, coringa)
         probabilidade = probabilidade_verdade(
-            ultimo.dado_face, ultimo.dado_qtd, suporte_ultimo, desconhecidos, coringa
+            ultimo.dado_face, ultimo.dado_qtd, suporte, desconhecidos, coringa
         )
+        # Fase 36: Perito/Mestre temperam a conta pura com o histórico deste
+        # adversário específico nesta partida (rodadas já fechadas). Níveis 1
+        # e 2 não fazem essa leitura — continuam só no cálculo/heurística de
+        # sempre.
+        probabilidade = _ler_probabilidade(rodada, ultimo, probabilidade, nivel)
 
     limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco, agressividade)
     desconfia = probabilidade is not None and probabilidade < limiar
@@ -282,6 +363,28 @@ def _sem_aposta(ultimo):
     if ultimo is not None:
         return {'acao': 'desconfiar'}
     return {'acao': 'apostar', 'dado': 1, 'quantidade': 1}
+
+
+def _ler_probabilidade(rodada, ultimo, probabilidade, nivel):
+    """
+    Nível 3/4: sobre a probabilidade matemática pura, aplica um ajuste
+    limitado conforme o quanto ESTE apostador específico já blefou nesta
+    partida (rodadas já fechadas — nunca a atual). Quem já blefou muito
+    ganha menos crédito do que a conta pura daria; quem raramente blefou
+    ganha um pouco mais de benefício da dúvida — do jeito que um jogador
+    atento também ajustaria a leitura pela pessoa, não só pelos números.
+    Mestre (4) confia mais nessa leitura do que Perito (3); níveis 1 e 2
+    não a fazem (devolvem a probabilidade sem alteração).
+    """
+    if probabilidade is None or nivel not in (3, 4):
+        return probabilidade
+    taxa = leitura_blefe(rodada.da_partida, ultimo.do_jogador)
+    if taxa is None:
+        return probabilidade
+    peso = PESO_LEITURA_MESTRE if nivel == 4 else PESO_LEITURA_PERITO
+    desvio = (taxa - 0.5) * 2 * peso  # -peso .. +peso
+    ajustada = probabilidade * (1.0 - desvio)
+    return max(0.0, min(1.0, ajustada))
 
 
 def _limiar_desconfianca(rodada, nivel, ultimo, risco=0.5, agressividade=0.5):
@@ -335,6 +438,33 @@ def _aposta_mais_alta(apostas):
     return max(apostas, key=lambda aposta: (aposta[1], aposta[0]))
 
 
+def _aposta_por_intuicao(apostas, ultimo, risco):
+    """
+    Nível 1 não calcula probabilidade nenhuma, mas isso não é motivo pra
+    chutar entre QUALQUER jogada legal — isso incluiria saltos de quantidade
+    gigantescos e implausíveis que nem um novato de verdade tentaria (dá pra
+    ser fraco sem ser insensato). Em vez de sortear uniforme, pesa cada
+    jogada pela distância da quantidade até a última aposta: incrementos
+    pequenos pesam mais, sem travar sempre no mínimo quando várias faces
+    empatam na mesma quantidade (o decaimento é suave, não um corte seco —
+    todo lance legal continua possível, só menos provável quanto mais
+    longe). Ousados (risco alto) decaem mais devagar e toleram saltos
+    maiores. A abertura da rodada (sem aposta anterior) continua livre, não
+    há "exagero" ainda para comparar.
+    """
+    if ultimo is None:
+        return secrets.choice(apostas)
+    decaimento = 0.35 + 0.55 * risco  # 0.35 (cauteloso) .. 0.90 (ousado)
+    pesos = [int(10000 * decaimento ** abs(qtd - ultimo.dado_qtd)) + 1 for _, qtd in apostas]
+    alvo = secrets.randbelow(sum(pesos))
+    acumulado = 0
+    for aposta, peso in zip(apostas, pesos):
+        acumulado += peso
+        if alvo < acumulado:
+            return aposta
+    return apostas[-1]  # defensivo: a soma acima garante que não chega aqui
+
+
 def _probabilidade_aposta(rodada, jogador, face, quantidade):
     """Probabilidade de uma aposta ser verdadeira, dado o que a IA conhece."""
     coringa = rodada.com_coringa
@@ -363,17 +493,44 @@ def _melhor_aposta(rodada, jogador, apostas, risco=0.5, agressividade=0.5):
 
 def _aposta_de_pressao(rodada, jogador, apostas, risco=0.5, agressividade=0.5):
     """
-    Nível 4: entre as apostas ainda seguras (P >= piso), escolhe a de maior
-    quantidade — pressiona o próximo sem apostar algo provavelmente falso. O piso
-    cai com a ousadia do bot (blefa mais); sem nenhuma segura, cai na mais
-    defensável, já com a personalidade na conta.
+    Nível 4: entre as apostas ainda seguras (P >= piso), pressiona com uma das
+    maiores quantidades — sem travar sempre na mesma escolha cravada, o que
+    ficaria previsível/robótico rápido demais. O piso cai com a ousadia do bot
+    (blefa mais) e ainda sobe ou desce um pouco conforme o quanto o PRÓXIMO
+    jogador da rodada costuma acertar ao desconfiar nesta partida — evita
+    empurrar demais contra quem tende a chamar, e relaxa contra quem quase
+    nunca desconfia. Sem nenhuma segura, cai na mais defensável, já com a
+    personalidade na conta.
     """
     piso = max(0.05, 0.60 - 0.30 * risco)
+    piso = _ajustar_piso_pelo_proximo(piso, rodada, jogador)
     seguras = [aposta for aposta in apostas
                if _probabilidade_aposta(rodada, jogador, *aposta) >= piso]
     if seguras:
-        return max(seguras, key=lambda aposta: (aposta[1], aposta[0]))
+        ordenadas = sorted(seguras, key=lambda aposta: (-aposta[1], -aposta[0]))
+        fatia = 1 + int(agressividade * 2)
+        candidatas = ordenadas[:max(1, min(len(ordenadas), fatia))]
+        return secrets.choice(candidatas)
     return _melhor_aposta(rodada, jogador, apostas, risco, agressividade)
+
+
+def _ajustar_piso_pelo_proximo(piso, rodada, jogador):
+    """
+    Antes de decidir até onde empurrar a aposta, dá uma espiada em quem vai
+    responder: contra quem desconfia muito e acerta (rodadas já fechadas
+    desta partida), sobe um pouco o piso de segurança; contra quem quase não
+    desconfia, relaxa um pouco. Ajuste pequeno e limitado — não troca a
+    ousadia do bot, só a calibra pra mesa em jogo.
+    """
+    jogadores = rodada.da_partida.jogadores
+    if jogador not in jogadores or len(jogadores) < 2:
+        return piso
+    proximo = rodada.selecionar_proximo_jogador_na_lista(jogador)
+    taxa = leitura_desafio(rodada.da_partida, proximo)
+    if taxa is None:
+        return piso
+    ajuste = (taxa - 0.5) * 2 * AJUSTE_PISO_MAXIMO
+    return max(0.03, min(0.85, piso + ajuste))
 
 
 def executar_acao(jogador, rodada, acao):
