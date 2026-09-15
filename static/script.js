@@ -1405,9 +1405,10 @@ socket.on('construtor_html', function (data) {
     }
 
     entradas.forEach(([jogador, turnos]) => {
-        // Criação do container principal
+        // Criação do container principal (`g-1` do `#cards` já dá o gutter
+        // vertical em linhas quebradas; sem `mb-1` para manter a simetria)
         const divCol = document.createElement('div');
-        divCol.className = 'col-md-2 col-sm-4 col-6 mb-1';
+        divCol.className = 'col-md-2 col-sm-4 col-6';
 
         // Criação do card
         const card = document.createElement('div');

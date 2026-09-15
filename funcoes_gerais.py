@@ -491,7 +491,7 @@ def listar_resumos_partidas(filtros, sala_atual=None):
     return resumos
 
 
-def validar_input(texto, tamanho_minimo=1, tamanho_maximo=12, permitir_espacos=True,
+def validar_input(texto, tamanho_minimo=1, tamanho_maximo=8, permitir_espacos=True,
                   caracteres_permitidos=r"^[a-zA-Z0-9\s\-_.@#!$%*()+=,;:?{}\[\]\\/áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]*$"):
     """
     Valida o texto recebido do front-end para verificar se é válido ou inválido.

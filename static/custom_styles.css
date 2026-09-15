@@ -869,17 +869,19 @@ h5,
     }
 }
 
-/* Grid adaptável no desktop: cards do mesmo tamanho (`auto-fill` mantém as
-   trilhas iguais mesmo na última linha com poucos jogadores). Fase 32 (P2):
-   `auto-fit` era usado — na última linha os cards esticavam a largura toda. */
+/* Grid no desktop: cards com largura FIXA e igual (180px), grupo SEMPRE
+   centralizado em qualquer quantidade de jogadores. Fase 32 (P2) usava
+   `auto-fit` com `1fr`, que esticava os cards da última linha; a troca para
+   `auto-fill` (P2) deixava os cards espalhados (trilhos vazios ocupavam
+   espaço). Agora as trilhas são fixas (`repeat(auto-fit, 180px)`): nenhum
+   nome de jogador muda o tamanho do card. */
 @media (min-width: 992px) {
     #cards {
         /* `!important` vence o `display: flex !important` do `.d-flex` do
            Bootstrap (o `#cards` usa a classe no HTML) — sem isto o desktop
-           continuava em flex e o `width: auto !important` das colunas deixava
-           um nome longo alargar o card além dos vizinhos. */
+           continuava em flex e as colunas `col-*` alargavam conforme o nome. */
         display: grid !important;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, 180px);
         gap: 0.6rem;
         justify-content: center;
         width: 100%;
@@ -888,10 +890,7 @@ h5,
     }
 
     #cards > div {
-        width: auto !important;
-        max-width: none !important;
-        flex: none !important;
-        margin: 0;
+        margin: 0 auto;
     }
 }
 
@@ -913,8 +912,15 @@ h5,
     min-width: 0;
 }
 
+/* Cards com largura FIXA e igual (180px) em QUALQUER breakpoint: a regra tem
+   mais especificidade que as classes `col-*` do Bootstrap, então o nome do
+   jogador nunca altera o tamanho — no desktop o grid usa trilhas fixas de
+   iguais; no mobile/tablet o flex `justify-content-center` centraliza. */
 #cards > div {
     min-width: 0;
+    flex: 0 0 180px !important;
+    width: 180px !important;
+    max-width: 180px !important;
 }
 
 #cards .card-body {

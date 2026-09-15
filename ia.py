@@ -55,6 +55,9 @@ AJUSTE_PISO_MAXIMO = 0.15
 # Apelidos dos bots: sorteados a cada criação, misturando designações
 # robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
 # A unicidade fica a cargo de Lobby.verificar_apelido.
+# O nome completo do bot (`🤖 apelido`) segue o limite de 8 caracteres do
+# nome de jogador: o marcador + espaço consomem 2, então o apelido cabe até 6.
+LIMITE_APELIDO_BOT = 6
 NOMES_ROBOTICOS = [
     'Chip', 'Bolt', 'Neo', 'Zeta', 'Vex', 'Kilo', 'Orb', 'Pino', 'Byte',
     'Hex', 'Volt', 'Nix', 'Zen', 'Dado', 'Asimo', 'Teco', 'Bino',
@@ -63,10 +66,14 @@ NOMES_ROBOTICOS = [
 PREFIXOS_ROBO = ['XJ', 'R2', 'C3', 'TK', 'ZX', 'QB', 'MK', 'AX', 'NV', 'IO',
                  'BOT', 'UNIT', 'NULL']
 
+# Nomes humanos em "leet" (algumas letras trocadas por números/símbolos
+# parecidos — 4 por A, 1 por I, 0 por O, 8 por B e afins). Todos os apelidos
+# ficam em até 6 caracteres para o nome completo (`🤖 apelido`) seguir o
+# limite de 8 do nome de jogador.
 NOMES_HUMANOS = [
-    'Ana', 'Bia', 'Bruno', 'Carla', 'Davi', 'Elisa', 'Fábio', 'Gabi',
-    'Heitor', 'Igor', 'Joana', 'Kelly', 'Lucas', 'Marina', 'Nando',
-    'Olívia', 'Pedro', 'Rafa', 'Sofia', 'Tati', 'Vitor', 'Zeca',
+    '4n4', 'B14', '8runo', 'C4rl4', 'D4v1', '3l1s4', 'F4b10', 'G4b1',
+    'H31t0r', '1g0r', 'J04n4', 'K3lly', 'Luc4s', 'M4r1n4', 'N4nd0',
+    '0l1v1a', 'P3dr0', 'R4f4', '50f1a', 'T4t1', 'V1t0r', 'Z3c4',
 ]
 
 PREFIXOS_HIBRIDOS = ['Robô', 'Cyber', 'Mega', 'Nano', 'Proto', 'Auto']
@@ -96,9 +103,18 @@ def _nome_hibrido():
 
 
 def gerar_nome():
-    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖."""
-    apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
-    return f"🤖 {apelido}"
+    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖.
+
+    Obedece ao limite de 8 caracteres do nome de jogador: `🤖 ` consome 2, então
+    o apelido cabe até 6. Sorteios que estourem o limite são refeitos; se
+    cair (quase impossível), usa um apelido curto garantido.
+    """
+    for _ in range(4):
+        apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
+        if len(apelido) <= LIMITE_APELIDO_BOT:
+            return f"🤖 {apelido}"
+    # Fallback: os apelidos robóticos têm no máximo 5 caracteres.
+    return f"🤖 {secrets.choice(NOMES_ROBOTICOS)}"
 
 
 def sorteiar_personalidade(jogador):
