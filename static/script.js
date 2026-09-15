@@ -1142,6 +1142,17 @@ socket.on("mudar_pagina", function (data) {
         subtitulo.style.display = (data.pag_numero === 1 || data.pag_numero === 2) ? 'none' : 'block';
     }
     mostrar_dica(data.pag_numero);
+
+    // Fase 58 (M7): no mobile a conferência entra já mostrando o título e os
+    // cards — o scroll posiciona o "Conferência" no topo do viewport, pulando
+    // o banner de vitória/derrota (os cards já foram montados pelo
+    // `cards_conferencia`, que o servidor emite antes do `mudar_pagina`).
+    if (data.pag_numero === 3 && eh_mobile()) {
+        const titulo_conf = document.getElementById('titulo_conferencia');
+        if (titulo_conf) {
+            titulo_conf.scrollIntoView({ block: 'start' });
+        }
+    }
 });
 
 // Função para preencher os dados do jogador na página de partida
