@@ -88,6 +88,13 @@ _CODIGO_BOOT = (
     "s=app.test_client().get('/static/custom_styles.css');"
     "assert s.status_code==200, s.status_code;"
     "assert 'Cache-Control' in s.headers, 'estatico sem Cache-Control (I6)';"
+    "tema=app.test_client().get('/tema.mid');"
+    "assert tema.status_code==200, ('/tema.mid', tema.status_code);"
+    "assert tema.data[:4]==b'MThd', 'tema nao e MIDI';"
+    "assert tema.headers.get('X-Dadinho-Tema-Seed') is not None, 'sem seed';"
+    "cc=tema.headers.get('Cache-Control','');"
+    "assert cc.startswith('public, max-age='), cc;"
+    "assert int(cc.split('=',1)[1])>0, 'max-age nao acompanha a janela';"
     "print('BOOT_OK')"
 )
 
@@ -240,6 +247,37 @@ def verificar_roundtrip():
 
 
 # ---------------------------------------------------------------------------
+# 4b) tema rotativo (geração a cada 12h)
+# ---------------------------------------------------------------------------
+def verificar_tema():
+    print("4b) tema rotativo (geração a cada 12h)")
+    import tema as modulo_tema
+
+    # O teste precisa da rotação real, não de um tema congelado no ambiente.
+    fixo_previo = os.environ.pop("DADINHO_TEMA_SEED", None)
+    try:
+        agora = time.time()
+        janela = modulo_tema.janela_atual(agora)
+        meio1, bpm1, seed1 = modulo_tema.tema_atual(agora)
+        meio2, bpm2, seed2 = modulo_tema.tema_atual(agora + 1)
+        _checar("mesma janela de 12h -> mesmo tema",
+                meio1 == meio2 and bpm1 == bpm2 and seed1 == seed2,
+                f"seeds {seed1}/{seed2}")
+        meio3, _, seed3 = modulo_tema.tema_atual(agora + modulo_tema.PERIODO_SEGUNDOS)
+        _checar("12h após a virada -> outro tema",
+                meio3 != meio1 and seed3 != seed1,
+                f"seeds {seed1}/{seed3}")
+        _checar("seed derivado da janela",
+                seed1 == modulo_tema._seed_da_janela(janela), str(seed1))
+        restante = modulo_tema.segundos_ate_virada(agora)
+        _checar("vira exatamente no Cache-Control",
+                0 < restante <= modulo_tema.PERIODO_SEGUNDOS, str(restante))
+    finally:
+        if fixo_previo is not None:
+            os.environ["DADINHO_TEMA_SEED"] = fixo_previo
+
+
+# ---------------------------------------------------------------------------
 # 5) Integração (Fases 6 e 7)
 # ---------------------------------------------------------------------------
 
@@ -256,6 +294,7 @@ def main():
     verificar_boot()
     verificar_store_producao()
     verificar_roundtrip()
+    verificar_tema()
     verificar_integracao()
     verificar_cross_instance()
     print()

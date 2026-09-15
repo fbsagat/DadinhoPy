@@ -44,6 +44,8 @@ def _falhou(nome, detalhe=""):
 def _checar(nome, condicao, detalhe=""):
     if condicao:
         _ok(nome)
+    else:
+        _falhou(nome, detalhe)
 
 # Globals setados por `_preparar_integracao` (placeholders até lá).
 modulo_store = None

@@ -2186,6 +2186,7 @@ function iniciar_partida() {
 }
 
 let contexto_audio = null;
+let promessa_resume_audio = null;
 
 function garantir_contexto_audio() {
     if (typeof (window.AudioContext) === 'undefined' && typeof (window.webkitAudioContext) === 'undefined') {
@@ -2193,9 +2194,17 @@ function garantir_contexto_audio() {
     }
     if (!contexto_audio) {
         contexto_audio = new (window.AudioContext || window.webkitAudioContext)();
+        promessa_resume_audio = null;
     }
-    if (contexto_audio.state === 'suspended') {
-        contexto_audio.resume();
+    // Retoma o contexto e guarda a promessa: o `resume` é assíncrono, e
+    // começar uma fonte com o contexto ainda 'suspended' engole o som de
+    // forma intermitente (iOS em especial). Quem for tocar aguarda a promessa.
+    if (contexto_audio.state === 'suspended' && !promessa_resume_audio) {
+        promessa_resume_audio = contexto_audio.resume();
+        promessa_resume_audio.then(
+            () => { promessa_resume_audio = null; },
+            () => { promessa_resume_audio = null; },
+        );
     }
     return true;
 }
@@ -3395,30 +3404,81 @@ let ganho_musica = null;
 let fonte_musica = null;
 let buffer_musica = null;
 let promessa_musica = null;
+let seed_musica = null;
+let relogio_tema = null;
+
+// Lê os segundos de `public, max-age=N` devolvidos pela rota /tema.mid.
+function segundos_ate_cache(cc) {
+    const parte = /max-age=(\d+)/.exec(cc || '');
+    return parte ? Number(parte[1]) : 0;
+}
+
+// Agenda o próximo re-check do tema logo após a expiração do Cache-Control
+// (a virada da janela de 12h). Sem header, recheca a cada meia hora.
+function agendar_verificacao_tema(cc) {
+    if (relogio_tema) {
+        clearTimeout(relogio_tema);
+    }
+    const espera = segundos_ate_cache(cc) || 30 * 60;
+    relogio_tema = setTimeout(verificar_tema_atual, (espera + 5) * 1000);
+}
+
+// Busca e renderiza o MIDI vigente em `buffer_musica`, guardando o seed do
+// tema. A concorrência é deduplicada por `promessa_musica`; roda no preload
+// (para o clique ligar a música na hora) e no re-check da virada de 12h.
+async function carregar_musica() {
+    if (promessa_musica) {
+        return promessa_musica;
+    }
+    promessa_musica = (async function () {
+        try {
+            const resposta = await fetch('/tema.mid');
+            if (!resposta.ok) {
+                throw new Error('HTTP ' + resposta.status);
+            }
+            const buffer_novo = await renderizar_musica(await resposta.arrayBuffer());
+            if (!buffer_novo) {
+                throw new Error('MIDI vazio');
+            }
+            buffer_musica = buffer_novo;
+            const seed_novo = resposta.headers.get('X-Dadinho-Tema-Seed');
+            if (seed_novo) {
+                seed_musica = seed_novo;
+            }
+            agendar_verificacao_tema(resposta.headers.get('Cache-Control') || '');
+        } catch (erro) {
+            console.error('Falha ao carregar a música:', erro);
+            buffer_musica = null;
+            agendar_verificacao_tema('');
+        }
+    })();
+    try {
+        await promessa_musica;
+    } finally {
+        promessa_musica = null;
+    }
+}
 
 async function iniciar_musica() {
     if (!musica_ativada || fonte_musica || !garantir_contexto_audio()) {
         return;
     }
     if (!buffer_musica) {
-        if (!promessa_musica) {
-            promessa_musica = (async function () {
-                try {
-                    const resposta = await fetch('/tema.mid');
-                    if (!resposta.ok) {
-                        throw new Error('HTTP ' + resposta.status);
-                    }
-                    buffer_musica = await renderizar_musica(await resposta.arrayBuffer());
-                } catch (erro) {
-                    console.error('Falha ao carregar a música:', erro);
-                    buffer_musica = null;
-                }
-            })();
-        }
-        await promessa_musica;
-        promessa_musica = null;
+        await carregar_musica();
     }
     if (!buffer_musica || !musica_ativada || fonte_musica) {
+        return;
+    }
+    // Só agenda a fonte depois de o contexto estar de fato 'running' — senão
+    // o start() cai no contexto suspenso e some (problema intermitente, iOS).
+    if (promessa_resume_audio) {
+        try {
+            await promessa_resume_audio;
+        } catch (erro) {
+            // segue na tentativa mesmo se o resume recusar
+        }
+    }
+    if (!musica_ativada || fonte_musica) {
         return;
     }
     if (!ganho_musica) {
@@ -3431,6 +3491,34 @@ async function iniciar_musica() {
     fonte_musica.loop = true;
     fonte_musica.connect(ganho_musica);
     fonte_musica.start();
+}
+
+// Quando o Cache-Control expira, a janela de 12h pode ter virado: revalida o
+// tema e, se o seed mudou, recarrega a composição e troca a fonte sem reload.
+async function verificar_tema_atual() {
+    relogio_tema = null;
+    try {
+        const resposta = await fetch('/tema.mid');
+        if (!resposta.ok) {
+            throw new Error('HTTP ' + resposta.status);
+        }
+        const seed_novo = resposta.headers.get('X-Dadinho-Tema-Seed');
+        if (seed_novo && seed_musica && seed_novo !== seed_musica) {
+            const buffer_novo = await renderizar_musica(await resposta.arrayBuffer());
+            if (buffer_novo) {
+                buffer_musica = buffer_novo;
+                seed_musica = seed_novo;
+                parar_musica();
+                if (musica_ativada) {
+                    iniciar_musica();
+                }
+            }
+        }
+        agendar_verificacao_tema(resposta.headers.get('Cache-Control') || '');
+    } catch (erro) {
+        console.error('Falha ao verificar o tema:', erro);
+        agendar_verificacao_tema('');
+    }
 }
 
 function parar_musica() {
@@ -3472,8 +3560,12 @@ function aplicar_estado_musica() {
 
 function alternar_musica() {
     musica_ativada = !musica_ativada;
-    localStorage.setItem('dadinho_musica', musica_ativada ? 'on' : 'off');
     aplicar_estado_musica();
+    try {
+        localStorage.setItem('dadinho_musica', musica_ativada ? 'on' : 'off');
+    } catch (erro) {
+        // armazenamento indisponível (privado/iframe): o toggle não pode falhar
+    }
     if (musica_ativada) {
         iniciar_musica();
     } else {
@@ -3488,6 +3580,11 @@ if (botao_musica) {
 if (botao_menu_musica) {
     botao_menu_musica.addEventListener('click', alternar_musica);
 }
+
+// Pré-carrega o tema em segundo plano para o clique ligar a música na hora,
+// sem depender do fetch + render do MIDI no primeiro toque. O AudioContext só
+// é criado/retomado no gesto (`garantir_contexto_audio` em `iniciar_musica`).
+carregar_musica();
 
 // Volume da música (0 a 100), persistido entre sessões — sliders do topo e do
 // drawer (M1) compartilham o mesmo estado.
