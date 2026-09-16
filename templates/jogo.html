@@ -13,6 +13,10 @@
          frontend). Vazio = mesmo host. O script.js lê este meta para conectar
          o io() na VPS; evita script inline (CSP estrita). -->
     <meta name="dadinho-api-url" content="{{ api_url }}">
+    <!-- Fase 59: sitekey da hCaptcha quando o captcha no connect está ativo
+         (DADINHO_CAPTCHA_ATIVO na API). O script.js só carrega o script da
+         hCaptcha e adia o connect quando este meta existe. -->
+    {% if hcaptcha_sitekey %}<meta name="dadinho-hcaptcha-sitekey" content="{{ hcaptcha_sitekey }}">{% endif %}
     <title>{{ og.titulo }}</title>
 
     <!-- SEO: descrição/canonical (o `<title>` e o OG dinâmico por sala vêm do

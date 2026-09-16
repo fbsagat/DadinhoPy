@@ -21,12 +21,16 @@ se a função serverless morrer sem disparar o GC do disconnect — antes a sala
 - dadinho:resumos        -> SET com os ids que têm resumo (evita SCAN na busca)
 - dadinho:sid:<client_id> -> sala_id do jogador (TTL; índice p/ achar_jogador
                              sem varrer o store)
+- dadinho:ip:<ip>        -> SET de client_ids ativos por IP (Fase 59; usado
+                             no limite de sockets por IP — SADD+EXPIRE,
+                             SREM no disconnect)
 - dadinho:lobby_seq      -> contador INCR p/ numerar lobbies novos (B8)
 - dadinho:lock:<id>      -> token de um lock distribuído por sala (Fase 24;
                              SET NX EX no adquirir + DELEX IFEQ no liberar,
                              TTL curto de lease)
 """
 
+import base64
 import contextlib
 import http.client
 import json
@@ -36,20 +40,23 @@ import secrets
 import threading
 import time
 import urllib.parse
+import zlib
 
 from modelos import Lobby
 
 # Fase 46: as falhas do redis-py (ConnectionError, TimeoutError, ResponseError)
-# herdam de RedisError, não de OSError — exposto aqui para o `evento_mutavel`
-# do app.py abortar silenciosamente num blip do Redis local da VPS (mesma
-# política da Fase B aplicada à REST da Upstash). O pacote é lazy no
-# `ArmazenamentoRedis`; o alias só existe para referência do wrapper.
-try:
-    import redis as _redis_pacote
-    RedisError = _redis_pacote.exceptions.RedisError
-except ImportError:  # pragma: no cover — redis é dep pinada em requirements.
-    class RedisError(Exception):
-        """Fallback para quando o pacote redis não está instalado (dev parcial)."""
+# herdam de RedisError, não de OSError — o `evento_mutavel` do app.py aborta
+# silenciosamente num blip do Redis local da VPS (mesma política da Fase B
+# aplicada à REST da Upstash).
+#
+# Fase 60: o pacote `redis` deixou de ser importado no boot do módulo — a
+# Vercel (Upstash/memória) nunca usa o Redis TCP e pagava o custo de carregar
+# o pacote sem usá-lo. `erros_de_rede()` importa o pacote LAZY (só quando o
+# `ArmazenamentoRedis`, modo VPS, entra em cena) e devolve a classe real de
+# erro na tupla de exceções; `RedisError` abaixo é só um placeholder que nunca
+# casa nada quando o pacote não chegou a carregar.
+class RedisError(Exception):
+    """Fallback para quando o pacote redis não está instalado (dev parcial)."""
 
 
 _log = logging.getLogger(__name__)
@@ -60,14 +67,35 @@ _log = logging.getLogger(__name__)
 # num GET não pode virar 500 (ex.: rota do OG) nem traceback num handler.
 # `evento_mutavel` já aborta silenciosamente nas ESCRITAS; aqui as leituras
 # são convertidas em None/[] (política de aborto silencioso da Fase B).
-_ERROS_DE_REDE = (OSError, http.client.HTTPException, RedisError, TimeoutError)
+# Fase 60: a tupla é montada LAZY (ver `erros_de_rede`) para o `redis` não ser
+# importado no boot da Vercel.
+_REDIS_ERRO_LAZY = None
+
+
+def erros_de_rede():
+    """
+    Exceções de rede/latência que leituras e handlers não devem deixar estourar.
+    Inclui a classe REAL de erro do redis-py só quando o pacote precisa existir
+    (modo VPS — `ArmazenamentoRedis`); antes disso devolve o placeholder
+    `RedisError`, que nunca casa nada (na Vercel o pacote não é usado). A
+    importação lazy acontece aqui ou no `ArmazenamentoRedis.__init__` quando o
+    Redis TCP é selecionado.
+    """
+    global _REDIS_ERRO_LAZY
+    if _REDIS_ERRO_LAZY is None:
+        try:
+            import redis as _pacote_redis
+            _REDIS_ERRO_LAZY = _pacote_redis.exceptions.RedisError
+        except ImportError:  # pragma: no cover — redis é dep pinada em requirements.
+            _REDIS_ERRO_LAZY = RedisError
+    return (OSError, http.client.HTTPException, TimeoutError, _REDIS_ERRO_LAZY)
 
 
 def _leitura_segura(funcao, fallback):
     """Executa uma leitura do store; falha de rede vira `fallback` com log."""
     try:
         return funcao()
-    except _ERROS_DE_REDE as erro:
+    except erros_de_rede() as erro:
         _log.warning("Fase 51: leitura do store falhou (aborto silencioso): %r", erro)
         return fallback
 
@@ -231,6 +259,13 @@ CACHE_SALA_TTL_PADRAO = 0.0  # 0 = cache desligado (leitura sempre fresca)
 # irrelevante para o re-sync — a próxima batida recarrega do store).
 CACHE_SALA_MAX = 4096
 
+# Fase 60: cache do RESUMO leve (OG dinâmico da home e eventuais listagens leem
+# o mesmo resumo a cada request; ele só muda em transições de estado). TTL curto
+# (5s) — uma leitura defasada em até 5s é irrelevante. Válido por instância;
+# `salvar_resumo`/`remover_resumo`/`salvar_sala_com_resumo` mantêm a entrada.
+CACHE_RESUMO_TTL = 5.0
+CACHE_RESUMO_MAX = 2048
+
 _cache_salas = {}
 _cache_salas_guard = threading.Lock()
 
@@ -243,9 +278,22 @@ def _armazenar_cache_sala(sala_id, lobby):
 
 
 def invalidar_cache_sala(sala_id):
-    """Descarta a entrada do cache (ex.: handler abortou no meio de uma mutação)."""
+    """Descarta o estado EM PROCESSO de uma sala após uma mutação abortar no
+    meio (ex.: `evento_mutavel` captura falha de rede/lock). Fase 60 (P2/P3):
+    além do cache de leitura do Lobby, limpa o cache do resumo (um resumo de
+    mutação revertida não pode ser servido ao OG por até 5s), a assinatura de
+    dedup (conteúdo que NUNCA foi gravado não pode ser marcado como gravado —
+    senão o save seguinte, igual, seria ignorado deixando o store antigo) e o
+    watermark de revisão do CAS (sem isso todo save posterior da sala abortaria
+    como ConflitoDeEstado até `remover_sala` — sala presa)."""
     with _cache_salas_guard:
         _cache_salas.pop(sala_id, None)
+    with _cache_resumos_guard:
+        _cache_resumos.pop(sala_id, None)
+    with _resumos_assinatura_guard:
+        _resumos_assinatura.pop(sala_id, None)
+    with _revisoes_guard:
+        _revisoes_salvas.pop(sala_id, None)
 
 
 def carregar_sala_leve(sala_id):
@@ -265,6 +313,20 @@ def carregar_sala_leve(sala_id):
     return lobby, False
 
 
+# ---------------------------------------------------------------------------
+# Cache do resumo da busca (Fase 60).
+# ---------------------------------------------------------------------------
+_cache_resumos = {}
+_cache_resumos_guard = threading.Lock()
+
+
+def _armazenar_cache_resumo(sala_id, resumo):
+    with _cache_resumos_guard:
+        if len(_cache_resumos) >= CACHE_RESUMO_MAX:
+            _cache_resumos.pop(min(_cache_resumos, key=lambda s: _cache_resumos[s][1]), None)
+        _cache_resumos[sala_id] = (resumo, time.monotonic())
+
+
 class ArmazenamentoMemoria:
     """Mantém os Lobby em memória no processo (mesmo comportamento de antes)."""
 
@@ -272,6 +334,7 @@ class ArmazenamentoMemoria:
         self._salas = {}
         self._resumos = {}
         self._sids = {}
+        self._ips = {}
         self._contador = 0
         self._contador_trava = threading.Lock()
 
@@ -297,6 +360,12 @@ class ArmazenamentoMemoria:
     def salvar_resumo(self, sala_id, resumo):
         self._resumos[sala_id] = resumo
 
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+        """Fase 60: grava Lobby + resumo numa chamada (interface comum; memória é trivial)."""
+        self._salas[lobby.sala_id] = lobby
+        if resumo_mudou:
+            self._resumos[lobby.sala_id] = resumo
+
     def carregar_resumo(self, sala_id):
         return self._resumos.get(sala_id)
 
@@ -314,6 +383,21 @@ class ArmazenamentoMemoria:
 
     def desregistrar_sid(self, client_id):
         self._sids.pop(client_id, None)
+
+    def registrar_ip(self, ip, client_id):
+        ativos = self._ips.setdefault(ip, set())
+        ativos.add(client_id)
+        return len(ativos)
+
+    def remover_ip(self, ip, client_id):
+        ativos = self._ips.get(ip)
+        if ativos is not None:
+            ativos.discard(client_id)
+            if not ativos:
+                self._ips.pop(ip, None)
+
+    def sids_do_ip(self, ip):
+        return list(self._ips.get(ip, set()))
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +457,7 @@ class ArmazenamentoUpstash:
     PREFIXO_SALA = "dadinho:sala:"
     PREFIXO_RESUMO = "dadinho:resumo:"
     PREFIXO_SID = "dadinho:sid:"
+    PREFIXO_IP = "dadinho:ip:"
     CHAVE_SEQUENCIA = "dadinho:lobby_seq"
     # Índice (SET) com os ids das salas que têm resumo, para a busca não varrer
     # o keyspace com SCAN a cada listagem.
@@ -382,6 +467,9 @@ class ArmazenamentoUpstash:
     TTL_SALA = 7 * 24 * 3600
     TTL_RESUMO = 7 * 24 * 3600
     TTL_SID = 24 * 3600
+    # Renovado a cada connect: o SET de um IP que parou de conectar some depois
+    # de TTL_IP (evita bloquear um IP por uma instância que morreu sem disconnect).
+    TTL_IP = 6 * 3600
 
     def __init__(self, url_rest, token):
         self._base = url_rest.rstrip("/")
@@ -461,6 +549,10 @@ class ArmazenamentoUpstash:
     def _chave_sid(cls, client_id):
         return f"{cls.PREFIXO_SID}{client_id}"
 
+    @classmethod
+    def _chave_ip(cls, ip):
+        return f"{cls.PREFIXO_IP}{ip}"
+
     def carregar_sala(self, sala_id):
         resposta = self._pedido(
             "GET", f"get/{urllib.parse.quote(self._chave_sala(sala_id))}"
@@ -529,6 +621,25 @@ class ArmazenamentoUpstash:
             ["SADD", self.CHAVE_RESUMOS, sala_id],
         ])
 
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+        """
+        Fase 60: persistir o Lobby e o resumo da busca num único request
+        (pipeline) no caminho quente do `atualizar_lista_usuarios` — a chamada
+        separada fazia 2 requests (SET do Lobby + pipeline do resumo). Com o
+        resumo inalterado (dedup da assinatura), cai no SET único do Lobby,
+        como a `salvar_sala`.
+        """
+        bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
+        comandos = [["SET", self._chave_sala(lobby.sala_id), bloco, "EX", self.TTL_SALA]]
+        if resumo_mudou:
+            rbloco = json.dumps(resumo, ensure_ascii=False)
+            comandos.append(["SET", self._chave_resumo(lobby.sala_id), rbloco, "EX", self.TTL_RESUMO])
+            comandos.append(["SADD", self.CHAVE_RESUMOS, lobby.sala_id])
+        if len(comandos) == 1:
+            self._comando(*comandos[0])
+        else:
+            self._pipeline(comandos)
+
     def remover_resumo(self, sala_id):
         self._pipeline([
             ["DEL", self._chave_resumo(sala_id)],
@@ -596,6 +707,22 @@ class ArmazenamentoUpstash:
     def desregistrar_sid(self, client_id):
         self._comando("DEL", self._chave_sid(client_id))
 
+    def registrar_ip(self, ip, client_id):
+        chave = self._chave_ip(ip)
+        self._pipeline([
+            ["SADD", chave, client_id],
+            ["EXPIRE", chave, self.TTL_IP],
+        ])
+        resposta = self._comando("SCARD", chave)
+        return (resposta or {}).get("result")
+
+    def remover_ip(self, ip, client_id):
+        self._comando("SREM", self._chave_ip(ip), client_id)
+
+    def sids_do_ip(self, ip):
+        resposta = self._comando("SMEMBERS", self._chave_ip(ip))
+        return list((resposta or {}).get("result") or [])
+
 
 class ArmazenamentoRedis:
     """
@@ -614,11 +741,20 @@ class ArmazenamentoRedis:
     PREFIXO_SALA = "dadinho:sala:"
     PREFIXO_RESUMO = "dadinho:resumo:"
     PREFIXO_SID = "dadinho:sid:"
+    PREFIXO_IP = "dadinho:ip:"
     CHAVE_SEQUENCIA = "dadinho:lobby_seq"
     CHAVE_RESUMOS = "dadinho:resumos"
     TTL_SALA = 7 * 24 * 3600
     TTL_RESUMO = 7 * 24 * 3600
     TTL_SID = 24 * 3600
+    TTL_IP = 6 * 3600
+
+    # Fase 60: compressão dos blobs do Lobby no Redis TCP da VPS. O JSON de uma
+    # partida longa passa de 100KB; `zlib` (nível 6) + base64 reduz banda e tempo
+    # de serialização. Textos abaixo do limiar e blobs que não encolhem seguem
+    # sem compressão — e blobs ANTIGOS (sem o marcador) continuam legíveis.
+    PREFIXO_COMPRESSAO = "gz1:"
+    LIMIAR_COMPRESSAO = 512
 
     _LUA_DELEX = (
         "if redis.call('GET', KEYS[1]) == ARGV[1] then "
@@ -648,12 +784,47 @@ class ArmazenamentoRedis:
     def _chave_sid(cls, client_id):
         return f"{cls.PREFIXO_SID}{client_id}"
 
+    @classmethod
+    def _chave_ip(cls, ip):
+        return f"{cls.PREFIXO_IP}{ip}"
+
+    @classmethod
+    def _comprimir(cls, texto):
+        """
+        Comprime um blob do Lobby (gzip→base64) se valer a pena; devolve o
+        texto original caso contrário (pequeno ou que não encolheu). Base64 por
+        causa do `decode_responses=True` do cliente — o Redis é configurado para
+        devolver strings.
+        """
+        if not isinstance(texto, str) or len(texto) < cls.LIMIAR_COMPRESSAO:
+            return texto
+        comprimido = zlib.compress(texto.encode("utf-8"), 6)
+        if len(comprimido) >= len(texto):
+            return texto
+        return cls.PREFIXO_COMPRESSAO + base64.b64encode(comprimido).decode("ascii")
+
+    @classmethod
+    def _descomprimir(cls, bloco):
+        """
+        Devolve o texto original (descomprimindo blobs novos); blobs antigos sem
+        o marcador passam intactos — compat retroativa. Corrompido cai no texto
+        cru para o `json.loads` de quem chamou tratar como blob inválido.
+        """
+        if not isinstance(bloco, str) or not bloco.startswith(cls.PREFIXO_COMPRESSAO):
+            return bloco
+        try:
+            return zlib.decompress(
+                base64.b64decode(bloco[len(cls.PREFIXO_COMPRESSAO):])
+            ).decode("utf-8")
+        except (zlib.error, ValueError, TypeError):
+            return bloco
+
     def carregar_sala(self, sala_id):
         bloco = self._redis.get(self._chave_sala(sala_id))
         if not bloco:
             return None
         try:
-            return Lobby.de_dict(json.loads(bloco))
+            return Lobby.de_dict(json.loads(self._descomprimir(bloco)))
         except (ValueError, TypeError, KeyError):
             # Mesma política da Fase 28 (H1): bloco corrompido não derruba o
             # handler — a sala é tratada como inexistente e recriada no GC.
@@ -661,7 +832,24 @@ class ArmazenamentoRedis:
 
     def salvar_sala(self, lobby):
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
-        self._redis.set(self._chave_sala(lobby.sala_id), bloco, ex=self.TTL_SALA)
+        self._redis.set(self._chave_sala(lobby.sala_id),
+                        self._comprimir(bloco), ex=self.TTL_SALA)
+
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+        """
+        Fase 60: Lobby (comprimido) + resumo da busca num único pipeline —
+        `atualizar_lista_usuarios` fazia 1 SET + 1 pipeline (resumo) separados.
+        Com o resumo inalterado (dedup), grava só o Lobby.
+        """
+        bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
+        with self._redis.pipeline() as pipe:
+            pipe.set(self._chave_sala(lobby.sala_id),
+                     self._comprimir(bloco), ex=self.TTL_SALA)
+            if resumo_mudou:
+                rbloco = json.dumps(resumo, ensure_ascii=False)
+                pipe.set(self._chave_resumo(lobby.sala_id), rbloco, ex=self.TTL_RESUMO)
+                pipe.sadd(self.CHAVE_RESUMOS, lobby.sala_id)
+            pipe.execute()
 
     def remover_sala(self, sala_id):
         self._redis.delete(self._chave_sala(sala_id))
@@ -673,7 +861,10 @@ class ArmazenamentoRedis:
             if not bloco:
                 continue
             try:
-                lobbys.append(Lobby.de_dict(json.loads(bloco)))
+                # Fase 60: blob pode estar comprimido (`_comprimir`) — descomprime
+                # como no `carregar_sala`, senão o fallback de busca por client_id
+                # (`buscar_lobby_pelo_client_id`) perderia a sala silenciosamente.
+                lobbys.append(Lobby.de_dict(json.loads(self._descomprimir(bloco))))
             except (ValueError, TypeError, KeyError):
                 continue
         return lobbys
@@ -746,6 +937,20 @@ class ArmazenamentoRedis:
     def desregistrar_sid(self, client_id):
         self._redis.delete(self._chave_sid(client_id))
 
+    def registrar_ip(self, ip, client_id):
+        chave = self._chave_ip(ip)
+        with self._redis.pipeline() as pipe:
+            pipe.sadd(chave, client_id)
+            pipe.expire(chave, self.TTL_IP)
+            pipe.execute()
+        return self._redis.scard(chave)
+
+    def remover_ip(self, ip, client_id):
+        self._redis.srem(self._chave_ip(ip), client_id)
+
+    def sids_do_ip(self, ip):
+        return list(self._redis.smembers(self._chave_ip(ip)))
+
     def _comando(self, *args):
         """
         Tradutor de comandos no formato usado pelo lock distribuído
@@ -779,10 +984,12 @@ class ArmazenamentoRedis:
             return {"result": list(self._redis.smembers(args[1]))}
         if op == "SREM":
             return {"result": self._redis.srem(args[1], *args[2:])}
-        if op == "MGET":
-            return {"result": list(self._redis.mget(args[1:]))}
+        if op == "SCARD":
+            return {"result": self._redis.scard(args[1])}
         if op == "EXPIRE":
             return {"result": self._redis.expire(args[1], int(args[2]))}
+        if op == "MGET":
+            return {"result": list(self._redis.mget(args[1:]))}
         return {"result": None}
 
     def _pipeline(self, comandos):
@@ -896,19 +1103,22 @@ def salvar_resumo(sala_id, resumo):
     eventos chamam `atualizar_lista_usuarios` sem alterar os campos relevantes
     (ex.: revelação de seed, reconexões), e cada gravação custa comandos na
     Upstash. O cache é por instância; entre instâncias a próxima divergência
-    corrige.
+    corrige. Fase 60: mantém o cache de leitura do resumo em dia.
     """
     assinatura = json.dumps(resumo, ensure_ascii=False, sort_keys=True)
     with _resumos_assinatura_guard:
         if _resumos_assinatura.get(sala_id) == assinatura:
             return
         _resumos_assinatura[sala_id] = assinatura
+    _armazenar_cache_resumo(sala_id, resumo)
     armazenamento.salvar_resumo(sala_id, resumo)
 
 
 def remover_resumo(sala_id):
     with _resumos_assinatura_guard:
         _resumos_assinatura.pop(sala_id, None)
+    with _cache_resumos_guard:
+        _cache_resumos.pop(sala_id, None)
     armazenamento.remover_resumo(sala_id)
 
 
@@ -917,7 +1127,55 @@ def listar_resumos():
 
 
 def carregar_resumo(sala_id):
-    return _leitura_segura(lambda: armazenamento.carregar_resumo(sala_id), None)
+    """
+    Resumo leve de uma sala (OG dinâmico da home/listagem). Fase 60: cache em
+    processo com TTL curto — leituras repetidas no mesmo instante não fazem GET
+    no Redis (o resumo só muda em transições de estado). Não-cache não guarda
+    `None`: um resumo que acaba de nascer não pode ficar invisível por 5s.
+    """
+    with _cache_resumos_guard:
+        entrada = _cache_resumos.get(sala_id)
+        if entrada is not None and (time.monotonic() - entrada[1]) < CACHE_RESUMO_TTL:
+            return entrada[0]
+    resumo = _leitura_segura(lambda: armazenamento.carregar_resumo(sala_id), None)
+    if resumo is not None:
+        _armazenar_cache_resumo(sala_id, resumo)
+    return resumo
+
+
+def salvar_sala_com_resumo(lobby, resumo):
+    """
+    Fase 60: persiste o Lobby e o resumo da busca numa SÓ operação no store
+    (pipeline com SET sala + SET resumo + SADD índice) — o caminho quente do
+    `atualizar_lista_usuarios` fazia 2-3 requests em sequência. Mantém as mesmas
+    garantias: CAS/revisão da `salvar_sala` (possível lost-update aborta) +
+    dedup de assinatura da `salvar_resumo` (com o resumo inalterado, grava só o
+    Lobby). Atualiza ambos os caches como as chamadas separadas fariam.
+    """
+    if lobby is None:
+        return
+    assinatura = json.dumps(resumo, ensure_ascii=False, sort_keys=True)
+    with _resumos_assinatura_guard:
+        if _resumos_assinatura.get(lobby.sala_id) == assinatura:
+            resumo_mudou = False
+        else:
+            _resumos_assinatura[lobby.sala_id] = assinatura
+            resumo_mudou = True
+    with _revisoes_guard:
+        anterior = _revisoes_salvas.get(lobby.sala_id, 0)
+        if anterior and lobby.revisao < anterior:
+            _log.warning(
+                "Fase 52 (CAS): sala %s salva com revisão %s (última salva: %s) "
+                "— possível lost-update; save ABORTADO (lock distribuído deveria "
+                "ter evitado)",
+                lobby.sala_id, lobby.revisao, anterior)
+            raise ConflitoDeEstado(lobby.sala_id)
+        lobby.revisao = max(lobby.revisao, anterior) + 1
+        _revisoes_salvas[lobby.sala_id] = lobby.revisao
+    armazenamento.salvar_sala_com_resumo(lobby, resumo, resumo_mudou)
+    _armazenar_cache_sala(lobby.sala_id, lobby)
+    if resumo_mudou:
+        _armazenar_cache_resumo(lobby.sala_id, resumo)
 
 
 def registrar_sid(client_id, sala_id):
@@ -930,3 +1188,18 @@ def sala_do_sid(client_id):
 
 def desregistrar_sid(client_id):
     armazenamento.desregistrar_sid(client_id)
+
+
+def registrar_ip(ip, client_id):
+    """Adiciona client_id ao SET de IPs e devolve a cardinalidade (Fase 59)."""
+    return armazenamento.registrar_ip(ip, client_id)
+
+
+def remover_ip(ip, client_id):
+    """Remove client_id do SET de IPs (Fase 59, disconnect)."""
+    armazenamento.remover_ip(ip, client_id)
+
+
+def sids_do_ip(ip):
+    """Devolve os client_ids ativos de um IP (Fase 59)."""
+    return _leitura_segura(lambda: armazenamento.sids_do_ip(ip), [])

@@ -35,6 +35,10 @@ class Jogador:
         # Bots não têm socket e nunca viram master.
         self.is_ia = False
         self.ia_nivel = None
+        # Sinalização de automação suspeita (Fase 59): preenchido pelo
+        # `anti_fraude` com um motivo em PT-BR quando a heurística detecta
+        # padrão de bot; aciona um delay extra nas ações do jogador.
+        self.suspeito = None
         # Personalidade do bot (Fase 20): predisposição a risco e agressividade
         # nas apostas, ambas em 0-1. Sorteadas por bot na criação; nulas para
         # humanos. Mexem na desconfiança, na altura das apostas e no ritmo.
@@ -105,6 +109,7 @@ class Jogador:
             'ia_nivel': self.ia_nivel,
             'ia_risco': self.ia_risco,
             'ia_agressividade': self.ia_agressividade,
+            'suspeito': self.suspeito,
             'compromisso_seed': self.compromisso_seed,
             'nonce_seed': self.nonce_seed,
             'revelado_seed': self.revelado_seed,

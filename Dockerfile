@@ -17,11 +17,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Gunicorn em modo threaded (async_mode='threading' + simple-websocket dá
-# suporte a WebSocket — ver docs/fluxo e docs/plano-cross-instance.md).
-# -w 1: o algoritmo de load balancing do gunicorn não faz sticky session, então
-# múltiplos workers num único processo não funcionam com Socket.IO. Escala-se
-# com múltiplas instâncias/containers atrás de um LB (nginx) + DADINHO_MESSAGE_QUEUE.
+# Fase 61: cada container roda 1 worker gevent (cooperativo — milhares de
+# sockets por processo num único thread, em vez de 100 threads nativos). Exige
+# `DADINHO_ASYNC_MODE=gevent` no ambiente (docker-compose seta) e o gunicorn
+# aplica o monkey-patch antes de importar o app. WebSocket vem do driver gevent
+# do python-engineio (gevent-websocket em requirements.txt).
+#
+# -w 1 por container: a session Engine.IO vive na memória do worker e o gunicorn
+# não faz sticky session; a escala horizontal é por RÉPLICAS do container
+# (api/api2/api3/api4 no docker-compose) atrás do nginx com hash por IP real
+# (`hash $ip_real consistent;`) + `DADINHO_MESSAGE_QUEUE` p/ emits entre
+# instâncias.
 EXPOSE 8000
-CMD ["gunicorn", "--worker-class", "gthread", "--threads", "100", \
+CMD ["gunicorn", "--worker-class", "gevent", "-w", "1", \
      "--bind", "0.0.0.0:8000", "app:app"]

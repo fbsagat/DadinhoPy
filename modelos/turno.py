@@ -1,6 +1,7 @@
 """Modelo do Turno (Fase 45, M4)."""
 from flask_socketio import emit
 
+import anti_fraude
 import narrador
 from modelos.comum import somente_ias_na_partida
 
@@ -32,9 +33,11 @@ class Turno:
         """Executa o turno no front end"""
         # Narração da jogada (vem antes do card para o cliente encaixar o
         # "tempo de pensamento" dos bots na fila de animação).
-        pensou = (narrador.tempo_pensamento(self.do_jogador.ia_nivel, jogador=self.do_jogador,
-                                            so_ias=somente_ias_na_partida(self.da_rodada.da_partida))
-                  if self.do_jogador.is_ia else 0)
+        pensou = max(
+            (narrador.tempo_pensamento(self.do_jogador.ia_nivel, jogador=self.do_jogador,
+                                       so_ias=somente_ias_na_partida(self.da_rodada.da_partida))
+             if self.do_jogador.is_ia else 0),
+            anti_fraude.delay_adicional(self.do_jogador))
         anterior = self.obter_turno_anterior_na_partida()
         dados_mesa = sum(getattr(jogador, 'dados_qtd', 0) or 0 for jogador in self.da_rodada.jogadores)
         emit('narracao',

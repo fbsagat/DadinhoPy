@@ -416,8 +416,10 @@ def atualizar_lista_usuarios(lobby):
     # Stamp do sinal de vida antes de persistir: resumos velhos são escondidos da
     # busca (serverless), e o próprio blob do Lobby guarda o instante renovado.
     lobby.marcar_visto()
-    salvar_sala(lobby)
-    store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
+    # Fase 60: Lobby + resumo da busca num SÓ save no store (pipeline) em vez de
+    # `salvar_sala` + `salvar_resumo` em sequência — o caminho mais chamado do
+    # jogo (qualquer evento que muda lista/estado cai aqui).
+    store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
 
 
 def _resumo_vivo(resumo):

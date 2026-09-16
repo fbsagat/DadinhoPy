@@ -3,7 +3,7 @@
 "Dadinho" — jogo de blefe de dados multiplayer em tempo real no navegador. Backend Flask-SocketIO em Python, uma página HTML + um JS frontend.
 
 **Leia antes de mudar comportamento de jogo:** a spec está em `Dadinho idéia.txt` (telas, regras, fluxo; reference `@regras`).
-**Referência de arquitetura, fluxo/eventos e operação:** `docs/arquitetura.md`, `docs/fluxo.md`, `docs/verificacao.md` (reference `@docs`). Planos de melhoria: `docs/plano-cross-instance.md` (Fases 24–26: lock distribuído + message queue entre instâncias). Habilidades (`evento-dadinho`, `i18n-dadinho`, `verificar-deploy`) e revisores (`revisor-dadinho`, `rastrear-evento`) estão em `.opencode/`.
+**Referência de arquitetura, fluxo/eventos e operação:** `docs/arquitetura.md`, `docs/fluxo.md`, `docs/verificacao.md` (verificação e deploy), `docs/runbook.md` (operação e incidente) e `docs/adr/` (decisões de arquitetura) (reference `@docs`). Planos de melhoria: `docs/plano-cross-instance.md` (Fases 24–26: lock distribuído + message queue entre instâncias). Habilidades (`evento-dadinho`, `i18n-dadinho`, `verificar-deploy`, `vps-ops-dadinho`, `multi-instancia-dadinho`) e revisores (`revisor-dadinho`, `rastrear-evento`) estão em `.opencode/`.
 
 ## Constraints para código novo
 

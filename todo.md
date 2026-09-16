@@ -780,3 +780,206 @@ Objetivo: Validar que a arquitetura serverless (Vercel + Upstash + Redis) funcio
 - [x] **Validação de Estado Final** — cada cenário carrega `store.carregar_sala` do fake (fonte da verdade) e verifica integridade: jogadores, prontidão, turnos, `dados_qtd`, janela de graça, revisão monotônica.
 
 Verificação: `python tests/test_cross_instance.py` passa sem erros de concorrência/timeouts (o fake local é determinístico); `python verificar.py` 100% verde incluindo os 4 novos `[OK]` cross-instance. O que não é coberto (registrado): a fila de mensagens (`DADINHO_MESSAGE_QUEUE`) entre duas instâncias REAIS continua validada em produção com 2 navegadores, conforme `docs/plano-cross-instance.md` — o lock distribuído e o re-sync do heartbeat são exatamente o que este teste cobre localmente.
+
+
+# TODO — Segurança, Performance, Escalabilidade e Qualidade (Fases 59–62)
+
+Continuação do `todo.md`. Fases focadas em **endurecer a VPS para produção real**, **bloquear abusos automatizados**, **otimizar performance do runtime** e **preparar a infraestrutura para escala horizontal**.
+
+Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
+
+## Índice das fases propostas
+
+- **Fase 59** — Segurança na VPS: rate limit, anti-fraude técnica e hardening. Prioridade crítica, esforço médio.
+- **Fase 60** — Performance e Otimizações Técnicas. Prioridade alta, esforço médio.
+- **Fase 61** — Escalabilidade Real: reverse proxy, múltiplos workers e Redis HA. Prioridade média, esforço alto.
+- **Fase 62** — Documentação e Agentes: runbooks, skills e ADRs. Prioridade baixa, esforço médio.
+
+---
+
+## Fase 59 — Segurança na VPS: rate limit, anti-fraude e hardening
+
+Objetivo: a Fase 39 protege a Vercel, mas o Cloudflare Tunnel da Fase 46 expõe a VPS diretamente. Um atacante que descobra `dadinho-api.memetrigger.com` pode spammar a API sem passar pelo firewall da Vercel. Além disso, scripts automatizados podem explorar o motor de IA para obter vantagem injusta.
+
+- [x] **Nginx como reverse proxy na VPS** — Substituir o `EXPOSE 8000` direto do gunicorn por nginx escutando na porta 80/443 (loopback), com:
+  - Rate limit por IP (`limit_req_zone`): 60 req/s por IP no `/socket.io/`, 10 req/s no resto.
+  - Body size limit: 100KB (alinhado com `max_http_buffer_size` do Flask-SocketIO).
+  - Timeout de idle: 60s para WebSocket (evita conexões zumbis).
+  - Logs estruturados em JSON para auditoria.
+- [x] **CORS restritivo em produção** — `DADINHO_CORS_ORIGINS` nunca deve ser `*` em produção. Validação no `app.py`: se `VERCEL_ENV=production` ou `DADINHO_ENV=production` e CORS for `*`, log de WARNING e fallback para as origens fixas do frontend (`dadinho.memetrigger.com` + alias `dadinho-hazel.vercel.app`). O compose da VPS seta `DADINHO_ENV=production`.
+- [x] **Detecção de múltiplas contas por IP** — Novo índice no Redis (`dadinho:ip:<ip>` → SET de `client_id`s ativos, TTL 6h). Handler `connect` limita os sockets simultâneos por IP **opt-in** (`DADINHO_LIMITE_SOCKETS_IP`, default `0` = desligado; ativar em picos com folga para NAT/CGNAT). Excesso retorna `connect_error` com motivo `muitas_contas`. IP vindo de `Cf-Connecting-Ip`/`X-Forwarded-For` validado como IP antes de virar chave.
+- [x] **Anti-automação (Captcha opcional)** — Adicionar `DADINHO_CAPTCHA_ATIVO` (default: false). Quando ativo, o handler `connect` exige `hcaptcha_token` validado via `https://api.hcaptcha.com/siteverify`; só liga de fato com `DADINHO_HCAPTCHA_SITEKEY` + `HCAPTCHA_SECRET` (faltando um, fica desligado com aviso no log). Só ativado em picos de abuso (rate limit da Fase 39 estourado). Front-end carrega o widget sob demanda.
+- [x] **Detecção de bots por padrão de jogo** — Novo módulo `anti_fraude.py` com análise de padrões:
+  - `tempo_entre_acoes`: humano raramente joga em <200ms consistentemente.
+  - `acuracia_binomial`: humano erra cálculos; bots acertam 100% das apostas matematicamente ótimas.
+  - `padrao_horario`: atividade 24/7 sem pausas é suspeito.
+  - Flag `suspeito` no `Jogador` que, se ativado, força delay adicional nas ações.
+- [x] **Logs estruturados de eventos suspeitos** — Novo módulo `observabilidade.py` com funções `log_evento_suspeito(tipo, client_id, ip, dados)`: tipos como `aposta_rapida_demais` (<200ms entre apostas), `desconfianca_em_rajada` (3+ desconfianças em 5s), `multiplas_contas` (detecção do item 3). Logs vão para stdout em JSON.
+- [x] **Sanitização de logs** — Garantir que `chave_secreta`, `nonce_seed`, `dados` do jogador NUNCA apareçam nos logs. Auditar `app.py` com grep por `log`/`print` e substituir por `observabilidade.log_redigido`.
+- [ ] **Cloudflare WAF rules específicas** — No painel Zero Trust, criar regras para o tunnel `dadinho-api`:
+  - Bloquear user-agents de bot conhecidos (Python-urllib, curl, wget sem headers custom).
+  - Rate limit por ASN (bloquear data centers suspeitos).
+  - Challenge automático quando rate limit é estourado.
+
+Verificação:
+- Script de teste `tests/test_anti_fraude.py`: abre 10 sockets do mesmo IP, confirma que só 3 conectam.
+- Teste manual: `ab -n 1000 -c 50 http://localhost/socket.io/` deve ser limitado pelo nginx (503 após exceder).
+- Log de auditoria: `docker logs dadinho-api` deve mostrar eventos estruturados sem PII.
+
+---
+
+## Fase 60 — Performance e Otimizações Técnicas
+
+Objetivo: reduzir latência percebida pelos jogadores, eliminar gargalos conhecidos no runtime e otimizar o uso de recursos (CPU do GIL, I/O do Redis, memória do processo). Esta fase não adiciona features, apenas torna o motor do jogo mais rápido e eficiente sob carga.
+
+- [x] **Heartbeat com path de leitura rápido** — O handler `heartbeat` (`app.py`) hoje adquire o lock distribuído (`trancar_sala_distribuida`) mesmo quando é 95% leitura (renova `visto_em`, envia snapshot). Refatorado com `@evento_mutavel(lock_distribuido=False)`:
+  - Sala de espera: re-sync SEMPRE fresco do store (Fase E2 preservada), mas SEM lock distribuído — `ia.processar` é inerte na página 0 e o re-sync é leitura pura (sem risco de lost-update).
+  - Partida quieta servida do cache (`carregar_sala_leve` + página/vez corretas): só renova o resumo, sem lock.
+  - Só adquire o lock quando há mutação possível: leitura fresca (cache estourou) OU divergência de página/vez, em sala **em partida** — e então RE-lê fresco DENTRO do lock antes de `ia.processar` (evita mover o turno com estado pré-lock). Se a leitura fresca da espera revelar que a partida começou, escala para o caminho lockado.
+  - Esperado: redução de 70%+ nas aquisições de lock em salas ociosas (coberto por `tests/test_performance.py` — `heartbeat-fast-path`).
+- [x] **Cache agressivo de `carregar_resumo`** — Adicionado cache em processo por 5s (`CACHE_RESUMO_TTL`, max `CACHE_RESUMO_MAX`=2048, guarda com `threading.Lock`) em `store.py` (`_cache_resumos`), populado em `salvar_resumo`/`salvar_sala_com_resumo` e invalidado em `remover_resumo`. `None` NUNCA é cacheado (resumo recém-nascido não pode ficar invisível por 5s). Evita GET repetido no Redis para a mesma sala em rajadas de listagem/OG.
+- [x] **Migrar cálculo probabilístico da IA para LRU** — Aplicado `functools.lru_cache(maxsize=1024)` na função pura `probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa)` (`ia.py`). **Decisão:** cache na função pura e NÃO em `_probabilidade_aposta` (receberia `Jogador`/`Rodada` vivos → retenção de memória). Args numéricos hasháveis = seguro.
+- [x] **Batch de operações no Redis** — Novo `store.salvar_sala_com_resumo(lobby, resumo)` público (CAS/revisão da `salvar_sala` + dedup de assinatura da `salvar_resumo`) nas 3 classes: Memória (trivial), Upstash (pipeline SET sala + SET resumo + SADD índice num request) e Redis TCP (`self._redis.pipeline()`). `atualizar_lista_usuarios` (`funcoes_gerais.py`) e o heartbeat passaram a usar — antes eram 2-3 commands em sequência.
+- [x] **Lazy import do `redis` no `ArmazenamentoRedis`** — Removido o `try: import redis` do topo do `store.py`; a tupla de erros de rede virou `store.erros_de_rede()`, função LAZY que importa o pacote só quando ele é preciso (e guarda a classe em `_REDIS_ERRO_LAZY`). O verdadeiro cliente TCP continua só no `ArmazenamentoRedis.__init__`. **Nota honesta:** o flask_socketio→`socketio.redis_manager` já carrega o pacote `redis` no boot mesmo em modo Memória/Upstash, então o ganho de cold start é parcial (store standalone e Vercel sem socketio no caminho); o ganho real é o store nunca INSTANCIAR o cliente TCP na Vercel. Coberto em `tests/test_performance.py`.
+- [ ] **Pool de threads dedicado para `ia.processar`** — **NÃO implementado (decisão de arquitetura).** Viola a invariante do AGENTS.md "Sem threads/timers no servidor (`ia.processar` roda dentro do request)": em serverless a thread de fundo é morta junto com a resposta (Vercel), e a fila por sala reintroduziria estado em memória entre requests. O caminho serverless-safe continua sendo rodar a IA dentro do handler que mutou o estado — os caches (LRU + resumo + save combinado) reduzem o custo de cada processamento sem quebrar essa invariante.
+- [x] **Compressão de blobs no Redis** — Adicionada no `ArmazenamentoRedis` (VPS/Vercel TCP) apenas: `_comprimir`/`_descomprimir` com `zlib` nível 6 → `base64` (cliente com `decode_responses=True`), marcador `gz1:`, limiar de 512 bytes (blobs pequenos e os que não encolhem seguem crus). Compat retroativa: blob antigo sem o marcador carrega direto. Aplicado a `salvar_sala`, `carregar_sala` e `salvar_sala_com_resumo`.
+
+Revisão (revisor-dadinho, pós-implementação):
+- **P1 (corrigido):** `ArmazenamentoRedis.listar_lobbys` lia o blob cru com `json.loads` → sala salva comprimida (>512 B, i.e. praticamente qualquer sala com >1 jogador) era silenciosamente pulada, quebrando o fallback `buscar_lobby_pelo_client_id` após restart/expiração do índice. Agora passa por `_descomprimir` (igual ao `carregar_sala`) + teste `lista-lobbys-comprime`.
+- **P2 (corrigido):** assinatura do resumo e watermark de revisão do CAS eram gravados ANTES da escrita; numa escrita abortada, o conteúdo nunca-gravado ficava marcado como salvo (dedup ignoraria o save seguinte) e a revisão presa abortava todos os saves seguintes como `ConflitoDeEstado` até `remover_sala` (sala presa). `invalidar_cache_sala` agora também limpa `_cache_resumos`, `_resumos_assinatura` e `_revisoes_salvas` — e passou a ser chamado no `except` de `evento_mutavel`, `handle_connect` e `handle_disconnect` + teste `invalida-estado-aborto`.
+- **P3 (corrigido junto do P2):** `invalidar_cache_sala` só limpava `_cache_salas`; a mutação revertida podia servir resumo velho ao OG por até 5s.
+
+Verificação:
+- Teste de benchmark `tests/test_performance.py` (Fase 60): assertões DETERMINÍSTICAS (o CI não pode depender de timing) — LRU da IA (2ª chamada idêntica = cache hit), cache de resumo (miss→fill→hit→TTL→invalidate), dedup do save combinado, compressão+compat retroativa (fast fake do Redis), `listar_lobbys` com blob comprimido (P1), invalidação de estado pós-aborto (P2/P3) e o fast path do heartbeat (contagem de aquisições do lock distribuído: 0 na espera e na partida quieta, 1 na divergência).
+- `verificar.py` verde (34s) com a suite completa + `simular_ia.py --partidas 20 --dados 3` ok (distribuição normal de vitórias).
+- Lazy import: coberto por assert funcional no subprocess (store Memória nunca instancia o cliente TCP; `_REDIS_ERRO_LAZY` fica `None` até o 1º uso).
+
+---
+
+## Fase 61 — Escalabilidade Real: múltiplos workers cooperativos + Redis HA (adiado)
+
+Objetivo: escalar o backend da VPS além de 1 processo gunicorn threaded. Hoje a
+VPS roda **1 worker × 100 threads** (`Dockerfile`, pré-Fase 61): ~50 jogadores
+simultâneos. Com 4 réplicas gevent + sticky por IP no nginx + message queue,
+dá para crescer para 100+ jogadores sem perder estado de Socket.IO.
+
+Decisões tomadas (com o mantenedor, 2026-09-16):
+
+- **Motor:** **gevent** e não eventlet. O eventlet 0.41.2 carrega aviso oficial
+  dos mantenedores no PyPI ("usages in new projects are discouraged... plan the
+  retirement of eventlet"); o gevent é mantido ativamente e é suportado do
+  mesmo jeito por Flask-SocketIO/gunicorn/python-socketio.
+- **Topologia:** **4 containers × 1 worker gevent** (e não `-w 4` num único
+  container). A session Engine.IO vive na memória do worker e o gunicorn não faz
+  sticky session — com `-w 4` num processo, o long-polling/upgrade cairia em
+  worker errado ("Invalid session", loop de reconexão). Com réplicas separadas,
+  o nginx faz o sticky.
+- **Redis HA:** **postergado** — ver item 2.
+
+- [x] **Migrar o gunicorn para gevent e escalar por réplicas (sticky no nginx)**:
+  - `requirements.txt` + pins: `gevent==26.9.0`, `gevent-websocket==0.10.1`
+    (WebSocket do driver gevent do python-engineio), `greenlet==3.5.6`,
+    `zope.event==6.2`, `zope.interface==8.6`.
+  - `Dockerfile`: `gunicorn --worker-class gevent -w 1` (1 processo por container;
+    a escala é por réplicas, não por workers internos).
+  - `app.py`: guard de `monkey.patch_all()` no TOPO (antes dos imports de
+    socket/ssl/threading do Flask/redis/socketio), opt-in por env — o worker
+    gevent do gunicorn já aplica o patch antes de importar o app; o guard cobre o
+    dev local (`python app.py` com `DADINHO_ASYNC_MODE=gevent`) e é idempotente
+    (`is_module_patched`). Também preserva o caminho eventlet (só se pedir).
+  - `docker-compose.yml`: serviço `api` vira **4 réplicas** (`api`/`api2`/`api3`/
+    `api4`, anchor YAML `x-api-base`), todas usando a MESMA image `dadinho-api`
+    (build só no `api`; as outras não rebuilam), `DADINHO_ASYNC_MODE=gevent` no
+    ambiente, portas loopback 8000-8003 (smoke), healthcheck por réplica.
+  - `nginx/nginx.conf`: upstream com as 4 réplicas e **`hash $ip_real consistent;`**
+    — sticky por IP REAL (Cf-Connecting-Ip, estável — o `sid` muda a cada
+    reconexão; por IP o handshake+upgrade+pols do mesmo cliente caem na mesma
+    réplica). `keepalive 32` no upstream. Emits entre réplicas seguem pela
+    message queue (`DADINHO_MESSAGE_QUEUE` → `GerenciadorRedisSeguro`, Fase 25).
+  - `atualizar_vps.ps1`: rebuild `api api2 api3 api4 nginx` (um build sobe as 4).
+  - **Trade-off anotado:** com gevent, `ia.processar` (CPU-bound, puro Python)
+    roda dentro do handler — não preempta outros greenlets DA MESMA réplica
+    enquanto calcula (mesmo GIL limitaria threads nativas). As 4 réplicas
+    distribuem e o LRU da IA (Fase 60) barateou cada cálculo. Ok para casual.
+- [x] **Redis HA: documentar SPOF e adiar implementação** — O Redis local
+  (`redis:7-alpine` + AOF) é o único ponto de falha da VPS: AOF cobre restart do
+  container, não disaster (reset zera salas ativas/dados em andamento). Aceitável
+  num jogo casual cujo estado é por partida e se regenera (TTL limpa órfãos). O
+  caminho de upgrade fica aberto sem mudança de código: `store.ArmazenamentoRedis`
+  já é agnóstico à URL (`DADINHO_REDIS_URL`) — apontar para um Redis gerenciado
+  com HA ou subir Sentinel/replica quando necessário. Registrado em
+  `docs/verificacao.md` (passo 1 da VPS).
+
+Verificação:
+- `verificar.py` novo bloco **3c**: boot em subprocesso com `DADINHO_ASYNC_MODE=gevent`
+  (import do `app` + `socketio.async_mode == 'gevent'`) — valida que o motor
+  cooperativo importa limpo sem afetar o resto da suite (que segue em threading).
+- Nginx: `docker run --rm ... nginx -t` com os hostnames das réplicas → **config ok**.
+  **Achado corrigido:** o `nginx/nginx.conf` do repo (untracked, criado na Fase 59)
+  não tinha `events {}`/`http {}` — config de borda inválido como arquivo principal
+  do nginx (falharia no boot; a VPS provavelmente roda cópia divergente editada à
+  mão). Reescrito completo e válido; o próximo `atualizar_vps.ps1` sobrescreve o do
+  `/opt/dadinho` com a versão correta (já com as 4 réplicas + sticky).
+- Compose: `docker compose config --quiet` → **ok** (interpola `api`/`api2`/`api3`/
+  `api4`/`redis`/`nginx`/`tunnel`).
+- Smoke gevent local (Windows): gunicorn NÃO roda em Windows (sem `fcntl` — prod é
+  Linux/Docker), então validou-se pelo caminho dev: `python app.py` com
+  `DADINHO_ASYNC_MODE=gevent` → `/robots.txt` 200 e handshake
+  `0{"sid":...,"upgrades":["websocket"],...}` (WebSocket do driver gevent ativo).
+- Resto do pipeline (py_compile, node/i18n, boot VERCEL, integração, cross-instance,
+  anti-fraude, performance) inalterado e verde.
+- Deploy: seguir `docs/verificacao.md` (VPS). Smoke test local agora cobre
+  `127.0.0.1:8000` (réplica 1) e `127.0.0.1:8080` (nginx/borda). Validar em 2+
+  abas/navegadores conectando (página Vercel, socket VPS) e, na VPS,
+  `docker compose ps` deve mostrar `dadinho-api`, `dadinho-api-2/3/4`,
+  `dadinho-redis`, `dadinho-nginx`, `dadinho-tunnel`.
+
+---
+
+## Fase 62 — Documentação e Agentes: runbooks, skills e ADRs
+
+Objetivo: o conhecimento operacional das Fases 46/59/60/61 estava espalhado em
+comentários, no `todo.md` e na cabeça do mantenedor. Esta fase cria os lugares
+canônicos: **runbook de incidente** (o que fazer quando quebra), **ADRs** (por que
+decidimos) e **skills** (para o agente aplicar o checklist sozinho).
+
+- [x] **Runbook operacional (`docs/runbook.md`)** — playbooks por sintoma, com
+  comandos reais da VPS (`/opt/dadinho`, `docker compose`, `redis-cli`):
+  topologia; triagem em 30s; §4 público fora (tunnel/DNS/nginx); §5 réplica
+  unhealthy; §6 Redis down/SPOF (ADR-007); §7 deploy quebrado → rollback (VPS:
+  sem git → reenviar commit bom via `atualizar_vps.ps1`; Vercel: Promote/Rollback);
+  §8 salas presas/locks (`TRAVA_TTL=120s`, chaves `dadinho:sala|resumo|sid|ip|lock`);
+  §9 abuso/rate limit (503 do `limit_req`, camadas não redundantes, captcha opt-in);
+  §10 custo/alertas; §11 pós-incidente. Regras de ouro (nunca `rm -rf
+  /opt/dadinho/*`, nunca `down -v`, não editar blob à mão).
+- [x] **ADRs (`docs/adr/`)** — índice + template (`README.md`) e 7 decisões:
+  001 serverless Vercel + API VPS opcional; 002 lock por sala + message queue;
+  003 nginx de borda com rate limit por IP real; 004 anti-fraude heurístico +
+  captcha opt-in; 005 performance do store (cache/batch/compressão/LRU) e
+  rejeição do pool de threads da IA; 006 gevent + 4 réplicas + sticky; 007 Redis
+  local SPOF com HA **adiado**. Cada um com Contexto/Decisão/Consequências +
+  "o que proíbe"; ADR é imutável (mudança = novo ADR).
+- [x] **Skills novas (`.opencode/skills/`)** —
+  `vps-ops-dadinho` (triagem/incidente → aponta para `docs/runbook.md`, regras de
+  ouro) e `multi-instancia-dadinho` (checklist das invariantes cross-instance:
+  escopo de emit, lock+`salvar_sala`, sem estado em memória, invalidação de cache
+  e o trade-off do gevent). Ambas com `description` enxuta com palavras-gatilho.
+- [x] **Referências atualizadas** — `AGENTS.md` e `opencode.json` (descrição da
+  reference `docs`) agora citam `docs/runbook.md` e `docs/adr/`; lista de skills
+  inclui as duas novas. **Lembrete:** config/skills não recarregam a quente —
+  reiniciar o opencode após editar.
+- [x] **Resíduos da Fase 61 em `docs/verificacao.md`** — o passo da VPS ainda
+  dizia "proxy para a `api:8000`" e `--build api nginx` (API única). Corrigido
+  para as 4 réplicas (`api api2 api3 api4 nginx`) e sticky.
+
+Verificação:
+- Cross-check de fatos do runbook/ADRs contra o repo: nomes de serviço/container
+  (`docker compose config` → `api`/`api2`/`api3`/`api4`/`redis`/`nginx`/`tunnel`),
+  script `atualizar_vps.ps1` (`--build api api2 api3 api4 nginx`), chaves e TTLs
+  do `store.py` (`dadinho:sala|resumo|resumos|sid|ip|lobby_seq|lock`, TTL 7d/24h/6h,
+  `TRAVA_TTL=120`), zones do nginx (60r/s e 10r/s) — conferidos linha a linha.
+- `nginx -t` da config do repo (hostnames das réplicas) → ok; `python
+  verificar.py` inalterado (a fase é documental, sem código de jogo).
+- Skills/ADRs/runbook são **texto**: a verificação é o cross-check acima + o
+  teste manual de que eles respondem aos sintomas reais (rodar a triagem §3 numa
+  VPS de verdade quando houver incidente).

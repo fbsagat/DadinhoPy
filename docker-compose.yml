@@ -2,43 +2,93 @@
 # para estado + message queue, num processo persistente (diferente do serverless
 # da Vercel, que recicla a função e derruba o socket).
 #
-# Uso: `docker compose up -d` (defina DADINHO_SECRET_KEY e DADINHO_CORS_ORIGINS
-# no .env ou no ambiente antes).
+# Uso: `docker compose up -d --build` (defina DADINHO_SECRET_KEY e
+# DADINHO_CORS_ORIGINS no .env ou no ambiente antes). O `--build` é necessário
+# na primeira subida: `api` tem o `build: .` e `api2/3/4` usam a MESMA image
+# `dadinho-api` (um build sobe as 4).
+#
+# Fase 46/61: API na VPS como processo persistente (diferente do serverless da
+# Vercel, que recicla a função e derruba o socket). Sobe o backend Socket.IO,
+# um Redis local para estado + message queue, 4 réplicas da API atrás do nginx
+# e o Cloudflare Tunnel.
+
+# Bloco comum das 4 réplicas da API (Fase 61): mesmo image/configure — só mudam
+# container_name e a porta loopback de smoke. 1 worker gevent por container;
+# o nginx faz sticky por IP real (`hash $ip_real consistent;`) e a message queue
+# (DADINHO_MESSAGE_QUEUE) propaga os emits entre as réplicas.
+x-api-base: &api-base
+  restart: unless-stopped
+  environment:
+    # Estado do jogo no Redis TCP local (ArmazenamentoRedis, store.py).
+    DADINHO_REDIS_URL: redis://redis:6379/0
+    # Message queue (emits entre instâncias) no MESMO Redis local.
+    DADINHO_MESSAGE_QUEUE: redis://redis:6379/0
+    # Fase 61: worker gevent do gunicorn exige async_mode=gevent.
+    DADINHO_ASYNC_MODE: "gevent"
+    # Chave de sessão do Flask (nunca comitar; gere com token_hex(32)).
+    DADINHO_SECRET_KEY: ${DADINHO_SECRET_KEY:?defina DADINHO_SECRET_KEY no .env}
+    # Origens do frontend (Vercel). Sem esta var, cai nas duas origens do
+    # projeto (domínio canônico + alias). "*" continua aceito em dev, mas em
+    # produção (DADINHO_ENV=production) o app recusa e loga aviso.
+    DADINHO_CORS_ORIGINS: ${DADINHO_CORS_ORIGINS:-https://dadinho.memetrigger.com,https://dadinho-hazel.vercel.app}
+    DADINHO_PERMITIR_WEBSOCKET: "true"
+    # Fase 59: a API está em produção atrás do tunnel (ativa o guard de CORS e
+    # sinaliza ambiente). Não confundir com VERCEL_ENV (a API não roda na Vercel).
+    DADINHO_ENV: "production"
+    # Fase 59 (opt-in): limite de sockets simultâneos por IP. Default 0
+    # (desligado) — ativar em picos de abuso; cuidado com IPs compartilhados
+    # (CGNAT/rede corporativa), que podem agregar vários jogadores.
+    DADINHO_LIMITE_SOCKETS_IP: ${DADINHO_LIMITE_SOCKETS_IP:-0}
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/robots.txt', timeout=5).status==200 else 1)"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 10s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
 services:
   api:
+    <<: *api-base
+    image: dadinho-api
     build: .
     container_name: dadinho-api
-    restart: unless-stopped
-    environment:
-      # Estado do jogo no Redis TCP local (ArmazenamentoRedis, store.py).
-      DADINHO_REDIS_URL: redis://redis:6379/0
-      # Message queue (emits entre instâncias) no MESMO Redis local.
-      DADINHO_MESSAGE_QUEUE: redis://redis:6379/0
-      # Chave de sessão do Flask (nunca comitar; gere com token_hex(32)).
-      DADINHO_SECRET_KEY: ${DADINHO_SECRET_KEY:?defina DADINHO_SECRET_KEY no .env}
-      # Origens do frontend (Vercel). Ex.: https://dadinho.memetrigger.com,https://dadinho-hazel.vercel.app
-      # "*" libera tudo (casual). Sem esta var, só same-origin.
-      DADINHO_CORS_ORIGINS: ${DADINHO_CORS_ORIGINS:-*}
-      DADINHO_PERMITIR_WEBSOCKET: "true"
     ports:
-      # Só loopback: a exposição pública é via Cloudflare Tunnel (cloudflared),
-      # que conecta em http://127.0.0.1:8000 — o UFW (deny default) não abre 8000.
+      # Só loopback (a api não é exposta direto): smoke test local da réplica 1.
       - "127.0.0.1:8000:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/robots.txt', timeout=5).status==200 else 1)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+  api2:
+    <<: *api-base
+    image: dadinho-api
+    container_name: dadinho-api-2
+    ports:
+      - "127.0.0.1:8001:8000"
+  api3:
+    <<: *api-base
+    image: dadinho-api
+    container_name: dadinho-api-3
+    ports:
+      - "127.0.0.1:8002:8000"
+  api4:
+    <<: *api-base
+    image: dadinho-api
+    container_name: dadinho-api-4
+    ports:
+      - "127.0.0.1:8003:8000"
 
   redis:
     image: redis:7-alpine
     container_name: dadinho-redis
     restart: unless-stopped
     # Persistência local (append-only) para o estado sobreviver a restart.
+    # Fase 61: Redis local é SPOF documentado (ver todo.md Fase 61 item 2 — HA
+    # adiado; AOF cobre restart, não disaster).
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - dadinho_redis_data:/data
@@ -54,8 +104,10 @@ services:
   # Cloudflare Tunnel (Fase 46/VPS): expõe dadinho-api.memetrigger.com para o
   # container da API, sem abrir porta no UFW (mesmo padrão do jellyfin-tunnel).
   # Token em /opt/dadinho/.env (TUNNEL_TOKEN) — criado no painel Zero Trust.
-  # O ingress (hostname -> localhost:8000) vem do config.yml local, montado
+  # O ingress (hostname -> localhost:8080) vem do config.yml local, montado
   # em ./cloudflared/config.yml (mais robusto que depender da UI do painel).
+  # Fase 59: o tunnel aponta para o nginx (borda com rate limit por IP), não
+  # direto para a api.
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: dadinho-tunnel
@@ -66,6 +118,33 @@ services:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
     volumes:
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # Fase 59 (nginx de borda): rate limit por IP real + proxy para as 4 réplicas
+  # da API (Fase 61: sticky `hash $ip_real consistent;`), só em loopback (a
+  # exposição pública continua sendo o Cloudflare Tunnel, agora apontando para
+  # 127.0.0.1:8080). As réplicas mantêm portas loopback (8000-8003) para smoke.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: dadinho-nginx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+      api3:
+        condition: service_healthy
+      api4:
+        condition: service_healthy
     logging:
       driver: json-file
       options:

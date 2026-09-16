@@ -56,12 +56,60 @@ const api_url = (document.querySelector('meta[name="dadinho-api-url"]') || {}).c
 // WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
 // request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
 // entra em loop de reconexão). O polling fica só como fallback de rede.
+// Fase 59 (captcha no connect): quando o servidor injeta
+// <meta name="dadinho-hcaptcha-sitekey">, o connect é adiado até o token
+// hCaptcha sair (a API recusa o handshake sem ele). Sem a meta, nada muda.
+const captcha_sitekey = (document.querySelector('meta[name="dadinho-hcaptcha-sitekey"]') || {}).content || '';
 const socket = io(api_url || undefined, {
-    autoConnect: true,
+    autoConnect: !captcha_sitekey,
     transports: ['websocket', 'polling'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
 });
-socket.connect();
+
+function conecta_com_captcha() {
+    // Fail-open: se o script da hCaptcha não carregar (rede/bloqueador), cai
+    // no connect sem token — o servidor decide (sem DADINHO_CAPTCHA_ATIVO na
+    // API o token nem é exigido; com, o connect é recusado e o erro aparece).
+    if (!window.hcaptcha) {
+        socket.connect();
+        return;
+    }
+    window.hcaptcha.execute(captcha_sitekey, { async: true })
+        .then(function (token) {
+            socket.io.opts.query = Object.assign({}, socket.io.opts.query, { hcaptcha_token: token });
+            socket.connect();
+        })
+        .catch(function () {
+            socket.connect();
+        });
+}
+
+if (captcha_sitekey) {
+    const script = document.createElement('script');
+    script.src = 'https://hcaptcha.com/1/api.js?render=' + encodeURIComponent(captcha_sitekey);
+    script.async = true;
+    script.onload = conecta_com_captcha;
+    script.onerror = conecta_com_captcha;
+    document.head.appendChild(script);
+} else {
+    socket.connect();
+}
+
+// Fase 59: connect recusado pelo servidor (limite de conexões por IP ou
+// captcha inválido). O servidor manda `motivo` com chave i18n — resolve aqui
+// mesmo no cliente (invariante: o servidor nunca escolhe idioma). Só nesse caso
+// (recusa intencional) o socket é desconectado de vez: sem isso, a reconexão
+// automática repetiria o handshake num loop com o mesmo erro. Erro transitório
+// (queda de rede, réplica reiniciando, ping timeout) NÃO desconecta — o
+// socket.io continua tentando com backoff (o status_conexao sinaliza).
+socket.on('connect_error', function (erro) {
+    const dados = (erro && erro.data) || null;
+    if (!dados || !dados.motivo || !dados.motivo.chave) {
+        return;
+    }
+    socket.disconnect();
+    mostrar_alerta(t(dados.motivo.chave, dados.motivo.params || {}), 'erro');
+});
 
 // Heartbeat de sala: renova o "visto_em" no servidor para a busca distinguir
 // salas vivas das órfãs do serverless (instância que morreu sem disconnect).

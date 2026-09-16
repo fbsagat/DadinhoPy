@@ -49,10 +49,20 @@ persistente em Docker; o **frontend continua na Vercel** (só a API na VPS).
 Compose v5.4.0), em `/opt/dadinho` (isolado dos demais projetos — MemeTrigger,
 jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
 
-1. **Repositório:** o `Dockerfile`/`docker-compose.yml` na raiz sobem a API (gunicorn
-   `threading` + simple-websocket, `-w 1` obrigatório — sem sticky session no gunicorn)
-   e um Redis local com AOF (`redis:7-alpine`). Na VPS, `docker compose up -d` a partir
-   de `/opt/dadinho` (código copiado do repo — não há git clone na VPS para o Dadinho).
+1. **Repositório:** o `Dockerfile`/`docker-compose.yml` na raiz sobem **4 réplicas da
+   API** (Fase 61: gunicorn `gevent`, 1 worker cooperativo por container) atrás do
+   nginx (Fase 59/61: rate limit por IP + sticky `hash $ip_real consistent;`), um
+   Redis local com AOF (`redis:7-alpine`) e o tunnel Cloudflare. As sessions do
+   Socket.IO ficam na réplica que aceitou o handshake (sticky por IP); os emits
+   entre réplicas usam a message queue (`DADINHO_MESSAGE_QUEUE` → pub/sub no
+   Redis). Na VPS, `docker compose up -d` a partir de `/opt/dadinho` (código
+   copiado do repo — não há git clone na VPS para o Dadinho).
+   - **Redis local = SPOF documentado (Fase 61, item 2):** AOF cobre restart do
+     container, não disaster. Um reset zera o estado (salas ativas/dados em
+     andamento) — aceitável num jogo casual cujo estado é por partida (TTL limpa
+     órfãos e o jogo se regenera). HA real (Sentinel/replica/managed) fica para
+     quando houver necessidade; o `store.ArmazenamentoRedis` já é agnóstico à URL
+     (`DADINHO_REDIS_URL`).
 
 2. **Variáveis de ambiente no `/opt/dadinho/.env`** (600, gitignored):
    - `DADINHO_REDIS_URL=redis://redis:6379/0` — estado do jogo (`store.ArmazenamentoRedis`).
@@ -70,11 +80,18 @@ jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
      (adicionar env não redeploya sozinho — `vercel redeploy <url-prod> --target production`).
 
 4. **Exposição pública — Cloudflare Tunnel** (o UFW da VPS só libera 22 e 80/443 de
-   faixas da Cloudflare; a porta 8000 da API fica **em loopback**):
+   faixas da Cloudflare; as portas da API/nginx ficam **em loopback**):
    - Container `dadinho-tunnel` (`cloudflare/cloudflared`) no compose, `network_mode:
      host`, com `TUNNEL_TOKEN` do `.env` e **ingress local** em
      `/opt/dadinho/cloudflared/config.yml` (ver `cloudflared/config.yml.example` no repo):
-     `dadinho-api.memetrigger.com → http://localhost:8000`, fallback `http_status:404`.
+     `dadinho-api.memetrigger.com → http://localhost:8080`, fallback `http_status:404`.
+   - **Fase 59 (nginx de borda):** o tunnel aponta para 8080, onde o serviço `nginx`
+     do compose aplica **rate limit por IP real** (60 req/s no `/socket.io/`, 10 req/s
+     no resto; nginx/nginx.conf) e proxy para as **4 réplicas da API** (Fase 61:
+     sticky `hash $ip_real consistent;` → `api`/`api2`/`api3`/`api4:8000`) — a api não
+     recebe tráfego direto do tunnel desde a Fase 59. Se o `config.yml` da VPS ainda
+     aponta para 8000 (deploy anterior a 59), trocar para 8080 e recriar o tunnel
+     manualmente.
    - **No painel Zero Trust** criar o tunnel e, no DNS da zona, um **CNAME manual**
      `dadinho-api → <tunnel-id>.cfargotunnel.com` (a opção "hostname route" do painel
      cria a rota mas **não** o CNAME — sem o CNAME o DNS não resolve).
@@ -91,7 +108,14 @@ jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
 6. **Observações de operação:**
    - `DADINHO_REDIS_URL`/`DADINHO_MESSAGE_QUEUE` são para a VPS — a Vercel não alcança um
      Redis local (o boot com `VERCEL=1` segue exigindo o Upstash).
-   - Logs/estado: `docker compose logs -f api`, `docker compose ps` (em `/opt/dadinho`).
+   - Logs/estado: `docker compose logs -f api` (e `-f nginx`, Fase 59 — o nginx loga
+     JSON no stdout com o IP real e o status de cada request), `docker compose ps`
+     (em `/opt/dadinho`). Eventos suspeitos do anti-fraude/captcha/limite saem no
+     `stdout` da api (observabilidade.py).
+   - Segurança (Fase 59, opt-in): `DADINHO_LIMITE_SOCKETS_IP` (limite de sockets por
+     IP na API), `DADINHO_CAPTCHA_ATIVO` + `DADINHO_HCAPTCHA_SITEKEY` + `HCAPTCHA_SECRET`
+     (captcha no connect), rate limit por IP real no nginx (60/s no `/socket.io/`).
+     Detalhes das envs em `.env.example` e no `todo.md` (Fase 59).
    - Não há auto-deploy do Dadinho na VPS — toda atualização é manual.
 
 ## Atualizar a VPS após um push (fluxo manual, passo a passo)
@@ -111,8 +135,10 @@ Na raiz do repo:
 .\atualizar_vps.ps1 -Chave "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key"
 ```
 
-O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API, recreate do
-tunnel se `docker-compose.yml` mudou, smoke test local e público). Params opcionais:
+O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API **e do
+`nginx`** (Fase 59), recreate do
+tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
+8080 — e público). Params opcionais:
 `-HostVps` (padrão `167.126.27.4`) e `-Usuario` (padrão `ubuntu`).
 
 ### Opção B — manual (equivalente ao script)
@@ -135,10 +161,11 @@ tunnel se `docker-compose.yml` mudou, smoke test local e público). Params opcio
    `cloudflared/config.yml` (ingress do tunnel) e o `.env` está oculto (glob `*` não
    pega dotfile, mas o `config.yml` é perdido). Tar com excludes preserva os dois.
 
-2. **Rebuild da API** (só a api muda no push normal; redis/tunnel ficam):
+2. **Rebuild da API e do nginx** (Fase 61: `api` tem o `build: .`; `api2/3/4` usam
+   a MESMA image `dadinho-api` — um build sobe as 4; redis/tunnel ficam):
 
    ```bash
-   cd /opt/dadinho && sudo docker compose up -d --build api
+   cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx
    ```
 
 3. **Tunnel** — recriar apenas se `docker-compose.yml` mudou (o ingress do
@@ -155,6 +182,9 @@ tunnel se `docker-compose.yml` mudou, smoke test local e público). Params opcio
    # local (loopback)
    curl -s -o /dev/null -w 'robots:%{http_code}\n' http://127.0.0.1:8000/robots.txt
    curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling'
+   # borda nginx (Fase 59; por onde o tunnel passa)
+   curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8080/robots.txt
+   curl -s 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling'
    # público (pelo tunnel)
    curl -s -o /dev/null -w 'robots:%{http_code}\n' https://dadinho-api.memetrigger.com/robots.txt
    curl -s 'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=polling'

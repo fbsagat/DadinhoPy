@@ -4,6 +4,7 @@ from flask_socketio import emit
 
 import narrador
 import seed
+import anti_fraude
 from modelos.comum import somente_ias_na_partida
 from modelos.turno import Turno
 
@@ -300,9 +301,11 @@ class Rodada:
             'tempo_max': int(self.da_partida.do_lobby.config.get('tempo_max_jogada', 0) or 0),
         }
         self.da_partida.do_lobby.pagina = 3
-        pensou = (narrador.tempo_pensamento(jogador.ia_nivel, jogador=jogador,
-                                            so_ias=somente_ias_na_partida(self.da_partida))
-                  if jogador.is_ia else 0)
+        pensou = max(
+            (narrador.tempo_pensamento(jogador.ia_nivel, jogador=jogador,
+                                       so_ias=somente_ias_na_partida(self.da_partida))
+             if jogador.is_ia else 0),
+            anti_fraude.delay_adicional(jogador))
         emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou,
                                                         aposta=ultimo_turno),
              to=self.sala_room())

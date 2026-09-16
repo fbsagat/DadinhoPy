@@ -5,6 +5,8 @@
 # da instalação e não deve ser commitado (ver .gitignore).
 tunnel: <tunnel-id>
 ingress:
+  # Fase 59: aponta para o nginx de borda (rate limit por IP real), não mais
+  # direto para a api em 8000. O nginx publica só em 127.0.0.1:8080.
   - hostname: dadinho-api.memetrigger.com
-    service: http://localhost:8000
+    service: http://localhost:8080
   - service: http_status:404

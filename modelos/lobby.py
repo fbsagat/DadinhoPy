@@ -246,6 +246,7 @@ class Lobby:
         jogador.ia_nivel = dados_jogador.get('ia_nivel')
         jogador.ia_risco = float(dados_jogador.get('ia_risco', 0.5) or 0.5)
         jogador.ia_agressividade = float(dados_jogador.get('ia_agressividade', 0.5) or 0.5)
+        jogador.suspeito = dados_jogador.get('suspeito')
         jogador.compromisso_seed = dados_jogador.get('compromisso_seed')
         jogador.nonce_seed = dados_jogador.get('nonce_seed')
         jogador.revelado_seed = bool(dados_jogador.get('revelado_seed', False))

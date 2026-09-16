@@ -39,8 +39,10 @@ tar -czf - `
     & ssh @sshBase "cd /opt/dadinho && sudo tar -xzf -"
 if ($LASTEXITCODE -ne 0) { Write-Host "ERRO: copia falhou." -ForegroundColor Red; exit 1 }
 
-Write-Host "==> Rebuild da API ..." -ForegroundColor Cyan
-& $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api"
+Write-Host "==> Rebuild da API (image dadinho-api) e do nginx ..." -ForegroundColor Cyan
+# Fase 61: `api` tem o `build: .`; api2/3/4 usam a MESMA image `dadinho-api`
+# (sem build próprio) — um build sobe as 4 réplicas.
+& $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx"
 
 # O tunnel so recria quando a definicao do servico mudou (docker-compose.yml).
 # O config.yml do ingress vive so na VPS e nunca vem do repo.
@@ -54,7 +56,9 @@ if ($hashLocal -ne $hashRemoto) {
 }
 
 Write-Host "==> Smoke test local ..." -ForegroundColor Cyan
-& $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"
+# A réplica 1 em 8000 (loopback), as demais em 8001-8003, e a borda nginx em
+# 8080 (por onde o tunnel passa).
+& $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo && curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8080/robots.txt && curl -s 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"
 
 Write-Host "==> Smoke test publico (via tunnel) ..." -ForegroundColor Cyan
 curl.exe -s -o /dev/null -w "robots_pub:%{http_code}\n" "https://dadinho-api.memetrigger.com/robots.txt"

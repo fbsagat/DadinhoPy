@@ -25,7 +25,8 @@ MODULOS = [
     "modelos/jogador.py", "modelos/turno.py", "modelos/rodada.py",
     "modelos/partida.py", "modelos/lobby.py",
     "funcoes_gerais.py", "store.py", "ia.py", "seed.py",
-    "tema.py", "gerar_musica.py", "narrador.py", "simular_ia.py", "api/index.py",
+    "tema.py", "gerar_musica.py", "narrador.py", "simular_ia.py",
+    "observabilidade.py", "anti_fraude.py", "api/index.py",
 ]
 SALA = "verificacao"
 

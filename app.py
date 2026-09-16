@@ -1,3 +1,18 @@
+# Fase 61: motor cooperativo opt-in por env (VPS). O worker `gevent` do gunicorn
+# já aplica `monkey.patch_all()` ANTES de importar o app; este guard só cobre o
+# dev local (`python app.py` com DADINHO_ASYNC_MODE=gevent). O patch é
+# idempotente e precisa vir ANTES dos imports de socket/ssl/threading em runtime
+# (Flask, redis, socketio) — por isso fica no topo, antes de tudo. O motor é
+# SÓ gevent (ADR-006); eventlet não está nas dependências.
+import os as _os
+
+_async_mode_lido = _os.environ.get("DADINHO_ASYNC_MODE", "threading").strip().lower()
+if _async_mode_lido == "gevent":
+    from gevent import monkey as _monkey_gevent
+    if not _monkey_gevent.is_module_patched("socket"):
+        _monkey_gevent.patch_all()
+del _async_mode_lido, _os
+
 from flask import Flask, Response, make_response, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
@@ -11,16 +26,21 @@ from modelos import Jogador
 from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
 from socketio.manager import Manager as GerenciadorSocketIOBase
+import anti_fraude
 import functools
 import hmac
 import http.client
+import ipaddress
+import json
 import os
 import secrets
 import socketio as pacote_socketio
 import store
 import ia
+import observabilidade
 import tema
 import threading
+import urllib.parse
 
 app = Flask(__name__)
 # Fase 27 (I3): sem `DADINHO_SECRET_KEY` definida, uma chave aleatória por
@@ -52,6 +72,46 @@ COOLDOWN_BUSCA = 2.0
 # Nível de IA usado na jogada automática de um humano atrasado (Fase 21): um
 # nível médio produz apostas razoáveis sem virar "assistente de jogo".
 AUTO_IA_NIVEL = 2
+
+# Limite de sockets simultâneos por IP (Fase 59): opt-in por env — quem não
+# setar não muda nada (regressão zero nos deploys atuais). '0' = desligado.
+def _ler_limite_sockets_ip():
+    bruto = os.environ.get("DADINHO_LIMITE_SOCKETS_IP", "0") or "0"
+    try:
+        return max(0, int(bruto))
+    except (TypeError, ValueError):
+        observabilidade.log_advertencia(
+            "DADINHO_LIMITE_SOCKETS_IP inválido — usando 0 (desligado).", valor=bruto)
+        return 0
+
+
+LIMITE_SOCKETS_IP = _ler_limite_sockets_ip()
+# Origens fixas permitidas quando a produção está com CORS aberto (`*`): as
+# páginas da Vercel (domínio canônico + alias do projeto). Usadas como fallback
+# do guard de produção da Fase 59.
+CORS_PADRAO_PRODUCAO = (
+    "https://dadinho.memetrigger.com",
+    "https://dadinho-hazel.vercel.app",
+)
+_EM_PRODUCAO = (os.environ.get("VERCEL_ENV") == "production"
+                or os.environ.get("DADINHO_ENV") == "production")
+
+
+def _normalizar_cors(origens, producao):
+    """
+    Garante que produção nunca aceite CORS `*` (Fase 59): um site malicioso
+    poderia abrir sockets no `session.id` de um jogador desatento. Em produção
+    com `*`, cai para as origens fixas do frontend (Vercel) com aviso no log.
+    """
+    if not origens:
+        return None
+    if not producao or "*" not in origens:
+        return list(origens)
+    observabilidade.log_advertencia(
+        "CORS '*' em produção é inseguro — caindo para as origens fixas do frontend.",
+        origens=origens, fallback=list(CORS_PADRAO_PRODUCAO),
+    )
+    return list(CORS_PADRAO_PRODUCAO)
 
 
 class GerenciadorThreadSeguro(GerenciadorSocketIOBase):
@@ -154,7 +214,8 @@ else:
 _cors_env = os.environ.get("DADINHO_CORS_ORIGINS", "").strip()
 cors_permitidos = None
 if _cors_env:
-    cors_permitidos = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    cors_permitidos = _normalizar_cors(
+        [o.strip() for o in _cors_env.split(",") if o.strip()], _EM_PRODUCAO)
 socketio = SocketIO(
     app,
     async_mode=async_mode,
@@ -168,6 +229,72 @@ socketio = SocketIO(
     # Limitar a entrada (default 1 MB) reduz a superfície de abuso/DoS.
     max_http_buffer_size=100_000,
 )
+
+# Fase 59 (segurança): captcha no connect é opt-in (`DADINHO_CAPTCHA_ATIVO`).
+# O frontend só carrega o script da hCaptcha quando o servidor injeta a meta
+# com a sitekey — sem env, o fluxo é o clássico (regressão zero). O captcha só
+# liga de fato com SECRET + SITEKEY presentes: ativo pela metade (sem um dos
+# dois) recusaria TODOS os connects e derrubaria o jogo — melhor desligar com
+# aviso no log.
+HCAPTCHA_SECRET = os.environ.get("HCAPTCHA_SECRET", "").strip()
+DADINHO_HCAPTCHA_SITEKEY = os.environ.get("DADINHO_HCAPTCHA_SITEKEY", "").strip()
+_captcha_pedido = os.environ.get("DADINHO_CAPTCHA_ATIVO", "").strip().lower() in ("1", "true", "sim")
+CAPTCHA_ATIVO = _captcha_pedido and bool(HCAPTCHA_SECRET and DADINHO_HCAPTCHA_SITEKEY)
+if _captcha_pedido and not CAPTCHA_ATIVO:
+    observabilidade.log_advertencia(
+        "DADINHO_CAPTCHA_ATIVO ligado mas HCAPTCHA_SECRET/DADINHO_HCAPTCHA_SITEKEY "
+        "faltando — captcha DESLIGADO para não bloquear todos os connects.")
+
+
+def _ip_do_cliente():
+    """
+    IP real do cliente na arquitetura atual (Fase 59). A API roda atrás do
+    Cloudflare Tunnel da VPS: `REMOTE_ADDR` é sempre loopback/nginx (cloudflared).
+    As camadas de verdade, em ordem:
+      1. `Cf-Connecting-Ip` — header definido pelo cloudflared (o padrão na VPS);
+      2. `X-Forwarded-For` (1º valor) — proxy genérico;
+      3. `REMOTE_ADDR` — fallback (dev local, Vercel sem proxy à frente).
+    Cada candidato é validado como IP (formato) antes de virar chave do índice:
+    um header forjado não pode criar chaves arbitrárias nem poluir os logs.
+    """
+    candidatos = [
+        request.headers.get("Cf-Connecting-Ip", "").strip(),
+        request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip(),
+        (request.remote_addr or "").strip(),
+    ]
+    for candidato in candidatos:
+        if not candidato:
+            continue
+        try:
+            ipaddress.ip_address(candidato)
+            return candidato
+        except ValueError:
+            continue
+    return "desconhecido"
+
+
+def _validar_hcaptcha(token, remoteip):
+    """
+    Valida o token hCaptcha no servidor (Fase 59). Espera `siteverify` que
+    não seja {success: False}. Qualquer falha de rede/HTTP devolve False com
+    registro suspeito — o connect é recusado (fail-closed é o correto aqui:
+    uma recusa a mais não custa; um bot a menos, sim).
+    """
+    if not CAPTCHA_ATIVO:
+        return True
+    corpo = f"secret={urllib.parse.quote(HCAPTCHA_SECRET)}&response={urllib.parse.quote(token)}"
+    if remoteip:
+        corpo += f"&remoteip={urllib.parse.quote(remoteip)}"
+    try:
+        conexao = http.client.HTTPSConnection("api.hcaptcha.com", timeout=6)
+        conexao.request("POST", "/siteverify", body=corpo,
+                        headers={"Content-Type": "application/x-www-form-urlencoded"})
+        resposta = conexao.getresponse()
+        dados = json.loads(resposta.read().decode("utf-8"))
+        conexao.close()
+        return bool(dados.get("success"))
+    except Exception:
+        return False
 
 
 def achar_jogador(client_id):
@@ -372,7 +499,7 @@ def _gc_sala(lobby):
     return False
 
 
-def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
+def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=True):
     """
     Wrapper padrão para handlers que mutam estado de sala (Fase 7):
     - V2: rate limit leve por sid (desligável com `cooldown=None` para eventos
@@ -382,6 +509,11 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
     - Fase 24: lock distribuído por sala (Upstash) por dentro do local —
       serializa a mutação ENTRE instâncias (pré-requisito da message queue);
     - V3: payload malformado aborta silenciosamente (nunca exceção no evento).
+
+    Fase 60: `lock_distribuido=False` é para caminhos apenas-leitura que servem
+    de re-sync (heartbeat) — o lock distribuído é adquirido pontualmente DENTRO
+    do handler só quando há mutação de fato (economia de 2 comandos por batida
+    em salas ociosas, onde a mutação é inexistente).
     """
     def decorator(func):
         @functools.wraps(func)
@@ -394,8 +526,10 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                 if sala_id is None:
                     return func(*args, **kwargs)
                 with trancar_sala(sala_id):
-                    with trancar_sala_distribuida(sala_id):
-                        return func(*args, **kwargs)
+                    if lock_distribuido:
+                        with trancar_sala_distribuida(sala_id):
+                            return func(*args, **kwargs)
+                    return func(*args, **kwargs)
             except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError,
                     store.TravaIndisponivel,
                     # Fase 52: save de um lobby stale (possível lost-update) —
@@ -407,11 +541,12 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA):
                     # abortam silenciosamente — sem elas, um blip de rede estoura o
                     # handler, loga traceback e perde o estado do read-modify-write.
                     OSError, http.client.HTTPException,
-                    # Fase 46: o ArmazenamentoRedis (VPS) fala com o Redis via
+                    # Fase 46/60: o ArmazenamentoRedis (VPS) fala com o Redis via
                     # redis-py, cujas falhas (ConnectionError, TimeoutError,
-                    # ResponseError) herdam de RedisError, não de OSError — o
-                    # blip do Redis local aborta como o do Upstash.
-                    store.RedisError):
+                    # ResponseError) herdam de RedisError, não de OSError; a
+                    # classe entra na tupla lazy (`store.erros_de_rede`) para não
+                    # importar o pacote no boot da Vercel.
+                    store.erros_de_rede()):
                 # Aborto no meio de uma mutação: o objeto vivo do cache de re-sync
                 # pode ter sido poluído — descarta para a próxima leitura recarregar.
                 if sala_id is not None:
@@ -497,13 +632,18 @@ API_URL = os.environ.get("DADINHO_API_URL", "").strip().rstrip("/")
 # dela para o WebSocket/polling do socket.io não ser bloqueado em modo
 # bloqueante. Sem DADINHO_API_URL, mantém o 'self' (regressão zero).
 _origem_api_csp = f" {API_URL}" if API_URL else ""
+# Fase 59: com captcha ativo, o script/iframe/estilos da hCaptcha e a
+# verificação de token exigem as origens dela no CSP (senão a política
+# bloqueante quebraria o widget). Sem `DADINHO_CAPTCHA_ATIVO`, intacto.
+_captcha_csp = " https://hcaptcha.com https://*.hcaptcha.com" if CAPTCHA_ATIVO else ""
 CSP = (
     "default-src 'self'; "
-    "script-src 'self' https://cdn.socket.io https://cdn.jsdelivr.net; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
-    "img-src 'self' data:; "
-    f"connect-src 'self'{_origem_api_csp} https://fonts.gstatic.com https://va.vercel-scripts.com; "
+    f"script-src 'self' https://cdn.socket.io https://cdn.jsdelivr.net{_captcha_csp}; "
+    f"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com{_captcha_csp}; "
+    f"font-src 'self' https://fonts.gstatic.com{_captcha_csp}; "
+    f"img-src 'self' data:{_captcha_csp}; "
+    f"connect-src 'self'{_origem_api_csp} https://fonts.gstatic.com https://va.vercel-scripts.com{_captcha_csp}; "
+    f"frame-src 'self'{_captcha_csp}; "
     "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
 )
 
@@ -544,7 +684,9 @@ def index():
     sala_id = normalizar_sala(request.args.get('sala'))
     if sala_id != SALA_PADRAO:
         og = _og_sala(sala_id, request.url)
-    resposta = make_response(render_template("jogo.html", og=og, api_url=API_URL))
+    resposta = make_response(render_template(
+        "jogo.html", og=og, api_url=API_URL,
+        hcaptcha_sitekey=DADINHO_HCAPTCHA_SITEKEY if CAPTCHA_ATIVO else ''))
     # Fase 44: CSP em Report-Only por padrão; `DADINHO_CSP_MODO=bloqueante`
     # aplica a política de verdade (depois de revisar as violações no browser).
     if os.environ.get("DADINHO_CSP_MODO", "").strip().lower() == "bloqueante":
@@ -636,6 +778,50 @@ def handle_connect():
     cliente navega para o código devolvido e reconecta já na sala nova.
     """
     client_id = request.sid
+    # Fase 59: limite de sockets simultâneos por IP (opt-in) + captcha opcional.
+    # O índice de IPs vive no store (`dadinho:ip:<ip>`); um blip de rede ao
+    # gravar o índice NÃO barra ninguém (fail-open com registro suspeito — só
+    # o handicap de segurança perde, o jogo segue).
+    ip = _ip_do_cliente()
+    if LIMITE_SOCKETS_IP > 0:
+        try:
+            total_no_ip = store.registrar_ip(ip, client_id) or 0
+        except Exception:
+            observabilidade.log_evento_suspeito(
+                "store_indisponivel_ip", client_id, ip, {'dimensao': 'indice_ip'})
+            total_no_ip = 0
+        if total_no_ip > LIMITE_SOCKETS_IP:
+            # Refusado: devolve a vaga já (senão cada tentativa recusada
+            # inflaria o índice e bloquearia o IP até o TTL expirar).
+            try:
+                store.remover_ip(ip, client_id)
+            except Exception:
+                pass
+            observabilidade.log_evento_suspeito(
+                "multiplas_contas", client_id, ip,
+                {'limite': LIMITE_SOCKETS_IP, 'conexoes_do_ip': total_no_ip})
+            raise pacote_socketio.exceptions.ConnectionRefusedError(
+                'limite_de_conexoes',
+                {'motivo': {'chave': 'msg.muitas_contas',
+                            'params': {'limite': LIMITE_SOCKETS_IP}}})
+    elif CAPTCHA_ATIVO:
+        # Sem limite por IP, o captcha no connect segura a abertura em massa.
+        try:
+            store.registrar_ip(ip, client_id)
+        except Exception:
+            pass
+    if CAPTCHA_ATIVO and not _validar_hcaptcha(
+            request.args.get('hcaptcha_token', '') or '', ip):
+        try:
+            store.remover_ip(ip, client_id)
+        except Exception:
+            pass
+        observabilidade.log_evento_suspeito(
+            "captcha_falhou", client_id, ip,
+            {"captcha_ativo": True, "possuia_token": bool(request.args.get('hcaptcha_token'))})
+        raise pacote_socketio.exceptions.ConnectionRefusedError(
+            'captcha_invalido', {'motivo': {'chave': 'msg.captcha_invalido'}})
+
     sala_id = normalizar_sala(request.args.get('sala'))
     if sala_id == SALA_PADRAO:
         # Fase 18: chegou sem código (ou com código inválido) — home, não cria
@@ -713,12 +899,15 @@ def handle_connect():
                 # o connect destrava o fluxo.
                 if ia.processar(lobby):
                     salvar_sala(lobby)
-        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.RedisError,
+        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.erros_de_rede(),
                 OSError, http.client.HTTPException):
             # Lock distribuído ocupado/indisponível, save stale (Fase 52), ou
             # falha do Redis local da VPS (Fase 46): aborta o connect. O cliente
             # reconecta com backoff e o heartbeat re-sincroniza da mesma forma
             # que hoje em dia com um blip de rede.
+            # Fase 60 (P2/P3): o aborto pode ter deixado caches/estado em processo
+            # inconsistentes — descarta para a próxima leitura recarregar fresco.
+            store.invalidar_cache_sala(sala_id)
             return
 
 
@@ -809,6 +998,17 @@ def handle_disconnect():
     se for a vez dele, o turno passa pro próximo; se sobrar apenas um, ele é declarado vencedor.
     """
     client_id = request.sid
+    # Fase 59: o registro do anti-fraude é por sid (único por socket); sem
+    # limpar aqui, o processo persistente da VPS acumularia uma entrada por
+    # conexão (a heurística não precisa sobreviver ao fim do socket).
+    anti_fraude.limpar(client_id)
+    # Fase 59: devolve a vaga no índice de IPs (opt-in). Fail-open: um blip de
+    # rede aqui só deixa o SET "engordar" até o TTL expirar (6h).
+    if LIMITE_SOCKETS_IP > 0 or CAPTCHA_ATIVO:
+        try:
+            store.remover_ip(_ip_do_cliente(), client_id)
+        except Exception:
+            pass
     sala_id = sala_do_cliente(client_id)
     if sala_id is None:
         return
@@ -860,12 +1060,15 @@ def handle_disconnect():
                 else:
                     remover_sala(lobby.sala_id)
                     sala_esvaziou = True
-        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.RedisError,
+        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.erros_de_rede(),
                 OSError, http.client.HTTPException):
             # Lock distribuído indisponível, save stale (Fase 52), ou falha do
             # Redis local da VPS (Fase 46): aborta silenciosamente — o ID do
             # jogador continua indexado (TTL limpa) e a limpeza segue na próxima
             # batida ou no GC, mesmo comportamento de hoje com blip de rede.
+            # Fase 60 (P2/P3): o aborto pode ter deixado caches/estado em
+            # processo inconsistentes — descarta (idempotente até após remover).
+            store.invalidar_cache_sala(sala_id)
             return
     # Depois de soltar o lock (evita corrida com um connect novo da mesma sala).
     if sala_esvaziou:
@@ -1187,7 +1390,7 @@ def verificar_desconectados(dados, lobby, jogador):
 
 
 @socketio.on('heartbeat')
-@evento_mutavel
+@evento_mutavel(lock_distribuido=False)
 def heartbeat(dados=None):
     """
     Renova o sinal de vida do resumo da sala na busca (Fase 17). Sem isso, uma
@@ -1228,6 +1431,16 @@ def heartbeat(dados=None):
     mutação só com leitura fresca, para não mover duas vezes o mesmo turno entre
     instâncias. O `visto_em` tem piso de 60s para o resumo não ser reescrito a
     cada batida.
+
+    Fase 60 (fast path): a maioria das batidas NÃO pode mutar nada — sala de
+    espera (ia é inerte na página 0) ou partida ociosa servida do cache sem
+    divergência. Nessas, o lock distribuído (2 comandos no store) é desnecessário
+    e o heartbeat roda apenas com o lock local: espera re-sincroniza SEMPRE do
+    store (E2, leitura sem lock — nunca muta a sala), partida quieta não
+    reescreve nada além do resumo. Só quando há mutação possível — leitura
+    fresca (cache estourou) OU divergência detectada, numa sala EM PARTIDA — o
+    handler adquire `trancar_sala_distribuida` e refaz a leitura DENTRO do lock
+    antes de `ia.processar` (evita mover o turno com estado de antes do lock).
     """
     dados = dados if isinstance(dados, dict) else {}
     client_id = request.sid
@@ -1257,40 +1470,102 @@ def heartbeat(dados=None):
             espectador_aux = jogador not in partida_aux.jogadores
     # Espectador não tem menu de jogada: nunca dispara o re-sync de vez.
     vez_divergente = pagina_sala == 2 and not espectador_aux and vez_cliente != vez_sala
-    # Re-sync entre instâncias (Fases 18/19/E): a lista da espera e o snapshot
-    # da página corrente vêm do store compartilhado para quem bateu, cobrindo o
-    # gap dos broadcasts que ficam presos na instância de origem.
-    #
-    # Fase E2: o re-sync SEMPRE lê o estado fresco do store (o cache tolerante
-    # a defasagem da Fase C fica só para o heartbeat da partida). Antes, a lista
-    # da espera vinha do cache até 25s para os não-master, e o início da partida
-    # só era detectado quando o cache expirava — na Vercel, com host e jogador em
-    # instâncias diferentes, o host não via quem entra/fica pronto e o jogador
-    # ficava preso na espera quando o master iniciava (o `mudar_pagina` fica na
-    # instância do host). Recarregar do store a cada batida da espera (a cada
-    # 20s) é o custo certo para o re-sync; o cache ainda evita o GET da partida.
-    if pagina_cliente != pagina_sala or lobby.status == 'espera' or vez_divergente:
-        lobby = store.carregar_sala(sala_id)
-        veio_do_cache = False
-        if lobby is None:
-            return
-        jogador = lobby.buscar_jogador_pelo_client_id(client_id)
-        if jogador is None:
-            return
-        pagina_sala = lobby.pagina or 0
-        if lobby.status == 'espera':
-            emit("update_user_list", montar_payload_lista_usuarios(lobby), to=client_id, ignore_queue=True)
-        if pagina_cliente != pagina_sala:
-            enviar_snapshot_sala(lobby, jogador)
-        elif vez_divergente:
+
+    # Fase 60 (fast path): o lock distribuído só entra quando o heartbeat PODE
+    # mutar a sala — leitura fresca (cache estourou) OU divergência detectada,
+    # numa sala em partida (status != espera). Espera e partida quieta servida
+    # do cache NÃO mutam o Lobby: a espera re-sincroniza do store SEM lock (ia é
+    # inerte e a leitura é pura — sem risco de lost-update), a partida quieta só
+    # renova o resumo. A lista da espera e o snapshot da página corrente vêm do
+    # store compartilhado para quem bateu, cobrindo o gap dos broadcasts que
+    # ficam presos na instância de origem (Fases 18/19/E/E2).
+    def _vez_divergente_de(lobby_re, jogador_re):
+        """
+        Recomputa a divergência de vez do lobby RELIDO: o valor calculado antes
+        do lock pode ter mudado entre a leitura e a aquisição (outra instância
+        avançou o turno). Espectador não tem menu de jogada (nunca reemite).
+        """
+        if (lobby_re.pagina or 0) != 2:
+            return False
+        partida_re = lobby_re.partidas[-1] if lobby_re.partidas else None
+        if partida_re is None or not partida_re.rodadas:
+            return False
+        vez_re = partida_re.rodadas[-1].vez_atual
+        if vez_re is None or jogador_re not in partida_re.jogadores:
+            return False
+        return vez_cliente != (vez_re.username or '')
+
+    def _emitir_re_sync(lobby_re, jogador_re, pagina_sala_re, vez_divergente_re):
+        if lobby_re.status == 'espera':
+            emit("update_user_list", montar_payload_lista_usuarios(lobby_re), to=client_id, ignore_queue=True)
+        if pagina_cliente != pagina_sala_re:
+            enviar_snapshot_sala(lobby_re, jogador_re)
+        elif vez_divergente_re:
             # Tela já montada e na página certa: falta só o indicador de vez
             # (menu de jogada) que se perdeu entre instâncias.
-            emitir_dispatcher_turno(lobby, jogador)
-    if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
-        lobby.marcar_visto()
-    if not veio_do_cache and ia.processar(lobby):
-        salvar_sala(lobby)
-    store.salvar_resumo(lobby.sala_id, lobby.resumo_partida())
+            emitir_dispatcher_turno(lobby_re, jogador_re)
+
+    def _renovar_sinal(lobby_re):
+        if lobby_re.visto_em is None or (datetime.now() - lobby_re.visto_em).total_seconds() >= 60:
+            lobby_re.marcar_visto()
+        store.salvar_resumo(lobby_re.sala_id, lobby_re.resumo_partida())
+
+    if (not veio_do_cache or pagina_cliente != pagina_sala or vez_divergente) and lobby.status != 'espera':
+        with trancar_sala_distribuida(sala_id):
+            # Re-leitura fresca DENTRO do lock: entre a leitura pré-lock e a
+            # aquisição outra instância pode ter avançado o turno — processar
+            # com o objeto de antes do lock moveria a partida duas vezes.
+            lobby = store.carregar_sala(sala_id)
+            if lobby is None or lobby.buscar_jogador_pelo_client_id(client_id) is None:
+                return
+            jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+            pagina_sala = lobby.pagina or 0
+            # Re-sync lento (cache estourado/divergência): reemite o que se
+            # perdeu entre instâncias — lista da espera, snapshot da página, ou
+            # o menu de vez (gap de broadcast preso na instância de origem).
+            _emitir_re_sync(lobby, jogador, pagina_sala, _vez_divergente_de(lobby, jogador))
+            if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
+                lobby.marcar_visto()
+            if ia.processar(lobby):
+                # Um SÓ save para o Lobby + resumo da busca (Fase 60).
+                store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+                return
+            _renovar_sinal(lobby)
+        return
+
+    if lobby.status == 'espera':
+        # Fase E2: o re-sync da espera SEMPRE lê o estado fresco do store (o
+        # cache tolerante a defasagem da Fase C fica só para o heartbeat da
+        # partida). Recarregar a cada batida da espera (a cada 20s) é o custo
+        # certo para o re-sync; o cache ainda evita o GET da partida.
+        lobby = store.carregar_sala(sala_id)
+        if lobby is None or lobby.buscar_jogador_pelo_client_id(client_id) is None:
+            return
+        if lobby.status == 'espera':
+            jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+            _emitir_re_sync(lobby, jogador, lobby.pagina or 0, _vez_divergente_de(lobby, jogador))
+            _renovar_sinal(lobby)
+            return
+        # A leitura fresca revelou que a partida começou (o cache dizia espera):
+        # o re-sync e a limpeza de fila de IA agora precisam do lock distribuído.
+        with trancar_sala_distribuida(sala_id):
+            lobby = store.carregar_sala(sala_id)
+            if lobby is None or lobby.buscar_jogador_pelo_client_id(client_id) is None:
+                return
+            jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+            pagina_sala = lobby.pagina or 0
+            _emitir_re_sync(lobby, jogador, pagina_sala, _vez_divergente_de(lobby, jogador))
+            if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
+                lobby.marcar_visto()
+            if ia.processar(lobby):
+                store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+                return
+            _renovar_sinal(lobby)
+        return
+
+    # Partida quieta servida do cache (sem divergência): nada mutável — o
+    # resumo da busca é o único write, e só quando o `visto_em` passou de 60s.
+    _renovar_sinal(lobby)
 
 
 @socketio.on('jogar_dados')
@@ -1449,6 +1724,13 @@ def aposta(dados, lobby, jogador):
     dados_aposta.pop('chave', None)
     rodada = jogador.rodada_atual
     if rodada and rodada.vez_atual == jogador:
+        # Fase 59: heurística anti-automação — aposta em <200ms ou padrão de
+        # horário marca o jogador como suspeito (delay extra nas ações) e vai
+        # para o log estruturado (sem PII).
+        for detecao in anti_fraude.registrar_acao(jogador.client_id, 'aposta'):
+            observabilidade.log_evento_suspeito(detecao, jogador.client_id,
+                                                _ip_do_cliente())
+            anti_fraude.marcar_suspeito(jogador, detecao)
         rodada.construir_turno(jogador=jogador, dados=dados_aposta)
         ia.processar(lobby)
         salvar_sala(lobby)
@@ -1468,7 +1750,26 @@ def desconfiar(dados, lobby, jogador):
         return
     rodada = jogador.rodada_atual
     if rodada and rodada.vez_atual == jogador and len(rodada.turnos) > 0:
+        # Fase 59: heurística anti-automação — rajada de desconfianças (<5s)
+        # e análise binomial da taxa de acerto das apostas.
+        for detecao in anti_fraude.registrar_acao(jogador.client_id, 'desconfiar'):
+            observabilidade.log_evento_suspeito(detecao, jogador.client_id,
+                                                _ip_do_cliente())
+            anti_fraude.marcar_suspeito(jogador, detecao)
         rodada.desconfiar(jogador=jogador)
+        # Se a conferência já foi montada (desconfiança aceita), alimenta a
+        # estatística binomial do apostador que errou/acertou — se a taxa dele
+        # cruzar o limiar, vira suspeito (bot calcula aposta exata).
+        conferencia = getattr(rodada, 'conferencia', None)
+        if conferencia and len(rodada.turnos) > 0:
+            apostador = rodada.turnos[-1].do_jogador
+            if anti_fraude.marcar_resultado_aposta(
+                    apostador.client_id, conferencia.get('verdadeira', False)):
+                # `ip=None`: o request corrente é do DESCONFIADOR; não temos o IP
+                # do apostador aqui (não inventar auditoria trocada).
+                observabilidade.log_evento_suspeito(
+                    'acuracia_binomial', apostador.client_id, None)
+                anti_fraude.marcar_suspeito(apostador, 'acuracia_binomial')
         ia.processar(lobby)
         salvar_sala(lobby)
 

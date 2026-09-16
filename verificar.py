@@ -143,6 +143,34 @@ def verificar_store_producao():
 
 
 # ---------------------------------------------------------------------------
+# 3c) Fase 61: motor cooperativo gevent importa sem erro (dev/VPS)
+# ---------------------------------------------------------------------------
+def verificar_gevent():
+    print("3c) boot com DADINHO_ASYNC_MODE=gevent (Fase 61)")
+    codigo = (
+        "import os;"
+        "os.environ['DADINHO_ASYNC_MODE']='gevent';"
+        "os.environ['DADINHO_STORE']='memoria';"
+        "os.environ.pop('VERCEL', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_URL', None);"
+        "os.environ.pop('UPSTASH_REDIS_REST_TOKEN', None);"
+        "os.environ.pop('DADINHO_REDIS_URL', None);"
+        "import app;"
+        "assert app.socketio.async_mode == 'gevent', app.socketio.async_mode;"
+        "print('GEVENT_OK')"
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo], cwd=RAIZ,
+        capture_output=True, text=True, timeout=60,
+    )
+    _checar(
+        "boot async_mode=gevent",
+        resultado.returncode == 0 and "GEVENT_OK" in (resultado.stdout or ""),
+        ((resultado.stderr or "") + (resultado.stdout or "")).strip()[-400:],
+    )
+
+
+# ---------------------------------------------------------------------------
 # 4) round-trip de serialização + migrações (S3)
 # ---------------------------------------------------------------------------
 def verificar_roundtrip():
@@ -288,15 +316,20 @@ def main():
     _preparar_integracao()
     from tests.test_integracao import verificar_integracao
     from tests.test_cross_instance import rodar as verificar_cross_instance
+    from tests.test_anti_fraude import rodar as verificar_anti_fraude
+    from tests.test_performance import rodar as verificar_performance
     inicio = time.time()
     verificar_py_compile()
     verificar_node()
     verificar_boot()
     verificar_store_producao()
+    verificar_gevent()
     verificar_roundtrip()
     verificar_tema()
     verificar_integracao()
     verificar_cross_instance()
+    verificar_anti_fraude()
+    verificar_performance()
     print()
     if _falhas:
         print(f"FALHAS ({len(_falhas)}): " + ", ".join(_falhas))

@@ -8,7 +8,19 @@
     },
     "docs": {
       "path": "docs",
-      "description": "Referências do projeto: docs/arquitetura.md, docs/fluxo.md (mapa de eventos), docs/verificacao.md (verificação e deploy) e docs/plano-cross-instance.md (Fases 24–26: lock distribuído + message queue)."
+      "description": "Referências do projeto: docs/arquitetura.md, docs/fluxo.md (mapa de eventos), docs/verificacao.md (verificação e deploy), docs/runbook.md (operação e incidente), docs/adr/ (decisões de arquitetura) e docs/plano-cross-instance.md (Fases 24–26: lock distribuído + message queue)."
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "local",
+      "command": ["npx", "-y", "@upstash/context7-mcp"],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "enabled": true
     }
   }
 }

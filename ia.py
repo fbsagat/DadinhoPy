@@ -28,6 +28,7 @@ sempre pública — aparece na tela pra todo mundo o jogo inteiro.
 
 import math
 import secrets
+from functools import lru_cache
 
 import funcoes_gerais
 from modelos import Jogador
@@ -196,11 +197,17 @@ def contar_suporte(dados, face, coringa):
     return total
 
 
+@lru_cache(maxsize=1024)
 def probabilidade_verdade(face, quantidade, suporte, desconhecidos, coringa):
     """
     P(total de dados que apoiam `face` >= `quantidade`), tratando os dados
     desconhecidos como independentes. Face 1 ou sem coringa: p = 1/6; face != 1
     com coringa: p = 2/6 (o 1 vale como a face).
+
+    Fase 60: cache LRU na memória — a IA avalia várias candidatas por jogada
+    (numa rodada de ~5-6 jogadores x ~6 faces) e o custo do `math.comb` repetido
+    é o maior gargalo do `processar`. Função pura com args hasháveis, então é
+    segura: tamanho do suporte é limitado (máx. de dados do jogo).
     """
     if desconhecidos <= 0:
         return 1.0 if suporte >= quantidade else 0.0
