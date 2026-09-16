@@ -111,6 +111,42 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8001/robots.txt   # sm
   reduzem a memória, mas um bug de vazamento aparece em `docker stats` crescendo
   sem parar — anote e abra bug.
 
+### 5.1. `connect` falha / não cria sala — WebSocket 500 (`gevent-websocket`)
+
+Sintoma: o jogo **não conecta em nenhuma tela** (home vazia, "Criar sala" sem
+efeito, "Buscar partidas" sem resposta), mas as réplicas estão `healthy` e o
+polling responde. O log do nginx mostra `"uri":"/socket.io/","status":500`
+repetido pelo IP do cliente; no log da API:
+`RuntimeError: The gevent-websocket server is not configured appropriately`.
+
+Causa: `gevent-websocket` instalado na imagem. Com ele presente o python-engineio
+deixa de usar o `simple-websocket` e passa a exigir `environ['wsgi.websocket']`,
+que só existe no worker `geventwebsocket.gunicorn.workers.GeventWebSocketWorker`
+— o Dockerfile usa o worker `gevent` puro, que não fornece essa chave. O cliente
+pede `transports: ['websocket','polling']` e o socket.io **não cai no polling**
+quando o WebSocket falha, então a conexão trava em loop de reconexão.
+
+Correção: manter `gevent-websocket` **fora** de `requirements.txt` (o engineio
+usa o `simple-websocket`, que funciona com o worker `gevent`). A regressão está
+guardada no `verificar.py` (assert `SimpleWebSocketWSGI is not None` no boot
+gevent). Rebuild: `docker compose up -d --build api api2 api3 api4 nginx`.
+
+Diagnóstico rápido na VPS:
+
+```bash
+# Deve imprimir None (pacote ausente); se achar o pacote, é a causa.
+sudo docker exec dadinho-api python -c "import importlib.util as u; print(u.find_spec('geventwebsocket'))"
+# Handshake público: esperado 101 (não 500).
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=websocket'
+```
+
+Obs.: um cliente que manda `Origin: https://dadinho-api...` (a própria API) toma
+`502` do Cloudflare — é bloqueio de borda, não a API; o browser manda o
+`Origin` do frontend e conecta normal.
+
 ## 6. Redis fora / perda de estado (SPOF conhecido — ADR-007)
 
 Sintoma: `/robots.txt` pode responder 200 (o app sobe), mas `connect`/handlers

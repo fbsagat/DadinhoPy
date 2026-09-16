@@ -161,6 +161,14 @@ def verificar_gevent():
         "import packaging.version;"
         "import app;"
         "assert app.socketio.async_mode == 'gevent', app.socketio.async_mode;"
+        # Regressao Fase 61 (WS 500 na VPS): com `gevent-websocket` instalado o
+        # engineio exige `environ['wsgi.websocket']`, que o worker `gevent` puro
+        # do gunicorn nao fornece -> todo handshake WebSocket responde 500. O
+        # driver so cai no `simple-websocket` (que funciona) quando o pacote
+        # NAO existe, entao o guard falha se ele reaparecer nas dependencias.
+        "from engineio.async_drivers import gevent as _eg;"
+        "assert _eg.SimpleWebSocketWSGI is not None, "
+        "'gevent-websocket instalado quebra o WebSocket do worker gevent';"
         "print('GEVENT_OK')"
     )
     resultado = subprocess.run(
