@@ -28,6 +28,11 @@ if (-not (Test-Path -LiteralPath $Chave)) {
 $sshBase = @('-i', $Chave, '-o', 'StrictHostKeyChecking=no', "${Usuario}@${HostVps}")
 $cmdR = { param([string]$c) & ssh @sshBase $c; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
 
+# Hash do docker-compose.yml ANTES de copiar o codigo: o tar sobrescreve o
+# arquivo da VPS, entao comparar depois daria sempre "inalterado" e o tunnel
+# nunca seria recriado. Guardado aqui para decidir o recreate no fim.
+$hashComposeRemotoAntes = (& ssh @sshBase "sudo md5sum /opt/dadinho/docker-compose.yml 2>/dev/null | cut -d' ' -f1").Trim()
+
 Write-Host "==> Copiando codigo para /opt/dadinho (tar com excludes) ..." -ForegroundColor Cyan
 # Exclui o que nao vai: VCS, ambiente local, deploy da Vercel e os arquivos
 # especificos da instalacao (.env, cloudflared/config.yml) — preservados.
@@ -45,10 +50,11 @@ Write-Host "==> Rebuild da API (image dadinho-api) e do nginx ..." -ForegroundCo
 & $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx"
 
 # O tunnel so recria quando a definicao do servico mudou (docker-compose.yml).
-# O config.yml do ingress vive so na VPS e nunca vem do repo.
+# O config.yml do ingress vive so na VPS e nunca vem do repo — mas o cloudflared
+# le o config.yml no boot, entao mudar o ingress exige recriar o tunnel (nao
+# basta o arquivo novo no volume).
 $hashLocal = (Get-FileHash "$dirRepo\docker-compose.yml" -Algorithm MD5).Hash
-$hashRemoto = (& ssh @sshBase "sudo md5sum /opt/dadinho/docker-compose.yml | cut -d' ' -f1").Trim()
-if ($hashLocal -ne $hashRemoto) {
+if ($hashLocal -ne $hashComposeRemotoAntes) {
     Write-Host "==> docker-compose.yml mudou: recriando tunnel ..." -ForegroundColor Yellow
     & $cmdR "cd /opt/dadinho && sudo docker compose up -d --force-recreate tunnel"
 } else {
@@ -57,8 +63,8 @@ if ($hashLocal -ne $hashRemoto) {
 
 Write-Host "==> Smoke test local ..." -ForegroundColor Cyan
 # A réplica 1 em 8000 (loopback), as demais em 8001-8003, e a borda nginx em
-# 8080 (por onde o tunnel passa).
-& $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo && curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8080/robots.txt && curl -s 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"
+# 8090 (por onde o tunnel passa).
+& $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo && curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8090/robots.txt && curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"
 
 Write-Host "==> Smoke test publico (via tunnel) ..." -ForegroundColor Cyan
 curl.exe -s -o /dev/null -w "robots_pub:%{http_code}\n" "https://dadinho-api.memetrigger.com/robots.txt"

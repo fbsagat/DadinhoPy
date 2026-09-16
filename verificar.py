@@ -155,6 +155,10 @@ def verificar_gevent():
         "os.environ.pop('UPSTASH_REDIS_REST_URL', None);"
         "os.environ.pop('UPSTASH_REDIS_REST_TOKEN', None);"
         "os.environ.pop('DADINHO_REDIS_URL', None);"
+        # O worker `gevent` do gunicorn (ggevent.py) importa `packaging.version`;
+        # sem o pacote pinado o deploy da VPS sobe com "class uri 'gevent'
+        # invalid or not found". Garante a dependência no ambiente limpo do CI.
+        "import packaging.version;"
         "import app;"
         "assert app.socketio.async_mode == 'gevent', app.socketio.async_mode;"
         "print('GEVENT_OK')"

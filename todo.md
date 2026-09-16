@@ -929,7 +929,7 @@ Verificação:
 - Resto do pipeline (py_compile, node/i18n, boot VERCEL, integração, cross-instance,
   anti-fraude, performance) inalterado e verde.
 - Deploy: seguir `docs/verificacao.md` (VPS). Smoke test local agora cobre
-  `127.0.0.1:8000` (réplica 1) e `127.0.0.1:8080` (nginx/borda). Validar em 2+
+  `127.0.0.1:8000` (réplica 1) e `127.0.0.1:8090` (nginx/borda). Validar em 2+
   abas/navegadores conectando (página Vercel, socket VPS) e, na VPS,
   `docker compose ps` deve mostrar `dadinho-api`, `dadinho-api-2/3/4`,
   `dadinho-redis`, `dadinho-nginx`, `dadinho-tunnel`.

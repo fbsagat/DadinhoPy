@@ -19,7 +19,7 @@ legítima e ainda não conteria o ataque.
 ## Decisão
 
 Um container **nginx** (`nginx:1.27-alpine`) como **borda** da VPS, publicado só em
-loopback (`127.0.0.1:8080`) e alvo do tunnel. O IP real do cliente é reconstruído
+loopback (`127.0.0.1:8090`) e alvo do tunnel. O IP real do cliente é reconstruído
 por `map` em cascata: `Cf-Connecting-Ip` (cloudflared) → `X-Forwarded-For` →
 `remote_addr`, na variável `$ip_real`. Sobre `$ip_real`:
 
@@ -36,7 +36,7 @@ O nginx faz proxy para as réplicas da API (Fase 61 → ADR-006).
 - Positivas: a API nunca recebe tráfego direto do tunnel; rate limit efetivo por
   cliente real; auditoria em log estruturado; UFW segue sem abrir porta.
 - Positivas: alinhamento com o `verificar.py` (boot/borda) e smoke tests locais
-  (8000/8080) e público.
+  (8000/8090) e público.
 - Negativas: um componente a mais para operar (ver `docs/runbook.md`); as regras
   de rate limit precisam ser ajustadas quando o padrão de uso mudar (falsos
   positivos são a falha mais provável).

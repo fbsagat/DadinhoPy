@@ -84,13 +84,14 @@ jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
    - Container `dadinho-tunnel` (`cloudflare/cloudflared`) no compose, `network_mode:
      host`, com `TUNNEL_TOKEN` do `.env` e **ingress local** em
      `/opt/dadinho/cloudflared/config.yml` (ver `cloudflared/config.yml.example` no repo):
-     `dadinho-api.memetrigger.com → http://localhost:8080`, fallback `http_status:404`.
-   - **Fase 59 (nginx de borda):** o tunnel aponta para 8080, onde o serviço `nginx`
+     `dadinho-api.memetrigger.com → http://localhost:8090`, fallback `http_status:404`.
+   - **Fase 59 (nginx de borda):** a porta loopback do nginx é **8090** (não 8080 —
+     o `crowdsec` da VPS já ocupa `127.0.0.1:8080`). O tunnel aponta para 8090, onde o serviço `nginx`
      do compose aplica **rate limit por IP real** (60 req/s no `/socket.io/`, 10 req/s
      no resto; nginx/nginx.conf) e proxy para as **4 réplicas da API** (Fase 61:
      sticky `hash $ip_real consistent;` → `api`/`api2`/`api3`/`api4:8000`) — a api não
      recebe tráfego direto do tunnel desde a Fase 59. Se o `config.yml` da VPS ainda
-     aponta para 8000 (deploy anterior a 59), trocar para 8080 e recriar o tunnel
+     aponta para 8000 (deploy anterior a 59), trocar para 8090 e recriar o tunnel
      manualmente.
    - **No painel Zero Trust** criar o tunnel e, no DNS da zona, um **CNAME manual**
      `dadinho-api → <tunnel-id>.cfargotunnel.com` (a opção "hostname route" do painel
@@ -138,7 +139,7 @@ Na raiz do repo:
 O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API **e do
 `nginx`** (Fase 59), recreate do
 tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
-8080 — e público). Params opcionais:
+8090 — e público). Params opcionais:
 `-HostVps` (padrão `167.126.27.4`) e `-Usuario` (padrão `ubuntu`).
 
 ### Opção B — manual (equivalente ao script)
@@ -183,8 +184,8 @@ tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
    curl -s -o /dev/null -w 'robots:%{http_code}\n' http://127.0.0.1:8000/robots.txt
    curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling'
    # borda nginx (Fase 59; por onde o tunnel passa)
-   curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8080/robots.txt
-   curl -s 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling'
+   curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8090/robots.txt
+   curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling'
    # público (pelo tunnel)
    curl -s -o /dev/null -w 'robots:%{http_code}\n' https://dadinho-api.memetrigger.com/robots.txt
    curl -s 'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=polling'

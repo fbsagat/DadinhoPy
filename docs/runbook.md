@@ -15,9 +15,9 @@ invariantes garantem que ninguém corrompe o jogo.
 | --- | --- | --- | --- |
 | Frontend (HTML/JS) | **Vercel** — `dadinho.memetrigger.com` | página + `script.js`; conecta o socket onde o `<meta name="dadinho-api-url">` manda | Vercel tem rollback por deploy; jogo fica sem UI |
 | API (Socket.IO) | **VPS** — 4 réplicas `dadinho-api`/`-2`/`-3`/`-4`, gevent, loopback 8000–8003 | jogo de verdade; estado no Redis | réplica saudável absorve; ver §5 |
-| Borda + rate limit | **VPS** — `dadinho-nginx`, loopback `127.0.0.1:8080` | proxy/rate limit por IP real | todo o tráfego público da API cai; ver §4 |
+| Borda + rate limit | **VPS** — `dadinho-nginx`, loopback `127.0.0.1:8090` | proxy/rate limit por IP real | todo o tráfego público da API cai; ver §4 |
 | Estado + message queue | **VPS** — `dadinho-redis` (AOF, volume `dadinho_redis_data`) | `dadinho:sala:*`, resumos, sids, IPs, locks, pub/sub | API inteira falha; ver §6 |
-| Exposição pública | **VPS** — `dadinho-tunnel` (cloudflared, `network_mode: host`) | `dadinho-api.memetrigger.com` → `localhost:8080` | público não resolve; ver §4 |
+| Exposição pública | **VPS** — `dadinho-tunnel` (cloudflared, `network_mode: host`) | `dadinho-api.memetrigger.com` → `localhost:8090` | público não resolve; ver §4 |
 
 No caminho Vercel puro (sem `DADINHO_API_URL`), o estado vive no **Upstash REST** e
 o rate limit é a **regra de firewall da Vercel** `rate-limit-socketio` (120 req/60s
@@ -49,8 +49,8 @@ sudo docker logs --tail=100 dadinho-api-2       # réplica específica
 # Saúde por container e testes de borda
 sudo docker inspect --format '{{.Name}} {{.State.Health.Status}}' dadinho-api dadinho-api-2 dadinho-api-3 dadinho-api-4
 curl -s -o /dev/null -w 'api:%{http_code}\n'    http://127.0.0.1:8000/robots.txt
-curl -s -o /dev/null -w 'nginx:%{http_code}\n'  http://127.0.0.1:8080/robots.txt
-curl -s 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling' | head -c 120
+curl -s -o /dev/null -w 'nginx:%{http_code}\n'  http://127.0.0.1:8090/robots.txt
+curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling' | head -c 120
 ```
 
 Público (de qualquer lugar): `curl -s -o /dev/null -w '%{http_code}\n'
@@ -59,7 +59,7 @@ https://dadinho-api.memetrigger.com/robots.txt` (esperado `200`).
 ## 3. Triagem em 30 segundos
 
 1. **Local responde em 8000?** Não → a API não subiu (§5) ou o Redis está fora (§6).
-2. **Local responde, nginx não (8080)?** → borda/rede (§4) ou nenhuma réplica
+2. **Local responde, nginx não (8090)?** → borda/rede (§4) ou nenhuma réplica
    saudável (§5).
 3. **nginx responde, público não?** → tunnel/DNS/Cloudflare (§4).
 4. **Tudo responde mas o jogo "trava"?** → Redis/lock/estado (§6, §8).
@@ -67,7 +67,7 @@ https://dadinho-api.memetrigger.com/robots.txt` (esperado `200`).
 ## 4. Público fora do ar (tunnel, DNS, borda)
 
 Sintoma: `https://dadinho-api.memetrigger.com` não responde / 502 / 1033; local
-(8000/8080) ok.
+(8000/8090) ok.
 
 ```bash
 sudo docker compose ps tunnel nginx
@@ -77,7 +77,7 @@ sudo docker compose logs --tail=100 nginx     # 502 = réplicas ruins; ver §5
 
 - **Tunnel parado/reiniciando:** `sudo docker compose up -d --force-recreate tunnel`.
   Confirme o `cloudflared/config.yml` em `/opt/dadinho` (ingress
-  `dadinho-api.memetrigger.com → http://localhost:8080`; nunca `:8000` — é a borda
+  `dadinho-api.memetrigger.com → http://localhost:8090`; nunca `:8000` — é a borda
   nginx, ADR-003). Esse arquivo é **só da VPS** (gitignored) e não é sobrescrito pelo
   deploy.
 - **Token inválido/rotacionado:** `TUNNEL_TOKEN` no `/opt/dadinho/.env` (Zero Trust
