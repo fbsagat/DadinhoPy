@@ -110,30 +110,42 @@ def _testar_ip_do_cliente():
 
 
 def _testar_captcha_misconfig():
-    """Fase 59: captcha só liga de fato com SITEKEY + SECRET; pela metade fica
-    desligado (senão bloquearia TODOS os connects)."""
+    """Fase 59 (Cloudflare Turnstile): a separação WIDGET x ATIVO —
+    - sem sitekey: nada liga (CAPTCHA_WIDGET False);
+    - só sitekey (frontend/Vercel): renderiza o widget mas NÃO valida;
+    - sitekey + secret (API/VPS): valida o token.
+    Pela metade nunca derruba os connects por engano."""
     base = (
         "import os;"
         "os.environ['DADINHO_STORE']='memoria';"
         "os.environ['DADINHO_CAPTCHA_ATIVO']='1';"
         "[os.environ.pop(v, None) for v in ('VERCEL','UPSTASH_REDIS_REST_URL',"
-        "'UPSTASH_REDIS_REST_TOKEN','DADINHO_REDIS_URL',"
-        "'HCAPTCHA_SECRET','DADINHO_HCAPTCHA_SITEKEY','DADINHO_MESSAGE_QUEUE')];"
+        "'UPSTASH_REDIS_REST_TOKEN','DADINHO_REDIS_URL','DADINHO_MESSAGE_QUEUE',"
+        "'TURNSTILE_SECRET','DADINHO_TURNSTILE_SITEKEY')];"
     )
-    faltando = subprocess.run(
-        [sys.executable, "-c", base + "import app; print('CAPTCHA', app.CAPTCHA_ATIVO)"],
+    sem_sitekey = subprocess.run(
+        [sys.executable, "-c", base +
+         "import app; print('CAPTCHA', app.CAPTCHA_WIDGET, app.CAPTCHA_ATIVO)"],
         cwd=RAIZ, capture_output=True, text=True, timeout=60)
-    _checar('captcha_sem_secret_desligado',
-            'CAPTCHA False' in (faltando.stdout or ''),
-            (faltando.stderr or faltando.stdout or '').strip()[-300:])
+    _checar('captcha_sem_sitekey_nada_liga',
+            'CAPTCHA False False' in (sem_sitekey.stdout or ''),
+            (sem_sitekey.stderr or sem_sitekey.stdout or '').strip()[-300:])
+    so_widget = subprocess.run(
+        [sys.executable, "-c", base +
+         "os.environ['DADINHO_TURNSTILE_SITEKEY']='site-x';"
+         "import app; print('CAPTCHA', app.CAPTCHA_WIDGET, app.CAPTCHA_ATIVO)"],
+        cwd=RAIZ, capture_output=True, text=True, timeout=60)
+    _checar('captcha_sitekey_sem_secret_so_widget',
+            'CAPTCHA True False' in (so_widget.stdout or ''),
+            (so_widget.stderr or so_widget.stdout or '').strip()[-300:])
     completo = subprocess.run(
         [sys.executable, "-c", base +
-         "os.environ['HCAPTCHA_SECRET']='x';"
-         "os.environ['DADINHO_HCAPTCHA_SITEKEY']='y';"
-         "import app; print('CAPTCHA', app.CAPTCHA_ATIVO)"],
+         "os.environ['DADINHO_TURNSTILE_SITEKEY']='site-x';"
+         "os.environ['TURNSTILE_SECRET']='sec-y';"
+         "import app; print('CAPTCHA', app.CAPTCHA_WIDGET, app.CAPTCHA_ATIVO)"],
         cwd=RAIZ, capture_output=True, text=True, timeout=60)
-    _checar('captcha_completo_ligado',
-            'CAPTCHA True' in (completo.stdout or ''),
+    _checar('captcha_completo_valida',
+            'CAPTCHA True True' in (completo.stdout or ''),
             (completo.stderr or completo.stdout or '').strip()[-300:])
 
 

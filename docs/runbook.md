@@ -200,9 +200,12 @@ evento suspeito.
   retorna `connect_error` `msg.muitas_contas`. Cuidado: IPs compartilhados
   (CGNAT de operadora, rede corporativa) agregam jogadores legítimos — um teto
   baixo bloqueia todos eles; prefira folga.
-- **Captcha (opt-in):** em pico de abuso, ligar `DADINHO_CAPTCHA_ATIVO=true` +
-  `HCAPTCHA_SECRET`/`DADINHO_HCAPTCHA_SITEKEY` no `.env` e recriar as réplicas.
-  Desligar quando o pico passar (fricção desnecessária).
+- **Captcha (opt-in, Cloudflare Turnstile):** em pico de abuso, setar
+  `DADINHO_CAPTCHA_ATIVO=true` + `DADINHO_TURNSTILE_SITEKEY` + `TURNSTILE_SECRET`
+  no `.env` da VPS (API) e recriar as réplicas; na **Vercel** (frontend) setar
+  `DADINHO_CAPTCHA_ATIVO=true` + `DADINHO_TURNSTILE_SITEKEY` e redeployar (o
+  secret fica só na API). Rodar sem sitekey = widget não aparece; sem secret, a
+  API só renderiza e não valida (aviso no log). Desligar quando o pico passar.
 - **Logs de auditoria:** eventos suspeitos saem no stdout da API
   (`observabilidade.py`, JSON redigido): `docker compose logs api | grep -i
   suspeit`.

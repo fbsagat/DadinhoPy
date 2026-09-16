@@ -231,19 +231,30 @@ socketio = SocketIO(
 )
 
 # Fase 59 (segurança): captcha no connect é opt-in (`DADINHO_CAPTCHA_ATIVO`).
-# O frontend só carrega o script da hCaptcha quando o servidor injeta a meta
-# com a sitekey — sem env, o fluxo é o clássico (regressão zero). O captcha só
-# liga de fato com SECRET + SITEKEY presentes: ativo pela metade (sem um dos
-# dois) recusaria TODOS os connects e derrubaria o jogo — melhor desligar com
-# aviso no log.
-HCAPTCHA_SECRET = os.environ.get("HCAPTCHA_SECRET", "").strip()
-DADINHO_HCAPTCHA_SITEKEY = os.environ.get("DADINHO_HCAPTCHA_SITEKEY", "").strip()
+# Usa o Cloudflare Turnstile (grátis, invisível por padrão). O frontend recebe
+# a SITEKEY pelo <meta>, roda o widget e manda o token no handshake; a API
+# valida o token no `siteverify` com o SECRET (nunca exposto ao cliente).
+#
+# Separação de responsabilidades (deploy Fase 46: frontend na Vercel + API na
+# VPS — o frontend NÃO tem o SECRET):
+#   - CAPTCHA_WIDGET: renderiza o <meta>; exige só a sitekey (Vercel usa).
+#   - CAPTCHA_ATIVO:  valida o token; exige sitekey + secret (API da VPS usa).
+# Sem sitekey nada liga; sem secret o processo só renderiza (não valida).
+# Faltando algo, NÃO derruba os connects — apenas não protege (avisa no log).
+TURNSTILE_SITEKEY = os.environ.get("DADINHO_TURNSTILE_SITEKEY", "").strip()
+TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "").strip()
 _captcha_pedido = os.environ.get("DADINHO_CAPTCHA_ATIVO", "").strip().lower() in ("1", "true", "sim")
-CAPTCHA_ATIVO = _captcha_pedido and bool(HCAPTCHA_SECRET and DADINHO_HCAPTCHA_SITEKEY)
-if _captcha_pedido and not CAPTCHA_ATIVO:
+CAPTCHA_WIDGET = _captcha_pedido and bool(TURNSTILE_SITEKEY)
+CAPTCHA_ATIVO = CAPTCHA_WIDGET and bool(TURNSTILE_SECRET)
+if _captcha_pedido and not CAPTCHA_WIDGET:
     observabilidade.log_advertencia(
-        "DADINHO_CAPTCHA_ATIVO ligado mas HCAPTCHA_SECRET/DADINHO_HCAPTCHA_SITEKEY "
-        "faltando — captcha DESLIGADO para não bloquear todos os connects.")
+        "DADINHO_CAPTCHA_ATIVO ligado sem DADINHO_TURNSTILE_SITEKEY — o widget do "
+        "captcha NÃO será renderizado e ninguém conseguiria resolver; nada ligou.")
+elif CAPTCHA_WIDGET and not CAPTCHA_ATIVO:
+    observabilidade.log_redigido(
+        evento="captcha_sem_secret",
+        mensagem="sitekey presente sem TURNSTILE_SECRET: este processo só renderiza "
+                 "o widget (o backend que valida o token é a API da VPS).")
 
 
 def _ip_do_cliente():
@@ -273,21 +284,21 @@ def _ip_do_cliente():
     return "desconhecido"
 
 
-def _validar_hcaptcha(token, remoteip):
+def _validar_captcha(token, remoteip):
     """
-    Valida o token hCaptcha no servidor (Fase 59). Espera `siteverify` que
-    não seja {success: False}. Qualquer falha de rede/HTTP devolve False com
-    registro suspeito — o connect é recusado (fail-closed é o correto aqui:
-    uma recusa a mais não custa; um bot a menos, sim).
+    Valida o token do Cloudflare Turnstile (Fase 59) em `siteverify`. Qualquer
+    falha de rede/HTTP devolve False (fail-closed: no pico de abuso, recusar a
+    mais não custa; um bot a menos, sim). Só roda quando `CAPTCHA_ATIVO`
+    (sitekey + secret presentes), então o frontend sem secret nunca chega aqui.
     """
     if not CAPTCHA_ATIVO:
         return True
-    corpo = f"secret={urllib.parse.quote(HCAPTCHA_SECRET)}&response={urllib.parse.quote(token)}"
+    corpo = f"secret={urllib.parse.quote(TURNSTILE_SECRET)}&response={urllib.parse.quote(token)}"
     if remoteip:
         corpo += f"&remoteip={urllib.parse.quote(remoteip)}"
     try:
-        conexao = http.client.HTTPSConnection("api.hcaptcha.com", timeout=6)
-        conexao.request("POST", "/siteverify", body=corpo,
+        conexao = http.client.HTTPSConnection("challenges.cloudflare.com", timeout=6)
+        conexao.request("POST", "/turnstile/v0/siteverify", body=corpo,
                         headers={"Content-Type": "application/x-www-form-urlencoded"})
         resposta = conexao.getresponse()
         dados = json.loads(resposta.read().decode("utf-8"))
@@ -632,10 +643,10 @@ API_URL = os.environ.get("DADINHO_API_URL", "").strip().rstrip("/")
 # dela para o WebSocket/polling do socket.io não ser bloqueado em modo
 # bloqueante. Sem DADINHO_API_URL, mantém o 'self' (regressão zero).
 _origem_api_csp = f" {API_URL}" if API_URL else ""
-# Fase 59: com captcha ativo, o script/iframe/estilos da hCaptcha e a
-# verificação de token exigem as origens dela no CSP (senão a política
+# Fase 59: com o widget de captcha (Turnstile) ativo, o script/iframe/conexões
+# do challenges.cloudflare.com exigem as origens no CSP (senão a política
 # bloqueante quebraria o widget). Sem `DADINHO_CAPTCHA_ATIVO`, intacto.
-_captcha_csp = " https://hcaptcha.com https://*.hcaptcha.com" if CAPTCHA_ATIVO else ""
+_captcha_csp = " https://challenges.cloudflare.com" if CAPTCHA_WIDGET else ""
 CSP = (
     "default-src 'self'; "
     f"script-src 'self' https://cdn.socket.io https://cdn.jsdelivr.net{_captcha_csp}; "
@@ -686,7 +697,7 @@ def index():
         og = _og_sala(sala_id, request.url)
     resposta = make_response(render_template(
         "jogo.html", og=og, api_url=API_URL,
-        hcaptcha_sitekey=DADINHO_HCAPTCHA_SITEKEY if CAPTCHA_ATIVO else ''))
+        captcha_sitekey=TURNSTILE_SITEKEY if CAPTCHA_WIDGET else ''))
     # Fase 44: CSP em Report-Only por padrão; `DADINHO_CSP_MODO=bloqueante`
     # aplica a política de verdade (depois de revisar as violações no browser).
     if os.environ.get("DADINHO_CSP_MODO", "").strip().lower() == "bloqueante":
@@ -810,15 +821,18 @@ def handle_connect():
             store.registrar_ip(ip, client_id)
         except Exception:
             pass
-    if CAPTCHA_ATIVO and not _validar_hcaptcha(
-            request.args.get('hcaptcha_token', '') or '', ip):
+    # `hcaptcha_token` é aceito como fallback durante a troca hCaptcha→Turnstile
+    # (JS antigo em cache enviando o token); o nome canônico é `captcha_token`.
+    token_captcha = (request.args.get('captcha_token')
+                     or request.args.get('hcaptcha_token') or '')
+    if CAPTCHA_ATIVO and not _validar_captcha(token_captcha, ip):
         try:
             store.remover_ip(ip, client_id)
         except Exception:
             pass
         observabilidade.log_evento_suspeito(
             "captcha_falhou", client_id, ip,
-            {"captcha_ativo": True, "possuia_token": bool(request.args.get('hcaptcha_token'))})
+            {"captcha_ativo": True, "possuia_token": bool(token_captcha)})
         raise pacote_socketio.exceptions.ConnectionRefusedError(
             'captcha_invalido', {'motivo': {'chave': 'msg.captcha_invalido'}})
 

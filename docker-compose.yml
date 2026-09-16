@@ -39,6 +39,12 @@ x-api-base: &api-base
     # (desligado) — ativar em picos de abuso; cuidado com IPs compartilhados
     # (CGNAT/rede corporativa), que podem agregar vários jogadores.
     DADINHO_LIMITE_SOCKETS_IP: ${DADINHO_LIMITE_SOCKETS_IP:-0}
+    # Fase 59 (opt-in): captcha Cloudflare Turnstile no connect. A API (VPS)
+    # precisa de SITEKEY + SECRET para VALIDAR o token; o frontend (Vercel)
+    # precisa só de DADINHO_CAPTCHA_ATIVO + SITEKEY para renderizar o widget.
+    DADINHO_CAPTCHA_ATIVO: ${DADINHO_CAPTCHA_ATIVO:-}
+    DADINHO_TURNSTILE_SITEKEY: ${DADINHO_TURNSTILE_SITEKEY:-}
+    TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
   depends_on:
     redis:
       condition: service_healthy

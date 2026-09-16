@@ -35,12 +35,16 @@ Duas camadas complementares:
    campos sensíveis** (`chave_secreta`, `nonce_seed`, dados do jogador nunca vão
    para o log).
 
-3. **Captcha opt-in** — `DADINHO_CAPTCHA_ATIVO` (default `false`): quando
-   estourado o rate limit/abuso, o `connect` passa a exigir `hcaptcha_token`
-   validado em `api.hcaptcha.com/siteverify` (só liga de fato com SITEKEY +
-   SECRET; faltando um, fica desligado para não bloquear todos os connects); o
-   widget é carregado sob demanda no frontend. Ligado só durante picos, não como
-   estado permanente.
+3. **Captcha opt-in (Cloudflare Turnstile)** — `DADINHO_CAPTCHA_ATIVO`
+   (default `false`): quando estourado o rate limit/abuso, o `connect` passa a
+   exigir `captcha_token` validado em
+   `challenges.cloudflare.com/turnstile/v0/siteverify`; o widget invisível é
+   carregado sob demanda no frontend. Ligado só durante picos, não como estado
+   permanente. Como o frontend (Vercel) e a API (VPS) são separados, o
+   `DADINHO_TURNSTILE_SITEKEY` (público) vai nos dois e o `TURNSTILE_SECRET`
+   fica **só na API**: `CAPTCHA_WIDGET` (renderiza o widget) exige só a sitekey;
+   `CAPTCHA_ATIVO` (valida o token) exige sitekey + secret. Faltando algo, nada
+   derruba os connects — só não protege (aviso no log).
 
 O índice `dadinho:ip:<ip>` (SET de `client_id`s ativos, TTL) habilita o limite de
 sockets simultâneos por IP (`DADINHO_LIMITE_SOCKETS_IP`, **0 = desligado** por

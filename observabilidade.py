@@ -14,7 +14,8 @@ from datetime import datetime
 # Campos cujo valor NÃO pode vazar para os logs (Fase 59, sanitização).
 CAMPOS_SENSIVEIS = frozenset({
     'chave', 'chave_secreta', 'nonce', 'nonce_seed', 'seed', 'seed_final',
-    'compromisso_seed', 'hcaptcha_response', 'hcaptcha_token', 'dados',
+    'compromisso_seed', 'captcha_token', 'cf-turnstile-response', 'turnstile_token',
+    'hcaptcha_response', 'hcaptcha_token', 'dados',
     'dado', 'token', 'senha', 'password', 'authorization',
 })
 

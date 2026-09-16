@@ -56,37 +56,51 @@ const api_url = (document.querySelector('meta[name="dadinho-api-url"]') || {}).c
 // WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
 // request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
 // entra em loop de reconexão). O polling fica só como fallback de rede.
-// Fase 59 (captcha no connect): quando o servidor injeta
-// <meta name="dadinho-hcaptcha-sitekey">, o connect é adiado até o token
-// hCaptcha sair (a API recusa o handshake sem ele). Sem a meta, nada muda.
-const captcha_sitekey = (document.querySelector('meta[name="dadinho-hcaptcha-sitekey"]') || {}).content || '';
+// Fase 59 (captcha no connect, Cloudflare Turnstile): quando o servidor injeta
+// <meta name="dadinho-turnstile-sitekey">, o connect é adiado até o token sair
+// (a API recusa o handshake sem ele). Sem a meta, nada muda.
+const captcha_sitekey = (document.querySelector('meta[name="dadinho-turnstile-sitekey"]') || {}).content || '';
 const socket = io(api_url || undefined, {
     autoConnect: !captcha_sitekey,
     transports: ['websocket', 'polling'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
 });
 
+function conecta_com_token(token) {
+    socket.io.opts.query = Object.assign({}, socket.io.opts.query, { captcha_token: token });
+    socket.connect();
+}
+
 function conecta_com_captcha() {
-    // Fail-open: se o script da hCaptcha não carregar (rede/bloqueador), cai
-    // no connect sem token — o servidor decide (sem DADINHO_CAPTCHA_ATIVO na
-    // API o token nem é exigido; com, o connect é recusado e o erro aparece).
-    if (!window.hcaptcha) {
+    // Fail-open no CLIENTE: se o Turnstile não carregar ou der erro (rede,
+    // bloqueador, sitekey/domínio errado), conecta sem token — o servidor
+    // decide (com captcha ativo na API o connect é recusado e o erro aparece).
+    if (!window.turnstile) {
         socket.connect();
         return;
     }
-    window.hcaptcha.execute(captcha_sitekey, { async: true })
-        .then(function (token) {
-            socket.io.opts.query = Object.assign({}, socket.io.opts.query, { hcaptcha_token: token });
-            socket.connect();
-        })
-        .catch(function () {
-            socket.connect();
+    try {
+        const caixa = document.createElement('div');
+        caixa.style.display = 'none';
+        document.body.appendChild(caixa);
+        // Modo invisível: resolve sozinho na maioria dos casos; o token chega
+        // pelo `callback`. `execute` dispara a verificação.
+        const widget = window.turnstile.render(caixa, {
+            sitekey: captcha_sitekey,
+            size: 'invisible',
+            callback: conecta_com_token,
+            'error-callback': function () { socket.connect(); },
+            'timeout-callback': function () { socket.connect(); },
         });
+        window.turnstile.execute(widget);
+    } catch (erro) {
+        socket.connect();
+    }
 }
 
 if (captcha_sitekey) {
     const script = document.createElement('script');
-    script.src = 'https://hcaptcha.com/1/api.js?render=' + encodeURIComponent(captcha_sitekey);
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
     script.async = true;
     script.onload = conecta_com_captcha;
     script.onerror = conecta_com_captcha;

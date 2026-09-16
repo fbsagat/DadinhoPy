@@ -114,8 +114,9 @@ jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
      (em `/opt/dadinho`). Eventos suspeitos do anti-fraude/captcha/limite saem no
      `stdout` da api (observabilidade.py).
    - Segurança (Fase 59, opt-in): `DADINHO_LIMITE_SOCKETS_IP` (limite de sockets por
-     IP na API), `DADINHO_CAPTCHA_ATIVO` + `DADINHO_HCAPTCHA_SITEKEY` + `HCAPTCHA_SECRET`
-     (captcha no connect), rate limit por IP real no nginx (60/s no `/socket.io/`).
+     IP na API), captcha Cloudflare Turnstile no connect (`DADINHO_CAPTCHA_ATIVO` +
+     `DADINHO_TURNSTILE_SITEKEY` + `TURNSTILE_SECRET` — na Vercel, só ATIVO+SITEKEY),
+     rate limit por IP real no nginx (60/s no `/socket.io/`).
      Detalhes das envs em `.env.example` e no `todo.md` (Fase 59).
    - Não há auto-deploy do Dadinho na VPS — toda atualização é manual.
 
