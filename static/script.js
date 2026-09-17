@@ -1569,7 +1569,6 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     diceDiv.className = 'd-flex align-items-center justify-content-evenly border rounded';
     if (destaque) {
         diceDiv.classList.add('jogada-destaque');
-        diceDiv.setAttribute('data-rotulo', t('js.jogada.ultima'));
     }
 
     const imgDiv = document.createElement('div');
@@ -1798,6 +1797,10 @@ socket.on('atualizar_turno', function (dados) {
         document.querySelectorAll('#cards .jogada-destaque').forEach(function (el) {
             el.classList.remove('jogada-destaque');
         });
+        document.querySelectorAll('#cards .card-header.card-ultima').forEach(function (el) {
+            el.classList.remove('card-ultima');
+            el.removeAttribute('data-rotulo');
+        });
     }
     card_row.innerHTML = ""
     lista_turnos.forEach((sublista, index) => {
@@ -1815,6 +1818,15 @@ socket.on('atualizar_turno', function (dados) {
         }
         card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado, destacar_ultimo && index === 0));
     })
+    // O selo "ÚLTIMA" ancora no cabeçalho (fora do container de rolagem do
+    // corpo do card) para nunca ser cortado nem ficar atrás do card.
+    if (destacar_ultimo) {
+        const cabecalho = document.getElementById(`card_hea_${jogador}`);
+        if (cabecalho) {
+            cabecalho.classList.add('card-ultima');
+            cabecalho.setAttribute('data-rotulo', t('js.jogada.ultima'));
+        }
+    }
 });
 
 // ---------------------------------------------------------------------------

@@ -927,21 +927,23 @@ h5,
 
 /* ------- Destaque da última jogada da rodada (tela 2) ------- */
 .jogada-destaque {
-    position: relative;
     border-color: #ffc107 !important;
     background: linear-gradient(135deg, rgba(255, 193, 7, 0.22), rgba(255, 193, 7, 0.05));
     box-shadow: 0 0 12px rgba(255, 193, 7, 0.6);
     animation: pulso_jogada 1.6s ease-in-out infinite;
 }
 
-.jogada-destaque::after {
+/* O selo "ÚLTIMA" é ancorado no `.card-header` (e não na jogada, dentro do
+   `.card-body`) porque o corpo do card é um container de rolagem
+   (`overflow-y: auto`): no mobile ele recortava o topo do selo, que aparecia
+   "atrás do card". O cabeçalho não recorta, então o selo (posicionado + com
+   z-index) fica sempre por cima de todo o conteúdo do card. O `data-rotulo`
+   com o texto traduzido é setado no cabeçalho pelo `atualizar_turno`. */
+#cards .card-header.card-ultima::after {
     content: attr(data-rotulo);
     position: absolute;
-    top: -9px;
+    bottom: -9px;
     right: 6px;
-    /* O selo "ÚLTIMA" paira sobre o cabeçalho do card — sobe no eixo z para
-       nunca aparecer atrás do card (o pai, `position: relative`, fica no
-       contexto de empilhamento do grid). */
     z-index: 2;
     pointer-events: none;
     padding: 1px 6px;
@@ -1000,6 +1002,7 @@ h5,
    com reticências; a contagem de dados é um badge de largura fixa, então nunca
    some mesmo com nome longo. */
 #cards .card-header {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.35rem;
