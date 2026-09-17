@@ -1227,8 +1227,14 @@ socket.on("mudar_pagina", function (data) {
     //   armada pelo `construtor_dados`).
     // - Entrou nos turnos (2): se for a minha vez, (re)começa o contador.
     // - Sair de uma tela de jogo: encerra o contador.
-    if (data.pag_numero === 2 && sou_da_vez) {
-        iniciar_timer_jogada(tempo_turno_max);
+    if (data.pag_numero === 2) {
+        // Fase 21: o contador do turno é exibido para todos; só o da vez emite
+        // `autojogar` ao zerar.
+        if (sou_da_vez) {
+            iniciar_timer_jogada(tempo_turno_max, true);
+        } else if (tempo_turno_max > 0) {
+            iniciar_timer_jogada(tempo_turno_max, false);
+        }
     } else if (data.pag_numero === 1 || data.pag_numero === 3 || data.pag_numero === 4) {
         // Manter o contador: na rolagem (1) ele é iniciado em `construtor_dados`;
         // na conferência/vitória (3/4) em `cards_conferencia`/`vencedor_da_partida`.
@@ -1661,15 +1667,20 @@ socket.on('atualizar_turno', function (dados) {
 
 // ---------------------------------------------------------------------------
 // Jogada automática por tempo máximo (Fase 21).
-// O servidor informa o limite (`tempo_max` segundos) em `construtor_dados`
-// (rolagem) e `meu_turno` (aposta/desconfiança). O cliente conta regressivo e,
-// ao expirar, pede ao servidor para jogar pelo atrasado (`autojogar`) — o
-// servidor confere o tempo decorrido antes de agir, então isto é só o gatilho.
+// O servidor informa o tempo (`tempo_max` segundos) em `construtor_dados`
+// (rolagem), `meu_turno` (aposta/desconfiança) e `espera_turno` (tempo
+// restante do turno, exibido também para quem espera). O cliente da vez conta
+// regressivo e, ao expirar, pede ao servidor para jogar pelo atrasado
+// (`autojogar`) — o servidor confere o tempo decorrido antes de agir, então
+// isto é só o gatilho. Quem apenas acompanha não emite `autojogar`.
 // ---------------------------------------------------------------------------
 let timer_autojogar = null;
 let tempo_autojogar_seg = 0;
+// Só quem realmente pode agir dispara `autojogar` ao zerar. Quem apenas
+// acompanha o turno (recebeu `espera_turno`) vê o contador, mas não emite.
+let timer_meu_autojogar = true;
 let sou_da_vez = false;      // recebeu `meu_turno` (a vez atual é a minha)
-let tempo_turno_max = 0;     // limite do turno (vem no `meu_turno`)
+let tempo_turno_max = 0;     // limite/restante do turno (vem no `meu_turno`/`espera_turno`)
 // Fase D2: apelido do jogador que o cliente acredita estar NA VEZ (vem de
 // `meu_turno`/`espera_turno`/`formatador_coletivo`). Vai no heartbeat para o
 // servidor detectar um indicador de vez perdido entre instâncias (refresh) e
@@ -1693,8 +1704,11 @@ function atualizar_contador_jogada() {
     el.style.display = 'inline-block';
 }
 
-function iniciar_timer_jogada(segundos) {
+function iniciar_timer_jogada(segundos, meu) {
     parar_timer_jogada();
+    // `meu` (default true) separa quem pode auto-jogar de quem só acompanha o
+    // turno (`espera_turno`): o observador exibe o contador mas não emite.
+    timer_meu_autojogar = meu !== false;
     tempo_autojogar_seg = Math.max(0, Math.floor(Number(segundos) || 0));
     if (tempo_autojogar_seg <= 0) {
         return;
@@ -1705,7 +1719,9 @@ function iniciar_timer_jogada(segundos) {
         atualizar_contador_jogada();
         if (tempo_autojogar_seg <= 0) {
             parar_timer_jogada();
-            socket.emit('autojogar', { chave: chave_secreta });
+            if (timer_meu_autojogar) {
+                socket.emit('autojogar', { chave: chave_secreta });
+            }
         }
     }, 1000);
 }
@@ -1736,7 +1752,7 @@ socket.on('meu_turno', function (data) {
     // isso para pedir um `meu_turno` reenviado se o indicador se perder).
     vez_atual_nome = String(data.username || '');
     if (indiceAtual === 2) {
-        iniciar_timer_jogada(tempo_turno_max);
+        iniciar_timer_jogada(tempo_turno_max, true);
     }
 
     if (painel_jogada && painel_aguarde) {
@@ -1769,8 +1785,15 @@ socket.on('meu_turno', function (data) {
 socket.on('espera_turno', function (data) {
     const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
-    sou_da_vez = false; // Fase 21: não é mais a minha vez, zera o contador.
-    parar_timer_jogada();
+    sou_da_vez = false; // Fase 21: não é mais a minha vez.
+    // Fase 21: o contador do turno agora aparece para todos — quem espera vê o
+    // mesmo relógio do da vez, mas sem emitir `autojogar` ao zerar.
+    tempo_turno_max = Number(data.tempo_max) || 0;
+    if (indiceAtual === 2 && tempo_turno_max > 0) {
+        iniciar_timer_jogada(tempo_turno_max, false);
+    } else {
+        parar_timer_jogada();
+    }
     // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
     // isso para pedir um `espera_turno` reenviado se o indicador se perder).
     vez_atual_nome = String(data.username || '');

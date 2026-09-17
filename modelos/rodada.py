@@ -1,4 +1,5 @@
 """Modelo da Rodada (Fase 45, M4)."""
+import math
 from datetime import datetime
 from flask_socketio import emit
 
@@ -327,6 +328,22 @@ class Rodada:
             'ultima_aposta': ({'face': ultima.dado_face, 'qtd': ultima.dado_qtd} if ultima else None),
         }
 
+    def tempo_restante_turno(self):
+        """
+        Segundos restantes do turno atual para o contador regressivo (Fase 21).
+
+        Calculado a partir de `vez_em` (e não o limite cheio) para que TODOS os
+        jogadores — o da vez e os que esperam — vejam o mesmo tempo, inclusive
+        quem dá refresh no meio do turno. Arredonda para cima para o cliente
+        nunca disparar o `autojogar` antes de o servidor considerar o tempo
+        esgotado. Devolve 0 quando a jogada automática está desligada.
+        """
+        tempo_max = int(self.da_partida.do_lobby.config.get('tempo_max_jogada', 0) or 0)
+        if tempo_max <= 0 or self.vez_em is None:
+            return 0
+        decorrido = (datetime.now() - self.vez_em).total_seconds()
+        return max(0, math.ceil(tempo_max - decorrido))
+
     def atualizar_front_pro_da_vez(self, jogador_atual):
         """
         Modifica o front-end para todos os jogadores, o da vez joga, os outros observam a mensagem: aguarde a sua vez.
@@ -336,16 +353,20 @@ class Rodada:
         nomes = [jogador.username for jogador in self.da_partida.jogadores]
         emit('formatador_coletivo', {'jogadores_nomes': nomes, 'jogador_inicial_nome': jogador_atual.username},
              to=self.sala_room())
+        # O contador do turno vai para todos (o da vez joga, os outros acompanham).
+        tempo_restante = self.tempo_restante_turno()
         payload = {'username': jogador_atual.username,
-                   'tempo_max': int(self.da_partida.do_lobby.config.get('tempo_max_jogada', 0) or 0)}
+                   'tempo_max': tempo_restante}
         payload.update(self.contexto_aposta())
         emit('meu_turno', payload, to=jogador_atual.client_id)
         for jogador in self.da_partida.jogadores:
             if jogador != jogador_atual:
                 # O username é o da VEZ (jogador_atual), não o do receptor: o
                 # cliente (Fase D2) e o snapshot (`emitir_dispatcher_turno`)
-                # dependem desse campo para saber quem é o da vez.
-                emit('espera_turno', {'username': jogador_atual.username}, to=jogador.client_id)
+                # dependem desse campo para saber quem é o da vez. O `tempo_max`
+                # é o tempo restante do turno, exibido também para quem espera.
+                emit('espera_turno', {'username': jogador_atual.username,
+                                      'tempo_max': tempo_restante}, to=jogador.client_id)
 
     def selecionar_proximo_jogador_na_lista(self, jogador_atual):
         lista_jogadores = self.da_partida.jogadores

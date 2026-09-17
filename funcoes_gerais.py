@@ -233,13 +233,17 @@ def emitir_dispatcher_turno(lobby, jogador):
     vez = rodada.vez_atual
     if vez is None or jogador not in partida.jogadores:
         return
+    # Fase 21: o contador do turno (tempo restante) vai também para quem
+    # espera, para todos verem o mesmo relógio.
+    tempo_restante = rodada.tempo_restante_turno()
     if vez == jogador:
         payload = {'username': jogador.username,
-                   'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)}
+                   'tempo_max': tempo_restante}
         payload.update(rodada.contexto_aposta())
         emit('meu_turno', payload, to=jogador.client_id, ignore_queue=True)
     else:
-        emit('espera_turno', {'username': vez.username}, to=jogador.client_id, ignore_queue=True)
+        emit('espera_turno', {'username': vez.username, 'tempo_max': tempo_restante},
+             to=jogador.client_id, ignore_queue=True)
 
 
 def enviar_snapshot_sala(lobby, jogador):

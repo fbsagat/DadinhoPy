@@ -628,7 +628,7 @@ I18N_DICIONARIOS['pt-BR'] = {
     'js.conectando': '⏳ Conectando...',
     'js.reconectando': '⚠ Reconectando...',
     'js.sem_conexao': '✖ Sem conexão — tentando reconectar...',
-    'js.vitoria_texto': 'Vitória de {nome}<br> Nessa bagaça!!!',
+    'js.vitoria_texto': 'Vitória de {nome}<br> Que jogaço!!!',
 
     'js.busca.vazia': 'Nenhuma partida encontrada com esses filtros.',
     'js.busca.dados': '🎲 {n} dado(s)',
