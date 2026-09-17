@@ -70,6 +70,15 @@ const socket = io(api_url || undefined, {
     autoConnect: !captcha_sitekey,
     transports: ['websocket'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
+    // Fase 68: o socket.io 4.6.0 embarca o engine.io-client 6.4, cujo default
+    // `closeOnBeforeunload: true` registra um listener de `beforeunload` que
+    // fecha o WebSocket de forma SÍNCRONA durante o reload/navegação. O close do
+    // WS pelo Cloudflare Tunnel pode atrasar o unload e a página fica "travada/
+    // em branco" no refresh — pior na rede móvel (Fase 64-66). O default só
+    // mudou para `false` no engine.io 6.5. Aqui o socket é destruído junto com a
+    // página; o servidor limpa o sid órfão no ping timeout e a retomada por
+    // `chave_secreta` reconstrói o jogador no próximo connect.
+    closeOnBeforeunload: false,
 });
 
 // Fase 67: o captcha é um script de terceiro e o connect só sai depois que ele
@@ -171,6 +180,10 @@ if (captcha_sitekey) {
 // falhas seguidas, vira um estado explícito de "sem conexão".
 const TENTATIVAS_SEM_CONEXAO = 5;
 let _tentativas_reconexao = 0;
+// Fase 68: marcado quando o servidor recusa a conexão de propósito (captcha/
+// limite de IP). Diferente de uma queda de rede, aqui não devemos reconectar
+// sozinhos — o resync de `visibilitychange`/`online` respeita esta flag.
+let _conexao_recusada = false;
 
 socket.on('connect_error', function (erro) {
     const dados = (erro && erro.data) || null;
@@ -183,6 +196,7 @@ socket.on('connect_error', function (erro) {
         }
         return;
     }
+    _conexao_recusada = true;
     socket.disconnect();
     mostrar_alerta(t(dados.motivo.chave, dados.motivo.params || {}), 'erro');
 });
@@ -410,7 +424,7 @@ function mostrar_pensando(nome, ms) {
         return;
     }
     if (eh_mobile()) {
-        mostrar_toast_mobile(t('js.pensando', { nome: nome || 'Bot' }), ms + 800);
+        mostrar_pensando_mobile(nome, ms);
         return;
     }
     const el = document.getElementById('narrador_pensando');
@@ -430,10 +444,43 @@ function mostrar_pensando(nome, ms) {
     }, ms + 800);
 }
 
+// Fase 60 (M5): no mobile o "pensando" usa um badge próprio, acima do toast, em
+// vez de reutilizar o `#toast_mobile` (slot único que sobrescrevia a fala na
+// hora e a impedia de ser lida). Enquanto o bot pensa, a fala anterior continua
+// visível. Reforço: o timer do toast é rearmado para a duração do pensamento,
+// garantindo o tempo de leitura mesmo quando `atraso` é grande.
+function mostrar_pensando_mobile(nome, ms) {
+    if (!pensando_mobile) {
+        return;
+    }
+    pensando_mobile.innerHTML = '';
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner-grow spinner-grow-sm text-info me-1';
+    spinner.setAttribute('role', 'status');
+    pensando_mobile.appendChild(spinner);
+    pensando_mobile.appendChild(document.createTextNode(t('js.pensando', { nome: nome || 'Bot' })));
+    pensando_mobile.classList.add('visivel');
+    posicionar_pensando_mobile();
+    clearTimeout(pensando_mobile._timer);
+    pensando_mobile._timer = setTimeout(function () {
+        pensando_mobile.classList.remove('visivel');
+    }, ms + 800);
+    if (toast_mobile && toast_mobile.classList.contains('visivel')) {
+        clearTimeout(mostrar_toast_mobile._timer);
+        mostrar_toast_mobile._timer = setTimeout(function () {
+            toast_mobile.classList.remove('visivel');
+        }, ms + 800);
+    }
+}
+
 function esconder_pensando() {
     const el = document.getElementById('narrador_pensando');
     if (el) {
         el.style.display = 'none';
+    }
+    if (pensando_mobile) {
+        clearTimeout(pensando_mobile._timer);
+        pensando_mobile.classList.remove('visivel');
     }
 }
 
@@ -454,6 +501,9 @@ function limpar_narrador() {
 // do `#rodape_acao` é medida a cada exibição, pois o rodapé cresce quando é a
 // vez do jogador — badge + dados + Apostar/Desconfiar — e encolhe no aguarde).
 const toast_mobile = document.getElementById('toast_mobile');
+// Fase 60 (M5): badge do "pensando" dos bots no mobile — elemento próprio para
+// não roubar o slot único do toast (que exibe a fala atual).
+const pensando_mobile = document.getElementById('pensando_mobile');
 
 function esconder_toast_mobile() {
     if (!toast_mobile) {
@@ -467,15 +517,36 @@ function esconder_toast_mobile() {
 // cada exibição e sempre que o rodapé muda de tamanho (menu de jogada abre/
 // fecha em `meu_turno`/`espera_turno`, jogador vira espectador, resize).
 function posicionar_toast_mobile() {
-    if (!eh_mobile() || !toast_mobile || !toast_mobile.classList.contains('visivel')) {
+    if (!eh_mobile() || !toast_mobile) {
+        return;
+    }
+    if (toast_mobile.classList.contains('visivel')) {
+        const rodape = document.getElementById('rodape_acao');
+        if (rodape && rodape.offsetParent !== null) {
+            const topo_rodape = rodape.getBoundingClientRect().top;
+            toast_mobile.style.bottom = Math.max(0, window.innerHeight - topo_rodape + 8) + 'px';
+        }
+    }
+    posicionar_pensando_mobile();
+}
+
+// Fase 60 (M5): posiciona o badge do "pensando" logo acima do toast (medindo a
+// borda superior do toast); se o toast estiver oculto, usa o topo do rodapé,
+// como o próprio toast faz. Sem toque bloqueado e sem sobrepor o conteúdo.
+function posicionar_pensando_mobile() {
+    if (!eh_mobile() || !pensando_mobile || !pensando_mobile.classList.contains('visivel')) {
+        return;
+    }
+    if (toast_mobile && toast_mobile.classList.contains('visivel')) {
+        const rect = toast_mobile.getBoundingClientRect();
+        pensando_mobile.style.bottom = Math.max(0, window.innerHeight - rect.top + 6) + 'px';
         return;
     }
     const rodape = document.getElementById('rodape_acao');
-    if (!rodape || rodape.offsetParent === null) {
-        return;
+    if (rodape && rodape.offsetParent !== null) {
+        const topo_rodape = rodape.getBoundingClientRect().top;
+        pensando_mobile.style.bottom = Math.max(0, window.innerHeight - topo_rodape + 8) + 'px';
     }
-    const topo_rodape = rodape.getBoundingClientRect().top;
-    toast_mobile.style.bottom = Math.max(0, window.innerHeight - topo_rodape + 8) + 'px';
 }
 
 function mostrar_toast_mobile(texto, duracao) {
@@ -2278,6 +2349,7 @@ function _atualizar_status_conexao(chave, classe) {
 
 socket.on('connect', function () {
     _tentativas_reconexao = 0;
+    _conexao_recusada = false;
     _atualizar_status_conexao('js.conectado', 'text-success');
     // Fase D2: reconnect com sid novo (morte de instância) ainda tem a chave
     // guardada — o placeholder foi criado com snapshot ADIADO (`tem_chave=1`);
@@ -2300,6 +2372,41 @@ socket.on('connect', function () {
 socket.on('disconnect', function () {
     _atualizar_status_conexao('js.reconectando', 'text-warning');
 });
+
+// Fase 68 (mobile): o Android suspende timers e o WebSocket quando a aba vai
+// para segundo plano ou a rede troca (wifi <-> dados). Ao voltar para a aba
+// (`visibilitychange`) ou recuperar a conexão (`online`), não espere o ping
+// timeout do socket.io (~35s): reconecta na hora se caiu, ou bate um heartbeat
+// para o servidor devolver o snapshot fresco (mesmo caminho do re-sync da
+// espera). É o que evita a tela "desatualizada/demorando a conectar" depois de
+// tirar o celular do bolso. Nunca reconecta após recusa intencional do servidor.
+function _resync_apos_background() {
+    if (_conexao_recusada) {
+        return;
+    }
+    if (!socket.connected) {
+        socket.connect();
+        return;
+    }
+    if (chave_secreta) {
+        try {
+            socket.emit('heartbeat', {
+                chave: chave_secreta,
+                pagina: indiceAtual,
+                vez: vez_atual_nome,
+            });
+        } catch (erro) {
+            console.error('Erro no resync ao voltar do background', erro);
+        }
+    }
+}
+
+document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) {
+        _resync_apos_background();
+    }
+});
+window.addEventListener('online', _resync_apos_background);
 
 socket.on("update_username", function (data) {
     nome_jogador = data.nome_jogador;

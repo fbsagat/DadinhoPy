@@ -137,6 +137,10 @@
          `#tela_partida` — antes ficava dentro dela, que é `display:none` fora da
          página 2, e as dicas nunca apareciam no celular. Position fixed no mobile. -->
     <div id="toast_mobile" class="toast-mobile" role="status" aria-live="polite"></div>
+    <!-- Fase 60 (M5): "pensando" dos bots no mobile num elemento próprio, acima
+         do toast — a fala anterior fica visível enquanto o bot pensa (o toast é
+         um slot único; antes o pensando sobrescrevia a fala na hora). -->
+    <div id="pensando_mobile" class="pensando-mobile" role="status" aria-live="polite"></div>
 
     <!-- Dropdown desktop (som + idioma): um ⚙️ que abre um painel pequeno com
          seletor de idioma e controles de som/música. No mobile a barra some e o
