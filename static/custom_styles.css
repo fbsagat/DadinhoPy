@@ -295,7 +295,7 @@ canvas {
     #cards .card {
         /* Fase 34: altura FIXA no mobile também (era `min-height`, que deixava
            o card crescer quando um nome longo quebrava linha no cabeçalho). */
-        height: 150px !important;
+        height: 165px !important;
     }
 }
 
@@ -922,11 +922,11 @@ h5,
     }
 }
 
-/* Grid no desktop: cards com largura FIXA e igual (180px), grupo SEMPRE
+/* Grid no desktop: cards com largura FIXA e igual (198px), grupo SEMPRE
    centralizado em qualquer quantidade de jogadores. Fase 32 (P2) usava
    `auto-fit` com `1fr`, que esticava os cards da última linha; a troca para
    `auto-fill` (P2) deixava os cards espalhados (trilhos vazios ocupavam
-   espaço). Agora as trilhas são fixas (`repeat(auto-fit, 180px)`): nenhum
+   espaço). Agora as trilhas são fixas (`repeat(auto-fit, 198px)`): nenhum
    nome de jogador muda o tamanho do card. */
 @media (min-width: 992px) {
     #cards {
@@ -934,7 +934,7 @@ h5,
            Bootstrap (o `#cards` usa a classe no HTML) — sem isto o desktop
            continuava em flex e as colunas `col-*` alargavam conforme o nome. */
         display: grid !important;
-        grid-template-columns: repeat(auto-fit, 180px);
+        grid-template-columns: repeat(auto-fit, 198px);
         gap: 0.6rem;
         justify-content: center;
         width: 100%;
@@ -950,30 +950,46 @@ h5,
 /* Fase 32 (P3): cards de jogadores com altura FIXA e compactos — o histórico
    de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo. */
 #cards .card {
-    height: 148px;
+    height: 163px;
     min-width: 0;
 }
 
 /* Fase 34: o nome do jogador NÃO influencia o tamanho do card — o cabeçalho
-   fica em linha única e trunca com reticências (sem quebrar linha nem crescer
-   o card). `min-width: 0` evita o nome empurrar a coluna além do trilho do
-   grid/flex; `overflow: hidden` do card corta qualquer sobra. */
+   fica em linha única. Fase nova: o cabeçalho é um flex onde só o NOME trunca
+   com reticências; a contagem de dados é um badge de largura fixa, então nunca
+   some mesmo com nome longo. */
 #cards .card-header {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
     min-width: 0;
 }
 
-/* Cards com largura FIXA e igual (180px) em QUALQUER breakpoint: a regra tem
+#cards .card-header .nome-jogador {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#cards .card-header .badge-dados {
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    font-weight: 700;
+    opacity: 0.92;
+    white-space: nowrap;
+}
+
+/* Cards com largura FIXA e igual (198px) em QUALQUER breakpoint: a regra tem
    mais especificidade que as classes `col-*` do Bootstrap, então o nome do
    jogador nunca altera o tamanho — no desktop o grid usa trilhas fixas de
    iguais; no mobile/tablet o flex `justify-content-center` centraliza. */
 #cards > div {
     min-width: 0;
-    flex: 0 0 180px !important;
-    width: 180px !important;
-    max-width: 180px !important;
+    flex: 0 0 198px !important;
+    width: 198px !important;
+    max-width: 198px !important;
 }
 
 #cards .card-body {

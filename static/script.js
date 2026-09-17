@@ -1418,6 +1418,22 @@ socket.on('atualizar_coringa', function (data) {
     }
 })
 
+// Fase: cabeçalho do card com o nome truncável e a quantidade de dados num
+// badge de largura fixa. O nome longo corta com reticências, mas a contagem
+// nunca some (antes ia no fim do texto e era a primeira coisa cortada).
+function montar_cabecalho_card(cabecalho, jogador, qtd) {
+    cabecalho.textContent = '';
+    const nome = document.createElement('span');
+    nome.className = 'nome-jogador';
+    nome.textContent = jogador;
+    const badge = document.createElement('span');
+    badge.className = 'badge-dados';
+    badge.textContent = `🎲 ${qtd}`;
+    cabecalho.appendChild(nome);
+    cabecalho.appendChild(badge);
+    cabecalho.title = jogador;
+}
+
 // Função para criar cada seção de dados
 function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     const col = document.createElement('div');
@@ -1621,9 +1637,8 @@ socket.on('construtor_html', function (data) {
             // window.alert(`${jogador} =/= ${nome_jogador}`);
         }
 
-        cardHeader.textContent = `${jogador} (🎲 x ${data.dados_tt})`;
         cardHeader.id = `card_hea_${jogador}`;
-        cardHeader.title = jogador;
+        montar_cabecalho_card(cardHeader, jogador, data.dados_tt);
 
         // Criação do corpo do card
         const cardBody = document.createElement('div');
@@ -1835,7 +1850,7 @@ socket.on('reset_rodada', function (data) {
         const c_row = document.getElementById(`card_row_${jogador}`);
 
         if (card) {  // Verifica se o elemento existe
-            card.textContent = `${jogador} (🎲 x ${jogadores_dados[index]})`;
+            montar_cabecalho_card(card, jogador, jogadores_dados[index]);
         }
         if (c_row) {  // Verifica se o elemento existe
             c_row.innerHTML = '';
