@@ -72,9 +72,31 @@ const socket = io(api_url || undefined, {
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
 });
 
-function conecta_com_token(token) {
-    socket.io.opts.query = Object.assign({}, socket.io.opts.query, { captcha_token: token });
+// Fase 67: o captcha é um script de terceiro e o connect só sai depois que ele
+// resolve — em produção isso custa alguns segundos e, até o `connect_start`
+// chegar, a tela mostrava o lobby "padrão" (badge `#padrao`, config travada).
+// Aqui: (a) mostra "conectando" em vez do `#padrao` enganoso; (b) watchdog —
+// se o Turnstile não carregar/travar, conecta mesmo assim (o servidor decide;
+// com captcha ativo o `connect_error` mostra o motivo), nunca mais uma tela
+// muda sem feedback. O script do Turnstile já vem no `<head>` (async, com
+// preconnect) para começar a baixar antes do resto da página.
+const CAPTCHA_TIMEOUT_MS = 6000;
+let _captcha_conectou = false;
+
+function _conectar_uma_vez() {
+    if (_captcha_conectou) {
+        return;
+    }
+    _captcha_conectou = true;
     socket.connect();
+}
+
+function conecta_com_token(token) {
+    if (_captcha_conectou) {
+        return;
+    }
+    socket.io.opts.query = Object.assign({}, socket.io.opts.query, { captcha_token: token });
+    _conectar_uma_vez();
 }
 
 function conecta_com_captcha() {
@@ -82,7 +104,7 @@ function conecta_com_captcha() {
     // bloqueador, sitekey/domínio errado), conecta sem token — o servidor
     // decide (com captcha ativo na API o connect é recusado e o erro aparece).
     if (!window.turnstile) {
-        socket.connect();
+        _conectar_uma_vez();
         return;
     }
     try {
@@ -95,24 +117,41 @@ function conecta_com_captcha() {
             sitekey: captcha_sitekey,
             size: 'invisible',
             callback: conecta_com_token,
-            'error-callback': function () { socket.connect(); },
-            'timeout-callback': function () { socket.connect(); },
+            'error-callback': _conectar_uma_vez,
+            'timeout-callback': _conectar_uma_vez,
         });
         window.turnstile.execute(widget);
     } catch (erro) {
-        socket.connect();
+        _conectar_uma_vez();
     }
 }
 
 if (captcha_sitekey) {
-    const script = document.createElement('script');
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    script.async = true;
-    script.onload = conecta_com_captcha;
-    script.onerror = conecta_com_captcha;
-    document.head.appendChild(script);
+    // Estado visível enquanto a verificação não termina (evita o `#padrao`).
+    if (sala_atual) {
+        const badge_sala = document.getElementById('sala_atual');
+        if (badge_sala) {
+            badge_sala.textContent = '…';
+        }
+    }
+    _atualizar_status_conexao('js.conectando', 'text-warning');
+    const _inicio_captcha = Date.now();
+    (function _esperar_turnstile() {
+        if (_captcha_conectou) {
+            return;
+        }
+        if (window.turnstile) {
+            conecta_com_captcha();
+            return;
+        }
+        if (Date.now() - _inicio_captcha > CAPTCHA_TIMEOUT_MS) {
+            _conectar_uma_vez();
+            return;
+        }
+        setTimeout(_esperar_turnstile, 100);
+    })();
 } else {
-    socket.connect();
+    _conectar_uma_vez();
 }
 
 // Fase 59: connect recusado pelo servidor (limite de conexões por IP ou
