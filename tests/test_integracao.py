@@ -2280,6 +2280,89 @@ def teste_ultimo_humano_sala_de_ias_ganha_grace():
     _ok("último humano de sala só de IAs ganha a janela de reconexão (Fase 23)")
 
 
+def teste_espectador_ritmo_partida_so_ias():
+    """
+    Fase 69: quando a partida fica sem humano com dados (o último humano foi
+    eliminado), o `ia.processar` deixa de simular a partida inteira numa tacada
+    e passa a liberar UM lance por `espectador_leitura`, no ritmo do relógio do
+    lobby. O espectador paga o ritmo; a resposta `espectador_ritmo` diz quanto
+    falta para o próximo lance. Sem espectador, o comportamento legado segue
+    (simula até o fim) para a sala não ficar presa.
+    """
+    from datetime import datetime, timedelta
+
+    import ia
+
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 3})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    partida = lobby.partidas[-1]
+    humano = next(j for j in lobby.jogadores if j.username == "Ana")
+    # Elimina Ana da mesa (a partida segue só de IAs), como no fluxo real.
+    partida.jogadores = [j for j in partida.jogadores if j is not humano]
+    for rodada in partida.rodadas:
+        rodada.jogadores = [j for j in rodada.jogadores if j is not humano]
+    rodada = partida.rodadas[-1]
+    rodada.vez_atual = next(j for j in partida.jogadores if j.is_ia)
+    assert ia.somente_ias_com_dados(lobby), "pré-condição: partida só de IAs"
+    assert ia._ha_espectador(lobby), "pré-condição: Ana segue na sala assistindo"
+    modulo_store.salvar_sala(lobby)
+
+    # A instância que libera o lance precisa ler o lobby fresco (como os
+    # handlers fazem) e rodar o `ia.processar` do poll.
+    c1.get_received()  # descarta os eventos do início
+    c1.emit("espectador_leitura", {"chave": cs1["chave_secreta"], "pagina": 1})
+    eventos = c1.get_received()
+    ritmos = [e for e in eventos if e["name"] == "espectador_ritmo"]
+    assert ritmos, "o poll deve responder `espectador_ritmo` (ritmo do próximo lance)"
+    assert "restante_ms" in ritmos[-1]["args"][0], "o ritmo deve trazer o tempo que falta"
+    assert _achar_evento(eventos, "mudar_pagina") is not None, \
+        "o primeiro poll libera o lance imediato (rolagem destrava)"
+
+    # Um lance por poll: depois do primeiro, o relógio fica no futuro e um poll
+    # imediato NÃO adianta o jogo (nada de simular a partida inteira numa tacada).
+    atual = modulo_store.carregar_sala(SALA)
+    assert ia.tem_relogio(atual), "depois de um lance o relógio deve estar armado"
+    pagina_antes = atual.pagina
+    c1.emit("espectador_leitura", {"chave": cs1["chave_secreta"], "pagina": pagina_antes})
+    eventos = c1.get_received()
+    assert _contar_eventos(eventos, "narracao") == 0, \
+        "poll antes do relógio vencer não pode liberar outro lance"
+    assert _achar_evento(eventos, "espectador_ritmo") is not None
+
+    # Adianta o relógio (simula o tempo de pensamento) e o próximo poll libera
+    # exatamente mais um lance — não a partida inteira.
+    atual = modulo_store.carregar_sala(SALA)
+    ia._gravar_relogio(atual, datetime.now() - timedelta(seconds=1))
+    modulo_store.salvar_sala(atual)
+    c1.emit("espectador_leitura", {"chave": cs1["chave_secreta"], "pagina": atual.pagina})
+    eventos = c1.get_received()
+    assert _contar_eventos(eventos, "narracao") >= 1, "o poll vencido deve liberar um lance"
+    atual = modulo_store.carregar_sala(SALA)
+    assert atual.pagina != 0, "a partida assistida não pode acabar numa única tacada"
+
+    # Sem espectador (nenhum humano fora da mesa), o modo legado simula até o
+    # fim: a sala não pode ficar presa com ninguém olhando. Fora de um request
+    # do Socket.IO não há room — neutraliza o emit (padrão do `simular_ia`).
+    atual = modulo_store.carregar_sala(SALA)
+    atual.jogadores = [j for j in atual.jogadores if j.is_ia]
+    atual.espectadores = []
+    ia._limpar_relogio(atual)
+    emit_salvo = _salvar_emit()
+    try:
+        _silenciar_emit()
+        ia.processar(atual)
+    finally:
+        _restaurar_emit(emit_salvo)
+    assert atual.pagina == 0, "sem espectador, a partida de IAs termina (não fica presa)"
+    c1.disconnect()
+    _limpar()
+    _ok("espectador ritma a partida só de IAs (Fase 69)")
+
+
 def teste_volta_apos_substituicao_ia():
     """
     Fase 30: caiu no meio da partida com a substituição ligada -> a graça expira
@@ -2873,12 +2956,15 @@ def verificar_integracao():
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
         ("lobby-lotado", teste_lobby_lotado_so_quando_lotar),
     ]
+    testes_fase69 = [
+        ("espectador-ritmo-so-ias", teste_espectador_ritmo_partida_so_ias),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
                            + testes_fase23 + testes_fase25 + testes_fase46
-                           + testes_fase29 + testes_fase30):
+                           + testes_fase29 + testes_fase30 + testes_fase69):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

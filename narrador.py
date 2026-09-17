@@ -24,8 +24,8 @@ import secrets
 # é propositalmente largo: a personalidade do bot e a situação da mesa
 # (só bots com dados) encolhem ou esticam esse tempo a cada lance.
 FAIXAS_PENSAMENTO = {
-    1: (800, 1350),
-    2: (1050, 1985),
+    1: (800, 1650),
+    2: (1050, 2185),
     3: (1400, 2720),
     4: (1800, 3560),
 }

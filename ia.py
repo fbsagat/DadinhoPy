@@ -28,9 +28,11 @@ sempre pública — aparece na tela pra todo mundo o jogo inteiro.
 
 import math
 import secrets
+from datetime import datetime, timedelta
 from functools import lru_cache
 
 import funcoes_gerais
+import narrador
 from modelos import Jogador
 
 
@@ -47,6 +49,18 @@ NOMES_NIVEIS = {
 # quando o jogo acaba. O teto antigo (50) era baixo demais e estacionava jogos
 # longos quando o último humano já tinha sido eliminado.
 LIMITE_ACOES_PROCESSAR = 10000
+
+# Fase 69 (espectador): quando a partida fica SEM humano com dados, quem assiste
+# não consegue acompanhar a simulação inteira numa tacada (o servidor avançava
+# rolagem/apostas/conferência/vitória até o fim e o cliente colapsava o burst —
+# `MAX_ATRASO_FILA`). Nesse modo, `processar` libera UM lance por chamada,
+# respeitando o relógio gravado no lobby (`proximo_lance_em`): o poll do
+# espectador (e o heartbeat, como rede de segurança) paga o ritmo. O instante
+# vive no store, então qualquer instância continua o jogo — sem timer/thread.
+# Piso/teto do intervalo entre lances: o piso evita um poll rápido demais virar
+# rajada; o teto impede a partida de "parar" se o poll atrasar muito.
+INTERVALO_LANCE_MIN_MS = 250
+INTERVALO_LANCE_MAX_MS = 6000
 
 # Leitura de oponentes (Fase 36): nº mínimo de observações desta partida antes
 # de a IA "confiar" numa leitura sobre um adversário específico — com menos
@@ -644,10 +658,21 @@ def processar(lobby):
     """
     Faz as IAs agirem até o jogo precisar de um humano (ou acabar). Chamado ao
     fim de cada handler mutável, sob o lock da sala. Devolve True se algo mudou.
+
+    Fase 69: quando não resta humano COM DADOS (todos eliminados ou só bots) e
+    ainda há quem assista, o laço NÃO simula a partida inteira — libera um lance
+    por chamada, no ritmo de `proximo_lance_em`. O primeiro lance é imediato e
+    arma o relógio; os seguintes esperam o poll do espectador (ou o heartbeat,
+    como rede de segurança). Sem espectador, o comportamento é o legado: simula
+    até acabar, para a sala não ficar presa com ninguém olhando.
     """
     if lobby is None:
         return False
-    limite = max(LIMITE_ACOES_PROCESSAR, len(lobby.jogadores) * 8)
+    passo_unico = _liberar_um_lance(lobby)
+    if passo_unico and not _lance_vencido(lobby):
+        # Ainda "pensando": um poll cedo demais não pode adiantar a jogada.
+        return False
+    limite = 1 if passo_unico else max(LIMITE_ACOES_PROCESSAR, len(lobby.jogadores) * 8)
     mudou = False
     for _ in range(limite):
         pagina = lobby.pagina
@@ -664,7 +689,141 @@ def processar(lobby):
         if not avancou:
             break
         mudou = True
+    # O relógio só é (re)armado quando o jogo AINDA precisa das IAs: se a
+    # partida acabou (página 0) ou parou num humano, o próximo lance é
+    # agendado pelo evento humano normal, não por um novo relógio.
+    if passo_unico and somente_ias_com_dados(lobby):
+        if lobby.pagina == 0:
+            # A partida acabou e voltou ao lobby: nada a ritmar.
+            _limpar_relogio(lobby)
+        else:
+            _armar_proximo_lance(lobby)
     return mudou
+
+
+def somente_ias_com_dados(lobby):
+    """True quando ninguém com dados na partida é humano (eliminado ou só bots)."""
+    partida = _partida_atual(lobby)
+    if partida is None:
+        return False
+    return not any(not jogador.is_ia for jogador in partida.jogadores)
+
+
+def _ha_espectador(lobby):
+    """True se resta humano na sala sem estar na mesa (assistindo a partida)."""
+    partida = _partida_atual(lobby)
+    if partida is None:
+        return False
+    for humano in lobby.espectadores:
+        if not humano.is_ia:
+            return True
+    return any(not jogador.is_ia and jogador not in partida.jogadores
+               for jogador in lobby.jogadores)
+
+
+def _liberar_um_lance(lobby):
+    """
+    Ritmo do lance quando só há IAs com dados (Fase 69). Devolve True quando o
+    `processar` desta chamada deve dar UM passo, e False para o laço legado.
+
+    O relógio (`proximo_lance_em`) é gravado no lobby, logo persiste no store e
+    vale para todas as instâncias. Sem espectador humano, zera o relógio e
+    libera o laço completo (ninguém está olhando; a sala não pode ficar presa).
+    Sem relógio mas com espectador é o PRIMEIRO lance: roda na hora e o
+    `processar` arma o relógio dos próximos.
+    """
+    if not somente_ias_com_dados(lobby) or not _ha_espectador(lobby):
+        _limpar_relogio(lobby)
+        return False
+    return True
+
+
+def _ler_relogio(lobby):
+    """Instante do próximo lance, ou None quando o ritmo está desligado."""
+    partida = _partida_atual(lobby)
+    if lobby.pagina == 2 and partida is not None and partida.rodadas:
+        return partida.rodadas[-1].proximo_lance_em
+    if partida is not None:
+        return partida.proximo_lance_em
+    return None
+
+
+def _lance_vencido(lobby):
+    """True quando o relógio chegou (ou nunca foi armado: primeiro lance)."""
+    relogio = _ler_relogio(lobby)
+    return relogio is None or relogio <= datetime.now()
+
+
+def tem_relogio(lobby):
+    """True se a partida assistida tem um próximo lance agendado (Fase 69)."""
+    return _ler_relogio(lobby) is not None
+
+
+def ms_ate_proximo_lance(lobby):
+    """
+    Milissegundos até o próximo lance (0 = já pode rodar) ou None quando a
+    partida não está mais em modo assistido (relógio desarmado). O poll do
+    espectador usa isso para reagendar sem adivinhar o ritmo.
+    """
+    relogio = _ler_relogio(lobby)
+    if relogio is None:
+        return None
+    restante = (relogio - datetime.now()).total_seconds() * 1000
+    return max(0, int(restante))
+
+
+def _gravar_relogio(lobby, valor):
+    partida = _partida_atual(lobby)
+    if lobby.pagina == 2 and partida is not None and partida.rodadas:
+        partida.rodadas[-1].proximo_lance_em = valor
+    if partida is not None:
+        partida.proximo_lance_em = valor
+
+
+def _limpar_relogio(lobby):
+    if _ler_relogio(lobby) is not None:
+        _gravar_relogio(lobby, None)
+
+
+def _armar_proximo_lance(lobby):
+    """
+    Agenda o próximo lance. Usa o relógio vigente como base quando ele ainda
+    está no futuro (mantém a cadência); senão parte de agora (o lance acabou de
+    rodar). O `_gravar_relogio` escreve na `Rodada` (página 2) e na `Partida`
+    (páginas 1/3/4), então a leitura é consistente em qualquer uma delas.
+    """
+    agora = datetime.now()
+    relogio = _ler_relogio(lobby)
+    base = relogio if (relogio is not None and relogio > agora) else agora
+    _gravar_relogio(lobby, base + timedelta(milliseconds=_tempo_de_um_lance(lobby)))
+
+
+def _tempo_de_um_lance(lobby):
+    """
+    Intervalo (ms) até o próximo lance: o tempo de um bot pensar, como o que o
+    cliente aplica via `narracao['atraso']` — o servidor agora também conhece
+    esse número para ritmar o poll do espectador.
+    """
+    valor = None
+    partida = _partida_atual(lobby)
+    if lobby.pagina == 2 and partida is not None and partida.rodadas:
+        rodada = partida.rodadas[-1]
+        vez = rodada.vez_atual
+        if vez is not None and vez.is_ia:
+            valor = narrador.tempo_pensamento(vez.ia_nivel, jogador=vez, so_ias=True)
+    if valor is None:
+        # Páginas 1/3/4 (ou vez pendente): usa o maior tempo de pensamento dos
+        # bots vivos, que dá a cadência de "quem está pensando" na mesa.
+        partida = partida or _partida_atual(lobby)
+        if partida is not None:
+            tempos = [narrador.tempo_pensamento(j.ia_nivel, jogador=j, so_ias=True)
+                      for j in partida.jogadores if j.is_ia]
+            valor = max(tempos) if tempos else INTERVALO_LANCE_MIN_MS
+    try:
+        valor = int(valor)
+    except (TypeError, ValueError):
+        valor = INTERVALO_LANCE_MIN_MS
+    return max(INTERVALO_LANCE_MIN_MS, min(INTERVALO_LANCE_MAX_MS, valor))
 
 
 def _partida_atual(lobby):

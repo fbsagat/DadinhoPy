@@ -1411,6 +1411,35 @@ def verificar_desconectados(dados, lobby, jogador):
     _gc_sala(lobby)
 
 
+@socketio.on('espectador_leitura')
+@evento_mutavel(cooldown=None, lock_distribuido=True)
+@autenticar()
+def espectador_leitura(dados, lobby, jogador):
+    """
+    Fase 69: poll do espectador. Quando a partida fica SEM humano com dados
+    (o último humano foi eliminado, ou a sala é só de bots), o `ia.processar`
+    deixa de simular a partida inteira numa tacada e passa a liberar um lance
+    por chamada, no ritmo do relógio gravado no lobby (`proximo_lance_em`).
+
+    Quem paga o ritmo é o cliente que assiste: ele chama este evento, e o
+    servidor responde `espectador_ritmo` com o tempo que falta para o próximo
+    lance (ou 0, se o lance já rodou e a narração vem na sequência). O poll
+    nunca precisa "adivinhar" o ritmo — sem isso, um poll cedo demais ficaria
+    sem resposta e o cliente pararia de pedir.
+
+    Exige a `chave_secreta` do jogador (invariante dos handlers mutáveis): o
+    poll não muta nada por conta própria — a mutação (um lance) acontece em
+    `ia.processar`, idempotente pelo relógio —, mas a chave evita que um socket
+    qualquer force o avanço da sala. `cooldown=None`: um drop silencioso pelo
+    cooldown travaria a única fonte de avanço da partida assistida.
+    """
+    if ia.processar(lobby):
+        salvar_sala(lobby)
+    restante = ia.ms_ate_proximo_lance(lobby)
+    if restante is not None:
+        emit('espectador_ritmo', {'restante_ms': restante}, to=jogador.client_id, ignore_queue=True)
+
+
 @socketio.on('heartbeat')
 @evento_mutavel(lock_distribuido=False)
 def heartbeat(dados=None):
@@ -1532,7 +1561,15 @@ def heartbeat(dados=None):
             lobby_re.marcar_visto()
         store.salvar_resumo(lobby_re.sala_id, lobby_re.resumo_partida())
 
-    if (not veio_do_cache or pagina_cliente != pagina_sala or vez_divergente) and lobby.status != 'espera':
+    # Fase 69: partida só de IAs (o último humano foi eliminado) com relógio
+    # pendente — o avanço é pago pelo poll do espectador; o heartbeat entra
+    # como rede de segurança (fechou a aba, o poll morreu?). Força o caminho
+    # lockado mesmo com o cache quente, senão a sala ficaria parada.
+    partida_so_ias = (lobby.status != 'espera' and lobby.pagina in (1, 2, 3, 4)
+                      and ia.somente_ias_com_dados(lobby) and ia.tem_relogio(lobby))
+
+    if (not veio_do_cache or pagina_cliente != pagina_sala or vez_divergente
+            or partida_so_ias) and lobby.status != 'espera':
         with trancar_sala_distribuida(sala_id):
             # Re-leitura fresca DENTRO do lock: entre a leitura pré-lock e a
             # aquisição outra instância pode ter avançado o turno — processar

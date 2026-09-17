@@ -241,6 +241,14 @@ def verificar_roundtrip():
     m7 = modelos.Lobby.de_dict(dict(v7))
     _checar("migração v7 -> v8", m7.vagas_recentes == {}, str(m7.vagas_recentes))
 
+    # v8 -> v9: o relógio do próximo lance dos bots (Fase 69) entra no formato.
+    v8 = {"sala_id": "v8", "lobby_num": 1, "versao": 8, "jogadores": [],
+          "partidas": [{"partida_num": 1, "rodadas": [{"rodada_num": 1, "turnos": []}]}]}
+    m8 = modelos.Lobby.de_dict(dict(v8))
+    _checar("migração v8 -> v9",
+            m8.partidas[0].proximo_lance_em is None
+            and m8.partidas[0].rodadas[0].proximo_lance_em is None)
+
     # v1 -> v3: campos da sala de espera e prontidão passam a existir.
     v1 = {"sala_id": "v1", "lobby_num": 1, "versao": 1,
           "jogadores": [{"client_id": "x", "chave_secreta": "k"}], "partidas": []}

@@ -254,7 +254,9 @@ let processando_eventos = false;
 // quando já há `MAX_ATRASO_FILA` ms de pausa pendente na fila, os próximos
 // eventos entram com atraso 0 (processa na hora) — a ORDEM é preservada e
 // nenhum evento é descartado, só as pausas extras são puladas.
-const MAX_ATRASO_FILA = 4000;
+// Dimensionado para ~2 lances de nível 4 (topo de `FAIXAS_PENSAMENTO`, 3560ms)
+// antes de começar a pular pausas.
+const MAX_ATRASO_FILA = 8000;
 let atraso_pendente_total = 0;
 
 function _processar_fila_eventos() {
@@ -576,6 +578,52 @@ socket.on('narracao', function (data) {
     if (data && data.tipo === 'vitoria') {
         tocar_fanfarra();
     }
+    // Fase 69: cada lance da partida só de IAs é pago por um poll do
+    // espectador; a resposta (`espectador_ritmo`) agenda o próximo.
+    if (eh_espectador && data && data.is_ia) {
+        agendar_poll_espectador(POLL_ESPECTADOR_PADRAO);
+    }
+});
+
+// Fase 69: poll do espectador (partida só de IAs). O servidor libera UM lance
+// por chamada, no ritmo de "pensamento" dos bots; aqui pedimos o próximo e o
+// servidor responde `espectador_ritmo` com o tempo que falta (nunca
+// adivinhamos o ritmo no cliente). Sem o poll, a partida assistida ficaria
+// parada esperando uma jogada humana que não existe mais.
+let _timer_poll_espectador = null;
+const POLL_ESPECTADOR_PADRAO = 600;
+const POLL_ESPECTADOR_MAX = 8000;
+
+function parar_poll_espectador() {
+    if (_timer_poll_espectador !== null) {
+        clearTimeout(_timer_poll_espectador);
+        _timer_poll_espectador = null;
+    }
+}
+
+function agendar_poll_espectador(ms) {
+    if (!eh_espectador || !sala_atual) {
+        return;
+    }
+    let espera = Number(ms);
+    if (!Number.isFinite(espera) || espera < 0) {
+        espera = POLL_ESPECTADOR_PADRAO;
+    }
+    espera = Math.min(POLL_ESPECTADOR_MAX, espera);
+    parar_poll_espectador();
+    _timer_poll_espectador = setTimeout(function () {
+        _timer_poll_espectador = null;
+        if (!eh_espectador || indiceAtual === 0) {
+            return;
+        }
+        socket.emit('espectador_leitura', { chave: chave_secreta, pagina: indiceAtual });
+    }, espera);
+}
+
+// O servidor diz quanto falta para o próximo lance (ou 0 se acabou de rodar):
+// reagenda o poll com esse tempo, em vez de martelar o servidor.
+socket.on('espectador_ritmo', function (data) {
+    agendar_poll_espectador(data && data.restante_ms);
 });
 
 function getParamSala() {
@@ -1344,6 +1392,8 @@ socket.on("mudar_pagina", function (data) {
         eh_espectador = false;
         limpar_narrador();
         parar_celebracao();
+        // Fase 69: de volta ao lobby não há partida só de IAs para ritmar.
+        parar_poll_espectador();
     }
     const paginas = [
         document.getElementById('tela_jogadores'),
@@ -1405,6 +1455,11 @@ socket.on("mudar_pagina", function (data) {
         if (titulo_conf) {
             titulo_conf.scrollIntoView({ block: 'start' });
         }
+    }
+    // Fase 69: um espectador que acabou de entrar/atualizar numa página de
+    // jogo precisa do poll rodando (o snapshot não traz `narracao`).
+    if (eh_espectador && data.pag_numero !== 0) {
+        agendar_poll_espectador(POLL_ESPECTADOR_PADRAO);
     }
 });
 
@@ -2201,6 +2256,9 @@ socket.on('espectador', function (data) {
     painel_aguarde.style.display = 'none';
     painel_jogada.style.display = 'none';
     posicionar_toast_mobile();
+    // Fase 69: quem vira espectador numa partida só de IAs passa a pagar o
+    // ritmo — agenda o primeiro poll já (o `narracao` reagenda os seguintes).
+    agendar_poll_espectador(POLL_ESPECTADOR_PADRAO);
 
 })
 

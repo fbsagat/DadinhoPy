@@ -26,6 +26,7 @@ Legenda: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
 - **Fase 30** — Frontend: fila de alertas e seleção de dado stale. ✅ concluída
 - **Fase 31** — Frontend: performance, CSS morto e CSP/i18n. ✅ concluída
 - **Fase 33** — Mobile vs desktop: menu ☰/drawer, carrossel do lobby, layout de partida e limpeza do swipe morto. ✅ concluída
+- **Fase 69** — Ritmo da partida só de IAs assistida (relógio no lobby + poll do espectador). ✅ concluída
 
 ---
 
@@ -1142,3 +1143,45 @@ uma mesma tentativa de conexão.
 - **Fase 66:** Opção A adotada pelo mantenedor (`transports: ['websocket']`),
   registrada no ADR-008 (ADR-006 marcado como revisado). Nenhuma mudança no
   nginx além do log; o sticky por IP segue só para distribuição de carga.
+
+---
+
+# Fase 69 — Ritmo da partida só de IAs assistida ✅ concluída
+
+Objetivo: o relato "a partida só com IAs no mobile, quando todos os humanos
+perdem, fica extremamente rápida, impossível de acompanhar como espectador".
+Diagnóstico confirmado: quando o último humano com dados é eliminado,
+`ia.processar` simulava a partida inteira numa única request (4 bots × 3 dados =
+~434 eventos, 48 narrações, ~30s de "pensamento" empurrados de uma vez); o
+cliente colapsava o burst (`MAX_ATRASO_FILA` 4s, Fase 53), então a partida
+passava em ~4s. Diagnóstico e decisão no ADR-009.
+
+- [x] **Relógio persistido (`modelos/`)** — `Rodada.proximo_lance_em` (páginas
+  1/2) e `Partida.proximo_lance_em` (páginas 3/4), serializados (`VERSAO_ATUAL`
+  8 → 9, `_migrar_v8_para_v9`). Vive no blob do store: vale para todas as
+  instâncias, sem estado em memória.
+- [x] **`ia.processar` em dois modos** — legado (há humano com dados, ou não há
+  espectador: simula até acabar) e assistido (sem humano com dados **e** com
+  espectador: um lance por chamada, no ritmo do relógio). O intervalo é o tempo
+  de pensamento dos bots (`narrador.tempo_pensamento(..., so_ias=True)`),
+  limitado por `INTERVALO_LANCE_MIN_MS`/`MAX`. Helpers públicos:
+  `somente_ias_com_dados`, `tem_relogio`, `ms_ate_proximo_lance`, `_liberar_um_lance`.
+- [x] **Poll do espectador (`app.py` + `static/script.js`)** — evento
+  `espectador_leitura` (`cooldown=None`, exige a chave; só roda `ia.processar`
+  sob o lock e responde `espectador_ritmo` com `restante_ms`). O cliente dispara
+  o poll a cada `narracao` de IA e reagenda com o tempo devolvido — nunca
+  adivinha o ritmo. O selo `espectador` e o `mudar_pagina` (refresh) ligam o
+  poll; a página 0 o para.
+- [x] **Heartbeat como rede de segurança** — sala em partida só de IAs com
+  relógio armado força o caminho lockado (mesmo com o cache quente), cobrindo o
+  caso de o polling do espectador morrer.
+- [x] **Sem espectador = modo legado** — a sala nunca fica presa esperando um
+  cliente que fechou a aba (mesma garantia de uma partida pura de bots).
+
+Verificação (local, `.venv`): `python verificar.py` 100% verde (37s) — inclui a
+migração `v8 -> v9` e o teste de integração `espectador-ritmo-so-ias` (o poll
+libera um lance, um poll antes do relógio não adianta o jogo, e sem espectador a
+partida de IAs termina); `python simular_ia.py --partidas 20 --dados 3`
+hierarquia 4>3>2>1 preservada (o simulador não tem espectador: modo legado).
+Complemento manual: assistir uma partida que vira só de IAs em 2 abas (uma
+delas eliminada) e confirmar o ritmo no mobile.

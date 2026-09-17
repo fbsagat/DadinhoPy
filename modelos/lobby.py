@@ -157,6 +157,7 @@ class Lobby:
                 'conferencia_em': rodada.conferencia_em.isoformat() if rodada.conferencia_em else None,
                 'perdedor_id': rodada.perdedor.client_id if rodada.perdedor else None,
                 'vencedor_id': rodada.vencedor.client_id if rodada.vencedor else None,
+                'proximo_lance_em': rodada.proximo_lance_em.isoformat() if rodada.proximo_lance_em else None,
                 'turnos': [
                     {
                         'turno_num': turno.turno_num,
@@ -175,6 +176,7 @@ class Lobby:
             'jogador_sorteado_id': partida.jogador_sorteado.client_id if partida.jogador_sorteado else None,
             'vencedor_final_id': partida.vencedor_final.client_id if partida.vencedor_final else None,
             'vitoria_em': partida.vitoria_em.isoformat() if partida.vitoria_em else None,
+            'proximo_lance_em': partida.proximo_lance_em.isoformat() if partida.proximo_lance_em else None,
             'seed_info': partida.seed_info,
             'seed_final': partida.seed_final,
             'rodadas': rodadas,
@@ -336,6 +338,9 @@ class Lobby:
             partida.vencedor_final = jogadores.get(dados_partida.get('vencedor_final_id'))
             vitoria_em = dados_partida.get('vitoria_em')
             partida.vitoria_em = datetime.fromisoformat(vitoria_em) if vitoria_em else None
+            proximo_lance = dados_partida.get('proximo_lance_em')
+            partida.proximo_lance_em = (datetime.fromisoformat(proximo_lance)
+                                        if proximo_lance else None)
             for dados_rodada in dados_partida.get('rodadas', []):
                 rodada = Rodada(partida=partida, jogadores=partida.jogadores,
                                 rodada_numero=dados_rodada.get('rodada_num', 1),
@@ -355,6 +360,9 @@ class Lobby:
                 rodada.conferencia_em = datetime.fromisoformat(conferencia_em) if conferencia_em else None
                 rodada.perdedor = jogadores.get(dados_rodada.get('perdedor_id'))
                 rodada.vencedor = jogadores.get(dados_rodada.get('vencedor_id'))
+                proximo_lance = dados_rodada.get('proximo_lance_em')
+                rodada.proximo_lance_em = (datetime.fromisoformat(proximo_lance)
+                                           if proximo_lance else None)
                 for dados_turno in dados_rodada.get('turnos', []):
                     turno = Turno(da_rodada=rodada, dado=dados_turno.get('dado_face', 1),
                                   jogador=jogadores.get(dados_turno.get('do_jogador_id')),

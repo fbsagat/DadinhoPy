@@ -39,6 +39,11 @@ class Partida:
         # Quando a tela de vitória (4) foi aberta (Fase 22): referência de tempo
         # do `autojogar` para auto-confirmar um humano atrasado no reset.
         self.vitoria_em = None
+        # Fase 69 (espectador): relógio do próximo lance dos bots. Cobre as
+        # páginas 3 (conferência) e 4 (vitória), que a `Rodada` não guarda com
+        # folga — ver `Rodada.proximo_lance_em`. Lido/gravado por qualquer
+        # instância via o store; nenhum timer/thread no servidor.
+        self.proximo_lance_em = None
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.jogadores]

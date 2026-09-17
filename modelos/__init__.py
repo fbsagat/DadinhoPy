@@ -17,7 +17,7 @@ from modelos.migracao import (MIGRACOES, VAGAS_RECENTES_SEGUNDOS, VERSAO_ATUAL,
                               _migrar_v1_para_v2, _migrar_v2_para_v3,
                               _migrar_v3_para_v4, _migrar_v4_para_v5,
                               _migrar_v5_para_v6, _migrar_v6_para_v7,
-                              _migrar_v7_para_v8)
+                              _migrar_v7_para_v8, _migrar_v8_para_v9)
 from modelos.partida import Partida
 from modelos.rodada import Rodada
 from modelos.turno import Turno
@@ -28,4 +28,4 @@ __all__ = ['Lobby', 'Partida', 'Rodada', 'Turno', 'Jogador',
            'VERSAO_ATUAL', 'VAGAS_RECENTES_SEGUNDOS', 'MIGRACOES',
            '_migrar_v1_para_v2', '_migrar_v2_para_v3', '_migrar_v3_para_v4',
            '_migrar_v4_para_v5', '_migrar_v5_para_v6', '_migrar_v6_para_v7',
-           '_migrar_v7_para_v8']
+           '_migrar_v7_para_v8', '_migrar_v8_para_v9']

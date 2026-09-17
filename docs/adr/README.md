@@ -28,6 +28,7 @@ sem conhecer o motivo original.
 | [006](006-gevent-4-replicas-sticky.md) | Múltiplos workers cooperativos: gevent + 4 réplicas + sticky por IP | Aceito (revisado por ADR-008) |
 | [007](007-redis-local-spof-adiado.md) | Redis local é SPOF documentado; HA adiado | Adiado |
 | [008](008-websocket-unico-transporte.md) | WebSocket como transporte único (revisa o sticky por IP do ADR-006) | Aceito |
+| [009](009-ritmo-partida-so-ias.md) | Ritmo da partida só de IAs: relógio no lobby + poll do espectador | Aceito |
 
 ## Template
 

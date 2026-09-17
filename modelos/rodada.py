@@ -42,6 +42,14 @@ class Rodada:
         # Quando a tela de conferência (3) foi aberta (Fase 22): o `autojogar`
         # usa como referência de tempo para auto-confirmar um humano atrasado.
         self.conferencia_em = None
+        # Fase 69 (espectador): relógio do próximo lance dos bots. Só entra em
+        # ação quando a partida fica SEM humano com dados (todos eliminados ou
+        # só bots): `ia.processar` deixa de simular a partida inteira numa
+        # tacada e passa a liberar um lance por chamada, respeitando este
+        # instante — quem chama é o poll do espectador (e o heartbeat, como
+        # rede de segurança). O instante é gravado no MESMO objeto que vai ao
+        # store, então qualquer instância o lê (sem timer/thread no servidor).
+        self.proximo_lance_em = None
 
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]

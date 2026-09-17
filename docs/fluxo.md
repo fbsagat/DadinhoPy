@@ -33,6 +33,8 @@ Eventos sempre escopados à room da sala (`to=sala_<id>`) no namespace global.
 
 Quem entra em sala com `status == 'jogando'` vira `Jogador` em `lobby.espectadores` (nunca em `lobby.jogadores`), limite `funcoes_gerais.MAX_ESPECTADORES`. Não conta para lotação, `pode_iniciar`, vitória nem GC (`tem_humano_conectado`) — mas, por estar conectado, mantém a sala viva. Recebe snapshot + selo `espectador` e é promovido a jogador no `resetar_para_lobby`. Confirmações ganham gates por `lobby.pagina` (3/4) e por ser jogador da sala.
 
+**Fase 69 (partida só de IAs assistida):** quando o último humano com dados é eliminado (ou a sala é só de bots) e há humano na sala fora da mesa, o motor para de simular a partida inteira numa tacada: cada lance espera o relógio do lobby (`proximo_lance_em`). O espectador paga o ritmo com o evento `espectador_leitura`, disparado a cada `narracao` de IA e reagendado por `espectador_ritmo` (`restante_ms`). Sem espectador, o motor volta ao modo legado (simula até o fim) — a sala nunca fica presa. Ver ADR-009.
+
 ## Expulsão (Fase 19)
 
 Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe `expulso_da_sala` e a room recebe `jogador_expulso`.
@@ -59,6 +61,7 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 | `criar_sala` | `criar_sala` | — |
 | `verificar_desconectados` | `verificar_desconectados` | extrair_chave=None |
 | `heartbeat` (`chave`, `pagina`, `vez`) | `heartbeat` | cooldown=None, sem autenticar |
+| `espectador_leitura` (`chave`, `pagina`) | `espectador_leitura` | cooldown=None, + chave (poll do espectador, Fase 69) |
 | `jogar_dados` (`chave`) | `jogar_dados` | + chave |
 | `joguei_dados` (`chave_secreta`) | `joguei_dados` | chave (campo `chave_secreta`), idempotente por rodada |
 | `autojogar` (`chave`) | `autojogar` | + chave |
@@ -103,6 +106,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `cards_conferencia` | funcoes_gerais:315 | cliente | 1466 |
 | `rolagem_status`/`conferencia_status`/`vitoria_status` | funcoes_gerais:208/213/218 | sala | 1595/1599/1603 |
 | `espectador` | funcoes_gerais:248 | cliente | 1608 |
+| `espectador_ritmo` | app.py:espectador_leitura (Fase 69) | cliente | handler do poll |
 | `narracao` (Fase 11/30: substituição em app.py:414 e retorno em app.py:1003) | modelos:1062 | sala | 214 |
 | `jogar_dados_resultado` | app.py:916 | cliente | 1744 |
 | `jogada_invalida` | modelos:1256 (`txtchave`/`txtparams`) | cliente | 1795 |
