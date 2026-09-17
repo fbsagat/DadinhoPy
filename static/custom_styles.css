@@ -804,8 +804,7 @@ h5,
     transform: translateY(0) scale(0.97);
 }
 
-#botao_som,
-#botao_musica,
+#botao_config_desktop,
 #botao_tutorial,
 #botao_dicas,
 #botao_narrador {
@@ -1252,6 +1251,52 @@ h5,
     width: 100%;
 }
 
+/* ------- Dropdown desktop (som + idioma) ------- */
+/* Um ⚙️ no topo direito abre um painel pequeno com idioma, sons e música.
+   Mesmo visual/espacamento dos menu-itens do drawer mobile; a barra-topo é
+   `display:none` no mobile, então o painel só existe no desktop. */
+.dropdown-config-desktop {
+    position: relative;
+}
+
+.dropdown-config-desktop-painel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 55;
+    width: 250px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background-color: rgba(0, 17, 37, 0.98);
+    border: 1px solid var(--cor-borda);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.55);
+    color: #eaf6ff;
+}
+
+.dropdown-config-desktop.aberto .dropdown-config-desktop-painel {
+    display: flex;
+    animation: drawer_aparecer 0.2s ease;
+}
+
+/* Item do painel (idioma / sons / música), no padrão dos menu-itens. */
+.dropdown-config-desktop .config-item {
+    padding: 8px 10px;
+    border-radius: 12px;
+    background-color: rgba(0, 41, 82, 0.65);
+    border: 1px solid var(--cor-borda);
+}
+
+.dropdown-config-desktop .config-item + .config-item {
+    margin-top: 2px;
+}
+
+.dropdown-config-desktop .config-item label {
+    margin-bottom: 2px;
+}
+
 /* ============================================================
    Menu de sala: drawer lateral esquerdo (Configurações + Jogadores IA).
    Encostado à esquerda para o master ver a lista de jogadores (card à
@@ -1271,12 +1316,31 @@ h5,
     border-bottom: 1px solid rgba(13, 202, 240, 0.25);
 }
 
+/* Botão ⚙️ do card Jogadores: simples, sem borda e sem a animação de hover/
+   active do `.btn` (translateY/scale); só mantém a posição absoluta em relação
+   ao cabeçalho — por isso o `transform: translateY(-50%)` é repetido no hover. */
 .bot-config {
     position: absolute;
     right: 0;
     top: 50%;
     transform: translateY(-50%);
     line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--bs-info, #31d2f2);
+    transition: none;
+}
+
+.bot-config:hover,
+.bot-config:focus,
+.bot-config:active,
+.bot-config:focus-visible {
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--bs-info, #31d2f2);
+    box-shadow: none;
+    outline: none;
 }
 
 /* No mobile o cabeçalho fica mais compacto: sem linha divisória, menos
@@ -1292,7 +1356,6 @@ h5,
     .bot-config {
         padding: 0 0.45rem;
         font-size: 0.85rem;
-        border-width: 1px;
     }
 }
 
@@ -1590,13 +1653,14 @@ h5,
     }
 }
 
-/* O botão de espectador não disputa o canto com os controles de som/música
-   no desktop — ele fica abaixo da coluna direita. No mobile a media query da
-   Fase 33 acima o reposiciona à esquerda do ☰. */
+/* O botão de espectador fica ao lado do ⚙️ de som/idioma no desktop: o ⚙️ é
+   44x44 com `m-2` (top/right efetivos = 8px), então o "Sair da sala" entra à
+   esquerda dele (8px de folga), centralizado na mesma linha. No mobile a media
+   query da Fase 33 acima o reposiciona à esquerda do ☰. */
 @media (min-width: 769px) {
     #bot_sair_da_sala {
-        top: calc(env(safe-area-inset-top, 0px) + 140px) !important;
-        right: 8px !important;
+        top: 6px !important;
+        right: 52px !important;
     }
 }
 

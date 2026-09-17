@@ -1148,6 +1148,7 @@ function remover_ias() {
 // as vagas não recebe o evento e permanece no painel de IA.
 socket.on('lobby_lotado', function () {
     fechar_config_sala();
+    fechar_config_desktop();
 });
 
 // --- Expulsão de jogador (Fase 19) ---
@@ -1301,8 +1302,10 @@ socket.on("mudar_pagina", function (data) {
         paginas[2].classList.toggle('tela-partida-ativa', em_partida);
     }
     // Menu de sala: qualquer troca de página fecha o drawer de configurações
-    // (o master pode estar com ele aberto ao iniciar a partida).
+    // (o master pode estar com ele aberto ao iniciar a partida). O dropdown de
+    // som/idioma do topo também fecha.
     fechar_config_sala();
+    fechar_config_desktop();
     // Fase 32 (P1): o título é texto "DADINHO" (sem imagens titulo.png/titulo_p).
     // Só o tamanho varia por página para abrir espaço nas telas de jogo.
     if (data.pag_numero === 2) {
@@ -2510,12 +2513,21 @@ let dicas_ativadas = dicas_salvas === null ? PADROES_CLIENTE.dicas : dicas_salva
 // Dicas contextuais mostradas conforme a página da partida (0 a 4). São chaves
 // de tradução; o texto é resolvido no idioma do jogador em mostrar_dica().
 const dicas_por_pagina = {
-    0: ['js.dica.0.0', 'js.dica.0.1', 'js.dica.0.2', 'js.dica.0.3'],
-    1: ['js.dica.1.0', 'js.dica.1.1', 'js.dica.1.2'],
-    2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5', 'js.dica.2.6'],
-    3: ['js.dica.3.0', 'js.dica.3.1', 'js.dica.3.2'],
-    4: ['js.dica.4.0', 'js.dica.4.1'],
+    0: ['js.dica.0.0', 'js.dica.0.1', 'js.dica.0.2', 'js.dica.0.3', 'js.dica.0.4', 'js.dica.0.5',
+        'js.dica.0.6', 'js.dica.0.7', 'js.dica.0.8', 'js.dica.0.9', 'js.dica.0.10', 'js.dica.0.11',
+        'js.dica.0.12'],
+    1: ['js.dica.1.0', 'js.dica.1.1', 'js.dica.1.2', 'js.dica.1.3', 'js.dica.1.4', 'js.dica.1.5',
+        'js.dica.1.6'],
+    2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5',
+        'js.dica.2.6', 'js.dica.2.7', 'js.dica.2.8', 'js.dica.2.9', 'js.dica.2.10', 'js.dica.2.11',
+        'js.dica.2.12', 'js.dica.2.13', 'js.dica.2.14', 'js.dica.2.15'],
+    3: ['js.dica.3.0', 'js.dica.3.1', 'js.dica.3.2', 'js.dica.3.3', 'js.dica.3.4', 'js.dica.3.5'],
+    4: ['js.dica.4.0', 'js.dica.4.1', 'js.dica.4.2', 'js.dica.4.3', 'js.dica.4.4'],
 };
+
+// Última chave sorteada em mostrar_dica(): usada para não repetir a mesma dica
+// na transição seguinte (refaz o sorteio uma vez quando cai a repetida).
+let ultima_dica = null;
 
 const botao_tutorial = document.getElementById('botao_tutorial');
 const botao_dicas = document.getElementById('botao_dicas');
@@ -2627,7 +2639,12 @@ function mostrar_dica(pag_numero) {
     if (dicas.length === 0) {
         return;
     }
-    const texto = t(dicas[Math.floor(Math.random() * dicas.length)]);
+    let chave = dicas[Math.floor(Math.random() * dicas.length)];
+    if (chave === ultima_dica && dicas.length > 1) {
+        chave = dicas[Math.floor(Math.random() * dicas.length)];
+    }
+    ultima_dica = chave;
+    const texto = t(chave);
     if (eh_mobile()) {
         mostrar_toast_mobile(texto);
         return;
@@ -2936,6 +2953,54 @@ document.addEventListener('click', function (evento) {
     fechar_config_sala();
 });
 
+// Dropdown desktop de som + idioma: abre pelo ⚙️ do topo direito, fecha em
+// clique fora, Esc ou novo clique no próprio ⚙️. Só existe no desktop (o ☰
+// do mobile tem os mesmos controles no drawer).
+const botao_config_desktop = document.getElementById('botao_config_desktop');
+const dropdown_config_desktop = document.getElementById('dropdown_config_desktop');
+
+function abrir_config_desktop() {
+    if (!dropdown_config_desktop) {
+        return;
+    }
+    dropdown_config_desktop.parentElement.classList.add('aberto');
+    dropdown_config_desktop.setAttribute('aria-hidden', 'false');
+}
+
+function fechar_config_desktop() {
+    if (!dropdown_config_desktop) {
+        return;
+    }
+    dropdown_config_desktop.parentElement.classList.remove('aberto');
+    dropdown_config_desktop.setAttribute('aria-hidden', 'true');
+}
+
+if (botao_config_desktop && dropdown_config_desktop) {
+    botao_config_desktop.addEventListener('click', function (evento) {
+        evento.stopPropagation();
+        const aberto = dropdown_config_desktop.parentElement.classList.contains('aberto');
+        if (aberto) {
+            fechar_config_desktop();
+        } else {
+            abrir_config_desktop();
+        }
+    });
+
+    document.addEventListener('click', function (evento) {
+        const wrapper = dropdown_config_desktop.parentElement;
+        if (!wrapper.classList.contains('aberto')) {
+            return;
+        }
+        if (!evento.target || typeof evento.target.closest !== 'function') {
+            return;
+        }
+        if (wrapper.contains(evento.target)) {
+            return;
+        }
+        fechar_config_desktop();
+    });
+}
+
 // Facilidade (teclado): Enter confirma a ação do contexto e Esc fecha o que
 // estiver aberto (alerta, tutorial, busca, dica, menu de sala). O Enter em um
 // input dispara a ação correspondente; em modais, confirma/fecha.
@@ -2946,6 +3011,7 @@ document.addEventListener('keydown', (event) => {
         fechar_busca();
         fechar_dica();
         fechar_config_sala();
+        fechar_config_desktop();
         return;
     }
     if (event.key !== 'Enter') {

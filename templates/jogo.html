@@ -128,7 +128,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../static/custom_styles.css?v=20260914">
+    <link rel="stylesheet" href="../static/custom_styles.css?v=20260917">
 </head>
 
 <body>
@@ -138,23 +138,42 @@
          página 2, e as dicas nunca apareciam no celular. Position fixed no mobile. -->
     <div id="toast_mobile" class="toast-mobile" role="status" aria-live="polite"></div>
 
-    <div class="barra-topo-desktop position-fixed top-0 end-0 m-2 d-flex flex-column gap-2 align-items-end"
-        style="z-index: 50;">
-        <select id="seletor_idioma" class="form-select form-select-sm bg-dark text-light border-light"
-            style="width: auto;" aria-label="Idioma"></select>
-        <div class="d-flex align-items-center gap-2">
-            <button id="botao_som" class="btn btn-sm btn-outline-light"
-                data-i18n-title="ui.botao_som" title="Efeitos sonoros ligados/desligados">🔊</button>
-            <input type="range" id="volume_som" class="form-range" min="0" max="100" value="70"
-                style="width: 90px;" data-i18n-aria-label="ui.volume_som"
-                aria-label="Volume dos efeitos sonoros">
-        </div>
-        <div class="d-flex align-items-center gap-2">
-            <button id="botao_musica" class="btn btn-sm btn-outline-light"
-                data-i18n-title="ui.botao_musica" title="Música ligada/desligada">🎵</button>
-            <input type="range" id="volume_musica" class="form-range" min="0" max="100" value="40"
-                style="width: 90px;" data-i18n-aria-label="ui.volume_musica"
-                aria-label="Volume da música">
+    <!-- Dropdown desktop (som + idioma): um ⚙️ que abre um painel pequeno com
+         seletor de idioma e controles de som/música. No mobile a barra some e o
+         ☰ assume (mesmos controles no drawer). Os IDs seletor_idioma, botao_som,
+         volume_som, botao_musica e volume_musica continuam os mesmos do wire. -->
+    <div class="barra-topo-desktop position-fixed top-0 end-0 m-2" style="z-index: 50;">
+        <div class="dropdown-config-desktop">
+            <button id="botao_config_desktop" class="btn btn-sm btn-outline-light"
+                data-i18n-title="ui.config_desktop.abrir" data-i18n-aria-label="ui.config_desktop.abrir"
+                title="Som e idioma" aria-label="Som e idioma">⚙️</button>
+            <div id="dropdown_config_desktop" class="dropdown-config-desktop-painel" aria-hidden="true">
+                <div class="config-item">
+                    <label class="form-label small mb-1" for="seletor_idioma"
+                        data-i18n="ui.menu.idioma">Idioma</label>
+                    <select id="seletor_idioma" class="form-select form-select-sm bg-dark text-light border-light"></select>
+                </div>
+                <div class="config-item">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <span class="small"><span data-i18n="ui.menu.som">Sons</span></span>
+                        <button id="botao_som" class="btn btn-sm btn-outline-light"
+                            data-i18n-aria-label="ui.botao_som"
+                            aria-label="Efeitos sonoros ligados/desligados">🔊</button>
+                    </div>
+                    <input type="range" id="volume_som" class="form-range" min="0" max="100" value="70"
+                        data-i18n-aria-label="ui.volume_som" aria-label="Volume dos efeitos sonoros">
+                </div>
+                <div class="config-item">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <span class="small"><span data-i18n="ui.menu.musica">Música</span></span>
+                        <button id="botao_musica" class="btn btn-sm btn-outline-light"
+                            data-i18n-aria-label="ui.botao_musica"
+                            aria-label="Música ligada/desligada">🎵</button>
+                    </div>
+                    <input type="range" id="volume_musica" class="form-range" min="0" max="100" value="40"
+                        data-i18n-aria-label="ui.volume_musica" aria-label="Volume da música">
+                </div>
+            </div>
         </div>
     </div>
 
@@ -295,7 +314,7 @@
                     style="--bs-bg-opacity: .8; max-width: 460px;">
                     <div class="d-flex align-items-center justify-content-center gap-2 painel-titulo">
                         <h5 class="text-info mb-0" data-i18n="ui.jogadores.titulo">👥 Jogadores</h5>
-                        <button id="bot_abrir_config" class="btn btn-sm btn-outline-info bot-config"
+                        <button id="bot_abrir_config" class="btn btn-sm bot-config"
                             data-acao="abrir_config_sala" data-i18n-title="ui.config.abrir"
                             data-i18n-aria-label="ui.config.abrir" title="Configurações da sala"
                             aria-label="Configurações da sala">⚙️</button>
@@ -852,8 +871,8 @@
     </div>
     <!-- PAINEL DE DICAS FIM -->
 
-    <script src="/static/i18n.js?v=20260914"></script>
-    <script src="/static/script.js?v=20260914"></script>
+    <script src="/static/i18n.js?v=20260917"></script>
+    <script src="/static/script.js?v=20260917"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous">
