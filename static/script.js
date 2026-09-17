@@ -1041,13 +1041,6 @@ socket.on('lobby_lotado', function () {
     rolar_para_slide(0);
 });
 
-socket.on('jogador_substituido_por_ia', function (data) {
-    const painel = document.getElementById('motivo_iniciar');
-    if (painel && data && data.nome) {
-        painel.textContent = t('msg.substituido_ia', { nome: data.nome });
-    }
-});
-
 // --- Expulsão de jogador (Fase 19) ---
 function expulsar_jogador(client_id, nome) {
     if (!sou_master || !client_id) {

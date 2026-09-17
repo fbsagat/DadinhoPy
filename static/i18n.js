@@ -221,6 +221,7 @@ I18N_DICIONARIOS.en = {
     'js.espectador': 'SPECTATOR',
     'js.conectado': '● Connected',
     'js.reconectando': '⚠ Reconnecting...',
+    'js.sem_conexao': '✖ No connection — trying to reconnect...',
     'js.vitoria_texto': '{nome} wins<br> What a game!!!',
 
     // Busca (cards)
@@ -278,12 +279,13 @@ I18N_DICIONARIOS.en = {
     'msg.codigo_sala_vazio': 'Type the room code!',
     'msg.sala_cheia': 'This room is full (player limit reached).',
     'msg.iniciar_negado': "Can't start: {motivo}",
-    'msg.substituido_ia': '{nome} dropped and was replaced by an AI.',
     'msg.vaga_perdida_inatividade': 'Your seat was released after inactivity. You joined as a spectator.',
     'msg.retomar_outra_sala': "Your saved session isn't recognized in this room. You joined as a new player.",
     'msg.muitas_contas': 'Too many connections from your address in this room. Close another tab or wait a moment.',
     'msg.captcha_invalido': 'Human check failed. Please try again.',
     'msg.erro_conexao': 'Connection problem. Please try again.',
+    'msg.criar_sala_timeout': 'Could not create the room. Try again?',
+    'msg.buscar_timeout': 'Could not load the games. Try again?',
     'msg.expulso_da_sala': 'You were kicked from the room by the host.',
     'msg.jogador_expulso': '{nome} was kicked from the room.',
     'msg.preencha_nome': 'Fill in your name!',
@@ -434,6 +436,11 @@ I18N_DICIONARIOS.en = {
     'narr.vitoria.pontos.0': " That's {pontos} wins in the room!",
     'narr.vitoria.pontos.1': ' What a streak: {pontos} wins!',
     'narr.vitoria.pontos.2': ' {pontos} wins and counting!',
+
+    // Narração — substituição por IA / retorno
+    'narr.substituicao.timeout': '📴 {nome} dropped and did not return in time — an AI takes over.',
+    'narr.substituicao.ausente': '📴 {nome} was disconnected when the game started — an AI takes over.',
+    'narr.retorno': '🔌 {nome} is back and has taken over again.',
 };
 
 // ---------------------------------------------------------------------------
@@ -618,6 +625,7 @@ I18N_DICIONARIOS['pt-BR'] = {
     'js.espectador': 'ESPECTADOR',
     'js.conectado': '● Conectado',
     'js.reconectando': '⚠ Reconectando...',
+    'js.sem_conexao': '✖ Sem conexão — tentando reconectar...',
     'js.vitoria_texto': 'Vitória de {nome}<br> Nessa bagaça!!!',
 
     'js.busca.vazia': 'Nenhuma partida encontrada com esses filtros.',
@@ -670,12 +678,13 @@ I18N_DICIONARIOS['pt-BR'] = {
     'msg.codigo_sala_vazio': 'Digite o código da sala!',
     'msg.sala_cheia': 'Esta sala está cheia (limite de jogadores atingido).',
     'msg.iniciar_negado': 'Não é possível iniciar: {motivo}',
-    'msg.substituido_ia': '{nome} caiu e foi substituído por uma IA.',
     'msg.vaga_perdida_inatividade': 'Sua vaga foi liberada por inatividade. Você entrou como espectador.',
     'msg.retomar_outra_sala': 'Sua sessão salva não é reconhecida nesta sala. Você entrou como novo jogador.',
     'msg.muitas_contas': 'Muitas conexões do seu endereço nesta sala. Feche outra aba ou aguarde um pouco.',
     'msg.captcha_invalido': 'A verificação humana falhou. Tente novamente.',
     'msg.erro_conexao': 'Problema de conexão. Tente novamente.',
+    'msg.criar_sala_timeout': 'Não foi possível criar a sala. Tentar de novo?',
+    'msg.buscar_timeout': 'Não foi possível carregar as partidas. Tentar de novo?',
     'msg.expulso_da_sala': 'Você foi expulso da sala pelo master.',
     'msg.jogador_expulso': '{nome} foi expulso da sala.',
     'msg.preencha_nome': 'Preencha o seu nome!',
@@ -820,6 +829,9 @@ I18N_DICIONARIOS['pt-BR'] = {
     'narr.vitoria.pontos.0': ' Já são {pontos} vitórias na sala!',
     'narr.vitoria.pontos.1': ' Que sequência: {pontos} vitórias!',
     'narr.vitoria.pontos.2': ' {pontos} vitórias e contando!',
+    'narr.substituicao.timeout': '📴 {nome} caiu e não voltou a tempo — uma IA assume o lugar.',
+    'narr.substituicao.ausente': '📴 {nome} estava desconectado quando a partida começou — uma IA assume o lugar.',
+    'narr.retorno': '🔌 {nome} voltou e reassumiu o próprio controle.',
 };
 
 I18N_DICIONARIOS.es = {
@@ -1001,6 +1013,7 @@ I18N_DICIONARIOS.es = {
     'js.espectador': 'ESPECTADOR',
     'js.conectado': '● Conectado',
     'js.reconectando': '⚠ Reconectando...',
+    'js.sem_conexao': '✖ Sin conexión — intentando reconectar...',
     'js.vitoria_texto': '¡Victoria de {nome}<br> Qué partida!!!',
 
     'js.busca.vazia': 'No se encontraron partidas con esos filtros.',
@@ -1053,12 +1066,13 @@ I18N_DICIONARIOS.es = {
     'msg.codigo_sala_vazio': '¡Escribe el código de la sala!',
     'msg.sala_cheia': 'Esta sala está llena (límite de jugadores alcanzado).',
     'msg.iniciar_negado': 'No se puede iniciar: {motivo}',
-    'msg.substituido_ia': '{nome} se cayó y fue sustituido por una IA.',
     'msg.vaga_perdida_inatividade': 'Tu asiento fue liberado por inactividad. Entraste como espectador.',
     'msg.retomar_outra_sala': 'Tu sesión guardada no se reconoce en esta sala. Entraste como nuevo jugador.',
     'msg.muitas_contas': 'Demasiadas conexiones desde tu dirección en esta sala. Cierra otra pestaña o espera un momento.',
     'msg.captcha_invalido': 'La verificación humana falló. Inténtalo de nuevo.',
     'msg.erro_conexao': 'Problema de conexión. Inténtalo de nuevo.',
+    'msg.criar_sala_timeout': 'No se pudo crear la sala. ¿Intentar de nuevo?',
+    'msg.buscar_timeout': 'No se pudieron cargar las partidas. ¿Intentar de nuevo?',
     'msg.expulso_da_sala': 'Fuiste expulsado de la sala por el master.',
     'msg.jogador_expulso': '{nome} fue expulsado de la sala.',
     'msg.preencha_nome': '¡Rellena tu nombre!',
@@ -1203,6 +1217,9 @@ I18N_DICIONARIOS.es = {
     'narr.vitoria.pontos.0': ' ¡Ya son {pontos} victorias en la sala!',
     'narr.vitoria.pontos.1': ' ¡Qué racha: {pontos} victorias!',
     'narr.vitoria.pontos.2': ' ¡{pontos} victorias y contando!',
+    'narr.substituicao.timeout': '📴 {nome} se cayó y no volvió a tiempo — una IA toma el relevo.',
+    'narr.substituicao.ausente': '📴 {nome} estaba desconectado cuando empezó la partida — una IA toma el relevo.',
+    'narr.retorno': '🔌 {nome} volvió y retomó su propio control.',
 };
 
 I18N_DICIONARIOS.fr = {
@@ -1384,6 +1401,7 @@ I18N_DICIONARIOS.fr = {
     'js.espectador': 'SPECTATEUR',
     'js.conectado': '● Connecté',
     'js.reconectando': '⚠ Reconnexion...',
+    'js.sem_conexao': '✖ Pas de connexion — tentative de reconnexion...',
     'js.vitoria_texto': 'Victoire de {nome}<br> Quelle partie !!!',
 
     'js.busca.vazia': 'Aucune partie trouvée avec ces filtres.',
@@ -1436,12 +1454,13 @@ I18N_DICIONARIOS.fr = {
     'msg.codigo_sala_vazio': 'Entrez le code de la salle !',
     'msg.sala_cheia': 'Cette salle est pleine (limite de joueurs atteinte).',
     'msg.iniciar_negado': 'Impossible de lancer : {motivo}',
-    'msg.substituido_ia': '{nome} est tombé et a été remplacé par une IA.',
     'msg.vaga_perdida_inatividade': "Votre place a été libérée après inactivité. Vous avez rejoint en tant que spectateur.",
     'msg.retomar_outra_sala': "Votre session enregistrée n'est pas reconnue dans cette salle. Vous avez rejoint en tant que nouveau joueur.",
     'msg.muitas_contas': "Trop de connexions depuis votre adresse dans cette salle. Fermez un autre onglet ou attendez un instant.",
     'msg.captcha_invalido': 'La vérification humaine a échoué. Réessayez.',
     'msg.erro_conexao': 'Problème de connexion. Réessayez.',
+    'msg.criar_sala_timeout': 'Impossible de créer la salle. Réessayer ?',
+    'msg.buscar_timeout': 'Impossible de charger les parties. Réessayer ?',
     'msg.expulso_da_sala': "Vous avez été expulsé de la salle par le master.",
     'msg.jogador_expulso': '{nome} a été expulsé de la salle.',
     'msg.preencha_nome': 'Remplissez votre nom !',
@@ -1586,6 +1605,9 @@ I18N_DICIONARIOS.fr = {
     'narr.vitoria.pontos.0': ' Déjà {pontos} victoires dans la salle !',
     'narr.vitoria.pontos.1': ' Quelle série : {pontos} victoires !',
     'narr.vitoria.pontos.2': ' {pontos} victoires et ça continue !',
+    'narr.substituicao.timeout': "📴 {nome} est tombé et n'est pas revenu à temps — une IA prend le relais.",
+    'narr.substituicao.ausente': '📴 {nome} était déconnecté au début de la partie — une IA prend le relais.',
+    'narr.retorno': '🔌 {nome} est de retour et a repris son propre contrôle.',
 };
 
 I18N_DICIONARIOS['zh-CN'] = {
@@ -1767,6 +1789,7 @@ I18N_DICIONARIOS['zh-CN'] = {
     'js.espectador': '观众',
     'js.conectado': '● 已连接',
     'js.reconectando': '⚠ 重新连接中...',
+    'js.sem_conexao': '✖ 无连接 — 正在尝试重新连接...',
     'js.vitoria_texto': '{nome} 获胜<br> 太精彩了！！！',
 
     'js.busca.vazia': '没有找到符合筛选条件的对局。',
@@ -1819,12 +1842,13 @@ I18N_DICIONARIOS['zh-CN'] = {
     'msg.codigo_sala_vazio': '请输入房间代码！',
     'msg.sala_cheia': '房间已满（达到玩家上限）。',
     'msg.iniciar_negado': '无法开始：{motivo}',
-    'msg.substituido_ia': '{nome} 掉线了，已由 AI 替换。',
     'msg.vaga_perdida_inatividade': '由于长时间不活动，您的座位已被释放。您以观众身份加入。',
     'msg.retomar_outra_sala': '此房间无法识别您保存的会话。您以新玩家身份加入。',
     'msg.muitas_contas': '您的地址在此房间的连接过多。请关闭其他标签页或稍等片刻。',
     'msg.captcha_invalido': '人工验证失败，请重试。',
     'msg.erro_conexao': '连接出现问题，请重试。',
+    'msg.criar_sala_timeout': '无法创建房间。要重试吗？',
+    'msg.buscar_timeout': '无法加载对局。要重试吗？',
     'msg.expulso_da_sala': '你已被房主踢出房间。',
     'msg.jogador_expulso': '{nome} 已被踢出房间。',
     'msg.preencha_nome': '请填写你的名字！',
@@ -1969,6 +1993,9 @@ I18N_DICIONARIOS['zh-CN'] = {
     'narr.vitoria.pontos.0': ' 房间里已有 {pontos} 场胜利！',
     'narr.vitoria.pontos.1': ' 连胜 {pontos} 场！',
     'narr.vitoria.pontos.2': ' {pontos} 场胜利，还在继续！',
+    'narr.substituicao.timeout': '📴 {nome} 掉线了，未能及时回来——由 AI 接管。',
+    'narr.substituicao.ausente': '📴 {nome} 在对局开始时处于掉线状态——由 AI 接管。',
+    'narr.retorno': '🔌 {nome} 回来了，重新接管了自己的操作。',
 };
 
 // ---------------------------------------------------------------------------

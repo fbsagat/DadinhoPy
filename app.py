@@ -37,6 +37,7 @@ import secrets
 import socketio as pacote_socketio
 import store
 import ia
+import narrador
 import observabilidade
 import tema
 import threading
@@ -387,7 +388,7 @@ def _remover_jogador_da_sala(lobby, jogador):
         emitir_status_vitoria(lobby)
 
 
-def _substituir_por_ia(lobby, jogador):
+def _substituir_por_ia(lobby, jogador, motivo='timeout'):
     """
     Converte um desconectado em bot (Fase 11), quando o master ativou a opção:
     preserva dados/turno e deixa a partida seguir. Só vale se ainda houver outro
@@ -395,6 +396,9 @@ def _substituir_por_ia(lobby, jogador):
     partida (espera) só é substituído quando a partida começa (`iniciar_partida`
     resolve os caídos antes de montar a mesa) — o expurgo da espera remove, não
     substitui (ver `_purgar_desconectados`).
+
+    O `motivo` ('timeout' ou 'ausente') vai na narração para os demais jogadores
+    entenderem por que o humano virou IA.
     """
     if not lobby.config.get('substituir_desconectado_por_ia'):
         return False
@@ -407,7 +411,7 @@ def _substituir_por_ia(lobby, jogador):
     ia.sorteiar_personalidade(jogador)
     jogador.desconectado_em = None
     jogador.pronto = True
-    emit('jogador_substituido_por_ia', {'nome': jogador.username or ''}, to=lobby.sala_room())
+    emit('narracao', narrador.narracao_substituicao(jogador, motivo), to=lobby.sala_room())
     return True
 
 
@@ -453,7 +457,7 @@ def _resolver_caidos_para_partida(lobby):
     for jogador in list(lobby.jogadores):
         if jogador.desconectado_em is None:
             continue
-        if jogador.username and _substituir_por_ia(lobby, jogador):
+        if jogador.username and _substituir_por_ia(lobby, jogador, motivo='ausente'):
             mudou = True
             continue
         _remover_jogador_da_sala(lobby, jogador)
@@ -986,13 +990,17 @@ def retomar_identidade(dados=None):
     era_bot_nativo = str(alvo.client_id).startswith('ia:')
     alvo.client_id = client_id
     alvo.desconectado_em = None
-    if alvo.is_ia and not era_bot_nativo:
+    voltou_de_ia = alvo.is_ia and not era_bot_nativo
+    if voltou_de_ia:
         alvo.is_ia = False
         alvo.ia_nivel = None
     lobby.definir_master()
     emit("connect_start",
          {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
           'sala': lobby.sala_id, 'username': alvo.username}, to=client_id, ignore_queue=True)
+    # Fase 11/30: avisa a sala que o humano reassumiu o controle que a IA tocava.
+    if voltou_de_ia:
+        emit('narracao', narrador.narracao_retorno(alvo), to=lobby.sala_room())
     atualizar_lista_usuarios(lobby)
     enviar_snapshot_sala(lobby, alvo)
     if ia.processar(lobby):

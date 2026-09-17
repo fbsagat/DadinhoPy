@@ -2308,6 +2308,13 @@ def teste_volta_apos_substituicao_ia():
     ana = next(j for j in lobby.jogadores if j.username == "Ana")
     assert ana.is_ia, "caído com a opção ligada deve virar IA"
     assert ana.client_id == ana_sid, "substituído mantém sid e chave"
+    eventos_c2 = c2.get_received()
+    assert any(e["name"] == "narracao" and e["args"][0].get("tipo") == "substituicao"
+               for e in eventos_c2), "a sala deve ser avisada da substituição por IA"
+    assert any(s.get("chave") == "narr.substituicao.timeout"
+               for e in eventos_c2 if e["name"] == "narracao"
+               for s in (e["args"][0].get("segmentos") or [])), \
+        "a narração deve informar o motivo (caiu e não voltou a tempo)"
 
     # Ana volta (sid novo): a retomada devolve o controle na mesma partida.
     c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
@@ -2322,6 +2329,8 @@ def teste_volta_apos_substituicao_ia():
     eventos = c1b.get_received()
     assert _achar_evento(eventos, "construtor_dados") is not None, \
         "snapshot da identidade retomada deve ser enviado"
+    assert any(e["name"] == "narracao" and e["args"][0].get("tipo") == "retorno"
+               for e in eventos), "a sala deve ser avisada de que Ana reassumiu o controle"
     c1b.disconnect()
     c2.disconnect()
     _limpar()

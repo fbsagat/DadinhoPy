@@ -81,7 +81,6 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
-| `jogador_substituido_por_ia` | app.py:257 | sala | 780 |
 | `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | 944 |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |
@@ -104,7 +103,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `cards_conferencia` | funcoes_gerais:315 | cliente | 1466 |
 | `rolagem_status`/`conferencia_status`/`vitoria_status` | funcoes_gerais:208/213/218 | sala | 1595/1599/1603 |
 | `espectador` | funcoes_gerais:248 | cliente | 1608 |
-| `narracao` | modelos:1062 | sala | 214 |
+| `narracao` (Fase 11/30: substituição em app.py:414 e retorno em app.py:1003) | modelos:1062 | sala | 214 |
 | `jogar_dados_resultado` | app.py:916 | cliente | 1744 |
 | `jogada_invalida` | modelos:1256 (`txtchave`/`txtparams`) | cliente | 1795 |
 | `iniciar_negado` | app.py:612 (`motivo`) | cliente | 438 |

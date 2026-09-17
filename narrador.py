@@ -402,3 +402,30 @@ def narracao_vitoria(jogador):
         segmentos.append(_seg(pontos_item))
         texto += pontos_item['texto'].format(pontos=pontos)
     return {'texto': texto, 'segmentos': segmentos, 'tipo': 'vitoria', 'is_ia': is_ia, 'atraso': 0}
+
+
+def narracao_substituicao(jogador, motivo='timeout'):
+    """
+    Narração quando um humano desconectado é substituído por uma IA (Fase 11/30).
+    `motivo` distingue a queda durante a partida ('timeout': a janela de
+    reconexão expirou) de quem já estava fora quando a partida começou
+    ('ausente'). Usa o apelido puro — o jogador ainda não é um bot "de verdade".
+    """
+    nome = jogador.username or 'Jogador'
+    if motivo == 'ausente':
+        fala = _item('narr.substituicao.ausente',
+                     "📴 {nome} estava desconectado quando a partida começou — uma IA assume o lugar.",
+                     nome=nome)
+    else:
+        fala = _item('narr.substituicao.timeout',
+                     "📴 {nome} caiu e não voltou a tempo — uma IA assume o lugar.", nome=nome)
+    return {'texto': fala['texto'].format(nome=nome), 'segmentos': [_seg(fala)],
+            'tipo': 'substituicao', 'is_ia': False, 'atraso': 0}
+
+
+def narracao_retorno(jogador):
+    """Narração quando o humano retoma a própria identidade após virar bot (Fase 11/30)."""
+    nome = jogador.username or 'Jogador'
+    fala = _item('narr.retorno', "🔌 {nome} voltou e reassumiu o próprio controle.", nome=nome)
+    return {'texto': fala['texto'].format(nome=nome), 'segmentos': [_seg(fala)],
+            'tipo': 'retorno', 'is_ia': False, 'atraso': 0}
