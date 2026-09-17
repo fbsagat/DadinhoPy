@@ -939,6 +939,11 @@ h5,
     position: absolute;
     top: -9px;
     right: 6px;
+    /* O selo "ÚLTIMA" paira sobre o cabeçalho do card — sobe no eixo z para
+       nunca aparecer atrás do card (o pai, `position: relative`, fica no
+       contexto de empilhamento do grid). */
+    z-index: 2;
+    pointer-events: none;
     padding: 1px 6px;
     background-color: #ffc107;
     color: #001125;
