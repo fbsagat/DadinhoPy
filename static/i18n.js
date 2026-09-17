@@ -83,6 +83,7 @@ I18N_DICIONARIOS.en = {
 
     // Configurações
     'ui.config.titulo': 'Game settings',
+    'ui.config.abrir': 'Room settings',
     'ui.config.nome': 'Game name',
     'ui.config.dados': 'Dice per player',
     'ui.config.max': 'Max players',
@@ -197,6 +198,7 @@ I18N_DICIONARIOS.en = {
     'js.aguardando_voce': 'Waiting for you...',
     'js.todos_confirmaram': "Everyone's confirmed!",
     'js.rodada': 'Round {n}',
+    'js.ranking': 'Ranking',
     'js.jogadores_conectados': 'Connected players',
     'js.expulsar': 'Kick',
     'js.expulsar_titulo': 'Kick this player from the room',
@@ -495,6 +497,7 @@ I18N_DICIONARIOS['pt-BR'] = {
     'ui.jogadores.titulo': '👥 Jogadores',
 
     'ui.config.titulo': 'Configurações da partida',
+    'ui.config.abrir': 'Configurações da sala',
     'ui.config.nome': 'Nome da partida',
     'ui.config.dados': 'Dados por jogador',
     'ui.config.max': 'Máximo de jogadores',
@@ -602,6 +605,7 @@ I18N_DICIONARIOS['pt-BR'] = {
     'js.aguardando_voce': 'Aguardando você...',
     'js.todos_confirmaram': 'Todos confirmaram!',
     'js.rodada': 'Rodada {n}',
+    'js.ranking': 'Ranking',
     'js.jogadores_conectados': 'Jogadores conectados',
     'js.expulsar': 'Expulsar',
     'js.expulsar_titulo': 'Expulsar este jogador da sala',
@@ -884,6 +888,7 @@ I18N_DICIONARIOS.es = {
     'ui.jogadores.titulo': '👥 Jugadores',
 
     'ui.config.titulo': 'Ajustes de la partida',
+    'ui.config.abrir': 'Ajustes de la sala',
     'ui.config.nome': 'Nombre de la partida',
     'ui.config.dados': 'Dados por jugador',
     'ui.config.max': 'Máximo de jugadores',
@@ -991,6 +996,7 @@ I18N_DICIONARIOS.es = {
     'js.aguardando_voce': 'Esperándote...',
     'js.todos_confirmaram': '¡Todos confirmaron!',
     'js.rodada': 'Ronda {n}',
+    'js.ranking': 'Clasificación',
     'js.jogadores_conectados': 'Jugadores conectados',
     'js.expulsar': 'Expulsar',
     'js.expulsar_titulo': 'Expulsar a este jugador de la sala',
@@ -1273,6 +1279,7 @@ I18N_DICIONARIOS.fr = {
     'ui.jogadores.titulo': '👥 Joueurs',
 
     'ui.config.titulo': 'Réglages de la partie',
+    'ui.config.abrir': 'Réglages de la salle',
     'ui.config.nome': 'Nom de la partie',
     'ui.config.dados': 'Dés par joueur',
     'ui.config.max': 'Joueurs maximum',
@@ -1380,6 +1387,7 @@ I18N_DICIONARIOS.fr = {
     'js.aguardando_voce': 'En attente de vous...',
     'js.todos_confirmaram': "Tout le monde a confirmé !",
     'js.rodada': 'Manche {n}',
+    'js.ranking': 'Classement',
     'js.jogadores_conectados': 'Joueurs connectés',
     'js.expulsar': 'Expulser',
     'js.expulsar_titulo': 'Expulser ce joueur de la salle',
@@ -1662,6 +1670,7 @@ I18N_DICIONARIOS['zh-CN'] = {
     'ui.jogadores.titulo': '👥 玩家',
 
     'ui.config.titulo': '对局设置',
+    'ui.config.abrir': '房间设置',
     'ui.config.nome': '对局名称',
     'ui.config.dados': '每人骰子数',
     'ui.config.max': '最大玩家数',
@@ -1769,6 +1778,7 @@ I18N_DICIONARIOS['zh-CN'] = {
     'js.aguardando_voce': '等待你确认...',
     'js.todos_confirmaram': '所有人都已确认！',
     'js.rodada': '第 {n} 回合',
+    'js.ranking': '排名',
     'js.jogadores_conectados': '已连接玩家',
     'js.expulsar': '踢出',
     'js.expulsar_titulo': '将此玩家踢出房间',

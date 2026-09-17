@@ -197,7 +197,7 @@ def verificar_roundtrip():
                 'dados_qtd': 3,
                 'max_jogadores': 4,
                 'com_coringa': True,
-                'publica': False,
+                'publica': True,
                 'substituir_desconectado_por_ia': True,
                 'ia_nivel_padrao': 3,
                 'verificacao_ativa': True,

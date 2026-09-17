@@ -860,12 +860,25 @@ socket.on("update_user_list", (data) => {
         vazio.textContent = t('ui.lista.aguardando');
         userListItems.appendChild(vazio);
     } else {
+        // Ranking dos campeões: junta os arrays paralelos do payload em objetos
+        // (nome/master/pronto/id/pontos), ordena por pontuação decrescente e
+        // coroa o líder. A ordenação é só visual — os índices originais do
+        // payload continuam válidos para expulsar (`id` guardado no objeto).
+        const ranking = data.users.map((user, index) => ({
+            nome: user,
+            master: data.masters[index] === true,
+            pronto: data.prontos[index] === true,
+            id: data.ids ? data.ids[index] : null,
+            pontos: Number(data.pontos[index]) || 0,
+        }));
+        ranking.sort((a, b) => b.pontos - a.pontos);
+
         const rowDiv = document.createElement("div");
-        rowDiv.className = "row border-bottom";
+        rowDiv.className = "row border-bottom ranking-cabecalho";
 
         const jogadoresDiv = document.createElement("div");
         jogadoresDiv.className = "col-md-6 fw-bold";
-        jogadoresDiv.textContent = t('js.jogadores_conectados');
+        jogadoresDiv.textContent = t('js.ranking');
 
         const pontuacaoDiv = document.createElement("div");
         pontuacaoDiv.className = "col-md-6 fw-bold";
@@ -875,41 +888,43 @@ socket.on("update_user_list", (data) => {
         rowDiv.appendChild(jogadoresDiv);
         rowDiv.appendChild(pontuacaoDiv);
 
-        data.users.forEach((user, index) => {
+        ranking.forEach((jogador, posicao) => {
+            const campeao = posicao === 0 && jogador.pontos > 0;
             const headerRow = document.createElement("div");
-            headerRow.className = "row border-bottom";
+            headerRow.className = "row border-bottom ranking-linha";
+            if (campeao) {
+                headerRow.classList.add('ranking-campeao');
+            }
 
             const userItem = document.createElement("div");
             userItem.className = "col-md-6";
 
-            let master = ''
-            if (data.masters[index] === true) {
-                master = '🏁'
-            }
-            const pronto = data.prontos[index] === true ? '✅' : '⏳';
-            userItem.textContent = `${user} ${master} ${pronto}`;
+            const master = jogador.master ? '🏁' : '';
+            const pronto = jogador.pronto ? '✅' : '⏳';
+            const coroa = campeao ? '👑 ' : '';
+            userItem.textContent = `${coroa}${jogador.nome} ${master} ${pronto}`;
 
             // Fase 19: o master pode expulsar qualquer jogador (humano ou IA),
             // exceto ele mesmo. O client_id vem no payload `ids` (mesmo índice).
-            if (sou_master && user !== nome_jogador && data.ids && data.ids[index]) {
+            if (sou_master && jogador.nome !== nome_jogador && jogador.id) {
                 const botao_expulsar = document.createElement("button");
                 botao_expulsar.className = "btn btn-sm btn-outline-danger ms-2";
                 botao_expulsar.textContent = t('js.expulsar');
                 botao_expulsar.title = t('js.expulsar_titulo');
                 botao_expulsar.onclick = function () {
-                    expulsar_jogador(data.ids[index], user);
+                    expulsar_jogador(jogador.id, jogador.nome);
                 };
                 userItem.appendChild(botao_expulsar);
             }
 
-            const pontuacaoDiv = document.createElement("div");
-            pontuacaoDiv.className = "col-md-6";
-            pontuacaoDiv.id = `pontos_${user}`;
-            pontuacaoDiv.textContent = data.pontos[index];
+            const pontosDiv = document.createElement("div");
+            pontosDiv.className = "col-md-6";
+            pontosDiv.id = `pontos_${jogador.nome}`;
+            pontosDiv.textContent = jogador.pontos;
 
             userListItems.appendChild(headerRow); // Adiciona cada row à lista
             headerRow.appendChild(userItem); // Adiciona cada usuário à headerRow
-            headerRow.appendChild(pontuacaoDiv); // Adiciona cada pontuação à lista
+            headerRow.appendChild(pontosDiv); // Adiciona cada pontuação à lista
         });
 
         // Botão "Ficar pronto" reflete o estado atual do próprio jogador.
@@ -970,11 +985,6 @@ function aplicar_master() {
     document.querySelectorAll('#painel_config input, #painel_config select, #painel_ia input, #painel_ia select, #painel_ia button').forEach(el => {
         el.disabled = !sou_master;
     });
-    // Fase 33 (M2): o carrossel do lobby tem sempre as 3 telas (Jogadores,
-    // Config, IA) para host e cliente — no cliente os controles ficam
-    // read-only (já desabilitados acima), como no desktop. Reconstrói os
-    // dots/setas do carrossel ao mudar o estado.
-    atualizar_carrossel();
 }
 
 function aplicar_config(config) {
@@ -1049,7 +1059,7 @@ let CONFIG_PADRAO_LOCAL = {
     dados_qtd: 3,
     max_jogadores: 4,
     com_coringa: true,
-    publica: false,
+    publica: true,
     substituir_desconectado_por_ia: true,
     ia_nivel_padrao: 3,
     verificacao_ativa: true,
@@ -1133,12 +1143,11 @@ function remover_ias() {
 }
 
 // Fase 57: quando "Adicionar IA" ou "Completar vagas" LOTAR a sala de espera,
-// o servidor avisa o master (`lobby_lotado`). No mobile o carrossel do lobby
-// volta ao card "Jogadores"; quem ainda não completou todas as vagas não
-// recebe o evento e permanece no painel de IA. No desktop não há carrossel,
-// então a navegação é ignorada.
+// o servidor avisa o master (`lobby_lotado`). O drawer de configurações fecha
+// para o master voltar a ver a lista completa; quem ainda não completou todas
+// as vagas não recebe o evento e permanece no painel de IA.
 socket.on('lobby_lotado', function () {
-    rolar_para_slide(0);
+    fechar_config_sala();
 });
 
 // --- Expulsão de jogador (Fase 19) ---
@@ -1291,10 +1300,9 @@ socket.on("mudar_pagina", function (data) {
     if (paginas[2]) {
         paginas[2].classList.toggle('tela-partida-ativa', em_partida);
     }
-    if (data.pag_numero === 0) {
-        // Fase 33 (M2): de volta ao lobby, reconstrói dots/setas do carrossel.
-        atualizar_carrossel();
-    }
+    // Menu de sala: qualquer troca de página fecha o drawer de configurações
+    // (o master pode estar com ele aberto ao iniciar a partida).
+    fechar_config_sala();
     // Fase 32 (P1): o título é texto "DADINHO" (sem imagens titulo.png/titulo_p).
     // Só o tamanho varia por página para abrir espaço nas telas de jogo.
     if (data.pag_numero === 2) {
@@ -2887,134 +2895,57 @@ if (menu_narrador) {
 }
 
 // ---------------------------------------------------------------------------
-// Fase 33 (M2): carrossel do lobby no mobile.
-// Scroll-snap nativo (sem lib de touch); setas + dots são o fallback acessível.
-// Os dots são 3 (Jogadores/Config/IA) para host e cliente — a contagem segue
-// os painéis realmente visíveis (`offsetParent`), então se algum dia um painel
-// for escondido os dots se ajustam sozinhos.
+// Menu de sala: drawer lateral esquerdo (Configurações + Jogadores IA).
+// Abre pelo ⚙️ do card Jogadores e deixa a lista visível ao lado; fecha no ✖,
+// Esc, clique fora, ao lotar a sala ou ao trocar de página.
 // ---------------------------------------------------------------------------
-let carrossel_slides = [];
-let carrossel_atual = 0;
-
-function slides_carrossel() {
-    const paineis = [
-        document.getElementById('painel_jogador'),
-        document.getElementById('painel_config'),
-        document.getElementById('painel_ia')
-    ];
-    return paineis.filter(function (painel) {
-        return painel && painel.offsetParent !== null;
-    });
-}
-
-function rolar_para_slide(indice) {
-    const trilho = document.querySelector('.lobby-linha');
-    const alvo = carrossel_slides[indice];
-    if (!trilho || !alvo) {
+function abrir_config_sala() {
+    const drawer = document.getElementById('menu_sala');
+    if (!drawer) {
         return;
     }
-    // Calcula o scroll diretamente no trilho (mais previsível que
-    // `scrollIntoView`, que interage mal com o scroll-snap no mobile).
-    const delta = alvo.getBoundingClientRect().left - trilho.getBoundingClientRect().left;
-    trilho.scrollTo({ left: trilho.scrollLeft + delta, behavior: 'smooth' });
+    drawer.classList.add('aberto');
+    drawer.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('sala-config-aberta');
 }
 
-function marcar_ponto_atual() {
-    const trilho = document.querySelector('.lobby-linha');
-    if (!trilho || carrossel_slides.length === 0) {
+function fechar_config_sala() {
+    const drawer = document.getElementById('menu_sala');
+    if (!drawer || !drawer.classList.contains('aberto')) {
         return;
     }
-    const trilho_esq = trilho.getBoundingClientRect().left;
-    const meio = trilho.clientWidth / 2;
-    let atual = 0;
-    carrossel_slides.forEach(function (slide, indice) {
-        const r = slide.getBoundingClientRect();
-        if (r.left - trilho_esq <= meio && r.right - trilho_esq > meio) {
-            atual = indice;
-        }
-    });
-    carrossel_atual = atual;
-    const dots = document.getElementById('lobby_dots');
-    if (dots) {
-        Array.from(dots.children).forEach(function (dot, indice) {
-            dot.classList.toggle('ativo', indice === carrossel_atual);
-            dot.setAttribute('aria-selected', indice === carrossel_atual ? 'true' : 'false');
-        });
-    }
-    const seta_esq = document.getElementById('lobby_seta_esq');
-    const seta_dir = document.getElementById('lobby_seta_dir');
-    if (seta_esq) {
-        seta_esq.disabled = carrossel_atual === 0;
-    }
-    if (seta_dir) {
-        seta_dir.disabled = carrossel_atual >= carrossel_slides.length - 1;
-    }
+    drawer.classList.remove('aberto');
+    drawer.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('sala-config-aberta');
 }
 
-function atualizar_carrossel() {
-    const trilho = document.querySelector('.lobby-linha');
-    const dots = document.getElementById('lobby_dots');
-    const dica = document.getElementById('lobby_swipe_dica');
-    if (!trilho || !dots) {
+// Clique fora do drawer (e fora do botão que o abre) fecha o menu de sala, sem
+// bloquear a lista de jogadores que fica visível atrás.
+document.addEventListener('click', function (evento) {
+    const drawer = document.getElementById('menu_sala');
+    if (!drawer || !drawer.classList.contains('aberto') || !evento.target || typeof evento.target.closest !== 'function') {
         return;
     }
-    carrossel_slides = slides_carrossel();
-    // Reconstrói os dots conforme os painéis visíveis.
-    dots.innerHTML = '';
-    carrossel_slides.forEach(function (_, indice) {
-        const dot = document.createElement('button');
-        dot.type = 'button';
-        dot.className = 'dot';
-        dot.setAttribute('role', 'tab');
-        dot.setAttribute('aria-selected', 'false');
-        dot.setAttribute('aria-label', t('ui.lobby.aba', { n: indice + 1 }));
-        dot.addEventListener('click', function () {
-            rolar_para_slide(indice);
-        });
-        dots.appendChild(dot);
-    });
-    if (dica) {
-        // A dica de swipe só existe no mobile (no desktop os painéis são
-        // grade — estilo inline aqui vazaria para fora da media query).
-        const eh_mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
-        dica.style.display = (eh_mobile && carrossel_slides.length > 1) ? 'block' : 'none';
+    if (drawer.contains(evento.target)) {
+        return;
     }
-    marcar_ponto_atual();
-}
-
-// Atualiza os dots ao rolar (scroll-snap) e em mudanças de viewport/layout.
-const trilho_lobby = document.querySelector('.lobby-linha');
-if (trilho_lobby) {
-    trilho_lobby.addEventListener('scroll', function () {
-        marcar_ponto_atual();
-    }, { passive: true });
-}
-const seta_esq_lobby = document.getElementById('lobby_seta_esq');
-const seta_dir_lobby = document.getElementById('lobby_seta_dir');
-if (seta_esq_lobby) {
-    seta_esq_lobby.addEventListener('click', function () {
-        rolar_para_slide(Math.max(0, carrossel_atual - 1));
-    });
-}
-if (seta_dir_lobby) {
-    seta_dir_lobby.addEventListener('click', function () {
-        rolar_para_slide(Math.min(carrossel_slides.length - 1, carrossel_atual + 1));
-    });
-}
-window.addEventListener('resize', function () {
-    atualizar_carrossel();
-    marcar_ponto_atual();
+    const botao = document.getElementById('bot_abrir_config');
+    if (botao && botao.contains(evento.target)) {
+        return;
+    }
+    fechar_config_sala();
 });
 
 // Facilidade (teclado): Enter confirma a ação do contexto e Esc fecha o que
-// estiver aberto (alerta, tutorial, busca, dica). O Enter em um input dispara a
-// ação correspondente; em modais, confirma/fecha.
+// estiver aberto (alerta, tutorial, busca, dica, menu de sala). O Enter em um
+// input dispara a ação correspondente; em modais, confirma/fecha.
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         fechar_alerta();
         fechar_tutorial();
         fechar_busca();
         fechar_dica();
+        fechar_config_sala();
         return;
     }
     if (event.key !== 'Enter') {
@@ -4494,17 +4425,14 @@ document.addEventListener('click', function (evento) {
     // Ações de leitura/UI caem direto; as mutáveis esperam a identidade ser
     // confirmada (senão o servidor rejeita a chave placeholder silenciosamente).
     const acoes_nao_mutaveis = ['abrir_busca', 'fechar_busca', 'buscar_partidas',
-        'copiar_link_sala', 'fechar_tutorial', 'fechar_dica', 'criar_sala'];
+        'copiar_link_sala', 'fechar_tutorial', 'fechar_dica', 'criar_sala',
+        'abrir_config_sala', 'fechar_config_sala'];
     if (!chave_confirmada && !acoes_nao_mutaveis.includes(acao)) {
         return;
     }
     const funcao = window.Dadinho[acao];
     if (typeof funcao === 'function') funcao();
 });
-
-// Fase 33 (M2): na primeira carga o lobby já pode estar visível — constrói os
-// dots/setas do carrossel (no desktop são `display:none`, então é no-op).
-atualizar_carrossel();
 
 // Fase 53: expõe as ações do `data-acao` sob um único global (nada mais vaza do
 // IIFE). Se adicionar um novo `data-acao` em `jogo.html`, exportar a função
@@ -4516,5 +4444,6 @@ window.Dadinho = {
     buscar_partidas, fechar_busca,
     conferencia_final, vencedor_final,
     fechar_tutorial, fechar_alerta, fechar_dica,
+    abrir_config_sala, fechar_config_sala,
 };
 })();

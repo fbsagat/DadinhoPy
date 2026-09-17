@@ -69,8 +69,9 @@ class Lobby:
             'dados_qtd': 3,
             'max_jogadores': 4,
             'com_coringa': True,
-            # Sala nasce privada (só entra por link); o master libera na busca.
-            'publica': False,
+            # Sala nasce pública (aparece na busca); o master pode deixá-la
+            # privada (só entra por link) no drawer de configurações.
+            'publica': True,
             'substituir_desconectado_por_ia': True,
             'ia_nivel_padrao': 3,
             # Verificação de integridade dos dados (provably fair): ligada por

@@ -834,11 +834,32 @@ h5,
 }
 
 /* ------- Lista de jogadores (lobby): colunas lado a lado no mobile ------- */
+/* O `.row` do Bootstrap tem margens negativas (gutter) que estouravam a
+   largura da lista e criavam uma barra de rolagem horizontal inútil. Zera as
+   margens e deixa o clipping por conta do container. */
+#lista_de_jogadores .row {
+    margin-left: 0;
+    margin-right: 0;
+    --bs-gutter-x: 0;
+}
+
 #lista_de_jogadores .col-md-6 {
     flex: 0 0 50%;
     max-width: 50%;
     padding: 6px 8px;
     word-break: break-word;
+}
+
+#lista_de_jogadores .ranking-cabecalho {
+    color: #0dcaf0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+#lista_de_jogadores .ranking-campeao {
+    background: linear-gradient(90deg, rgba(255, 193, 7, 0.22), transparent);
+    border-left: 3px solid #ffc107;
 }
 
 #lista_de_jogadores > div {
@@ -1101,6 +1122,7 @@ h5,
     #lista_de_jogadores {
         max-height: 220px;
         overflow-y: auto;
+        overflow-x: hidden;
     }
 }
 
@@ -1230,11 +1252,107 @@ h5,
     width: 100%;
 }
 
-/* -------- M2: setas/dots/dica do carrossel (só mobile) -------- */
-.lobby-seta,
-.lobby-dots,
-.lobby-swipe-dica {
+/* ============================================================
+   Menu de sala: drawer lateral esquerdo (Configurações + Jogadores IA).
+   Encostado à esquerda para o master ver a lista de jogadores (card à
+   direita) enquanto ajusta a partida e adiciona bots.
+   ============================================================ */
+#painel_jogador,
+#painel_config,
+#painel_ia {
+    padding: 0.75rem 0.9rem;
+}
+
+.painel-titulo {
+    position: relative;
+    min-height: 44px;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(13, 202, 240, 0.25);
+}
+
+.bot-config {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    line-height: 1;
+}
+
+/* No mobile o cabeçalho fica mais compacto: sem linha divisória, menos
+   altura e o ⚙️ menor, para não cruzar a borda. */
+@media (max-width: 767.98px) {
+    .painel-titulo {
+        min-height: 32px;
+        padding-bottom: 0.35rem;
+        margin-bottom: 0.35rem;
+        border-bottom: none;
+    }
+
+    .bot-config {
+        padding: 0 0.45rem;
+        font-size: 0.85rem;
+        border-width: 1px;
+    }
+}
+
+.sala-drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(92vw, 380px);
+    z-index: 85;
     display: none;
+    flex-direction: column;
+    background-color: rgba(0, 17, 37, 0.98);
+    border-right: 1px solid var(--cor-borda);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.55);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px);
+}
+
+.sala-drawer.aberto {
+    display: flex;
+    animation: sala_drawer_aparecer 0.25s ease;
+}
+
+@keyframes sala_drawer_aparecer {
+    from {
+        opacity: 0;
+        transform: translateX(-24px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.sala-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(13, 202, 240, 0.3);
+    margin-bottom: 10px;
+}
+
+.sala-drawer-corpo {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* No desktop o drawer empurra o conteúdo do lobby para a direita: a lista de
+   jogadores continua visível ao lado das configurações. */
+@media (min-width: 992px) {
+    body.sala-config-aberta .app-main {
+        padding-left: calc(min(92vw, 380px) + 16px);
+        transition: padding-left 0.25s ease;
+    }
 }
 
 /* -------- M3: rodapé de ação e telas de jogo (só mobile) -------- */
@@ -1271,116 +1389,16 @@ h5,
         margin-top: calc(env(safe-area-inset-top, 0px) + 8px);
     }
 
-    /* -------- M2: carrossel do lobby -------- */
-    .lobby-carrossel {
-        position: relative;
-        padding: 0 4px;
-        max-width: 560px;
-    }
-
-    .lobby-linha {
-        display: flex;
-        flex-wrap: nowrap;
-        /* O trilho NÃO usa `justify-content-center` (Bootstrap, com
-           `!important`): centrar o overflow empurra o 1º card para fora da
-           tela e deixa só 2 telas alcançáveis. `flex-start` + snap `start` =
-           cada card preenche a largura e o swipe desloca exatamente um slide. */
-        justify-content: flex-start;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        scroll-padding-left: 0;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior-x: contain;
-        scrollbar-width: none;
-        margin: 0;
-        padding: 0;
-    }
-
-    .lobby-linha::-webkit-scrollbar {
-        display: none;
-    }
-
-    /* Cada card mora no SEU slide (`col-... lobby-slide`); não há wrapper:
-       `display: contents` é instável no mobile (vira 2 slides e estoura a
-       tela), então o trilho trabalha com colunas diretas. Especificidade
-       (0,2,0) vence o `.col-12`/`.col-lg-*` do Bootstrap sem `!important`. */
-    .lobby-linha .lobby-slide {
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-start;
-        align-items: center;
-        flex: 0 0 100%;
-        max-width: 100%;
-        min-width: 0;
-        scroll-snap-align: start;
-    }
-
-    .lobby-linha .lobby-slide > * {
-        width: 100%;
-    }
-
-    /* Lista de jogadores com scroll interno: cresce sem estourar a tela. */
+    /* -------- Lobby: lista de jogadores rolável no mobile -------- */
     #lista_de_jogadores {
         max-height: 32vh;
         overflow-y: auto;
+        overflow-x: hidden;
     }
 
-    .lobby-seta {
-        display: flex;
-        position: absolute;
-        top: 38%;
-        width: 30px;
-        height: 46px;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        border-radius: 8px;
-        background-color: rgba(0, 41, 82, 0.85);
-        color: #0dcaf0;
-        font-size: 1.4rem;
-        z-index: 3;
-    }
-
-    #lobby_seta_esq {
-        left: -2px;
-    }
-
-    #lobby_seta_dir {
-        right: -2px;
-    }
-
-    .lobby-seta:disabled {
-        opacity: 0.35;
-    }
-
-    .lobby-dots {
-        display: flex;
-        justify-content: center;
-        gap: 8px;
-        margin-top: 8px;
-    }
-
-    .lobby-dots .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        border: none;
-        padding: 0;
-        background-color: rgba(13, 202, 240, 0.35);
-        transition: background-color 0.2s ease, transform 0.2s ease;
-    }
-
-    .lobby-dots .dot.ativo {
-        background-color: #0dcaf0;
-        transform: scale(1.3);
-    }
-
-    .lobby-swipe-dica {
-        display: block;
-        text-align: center;
-        font-size: 0.75rem;
-        color: #9fb8cf;
-        margin-top: 4px;
+    /* O card de Jogadores ocupa a largura útil da tela. */
+    .lobby-sala {
+        max-width: 520px;
     }
 
     /* -------- M3: partida vira layout de app (flex 100dvh) -------- */
@@ -1502,7 +1520,7 @@ h5,
         --bs-gutter-x: 0.25rem;
         /* A escala do dado selecionado estoura a coluna (16.66%) e acionaria a
            scrollbar nativa cinza no mobile — mantém o scroll por toque sem
-           mostrar a barra (mesmo padrão do .lobby-linha). */
+           mostrar a barra. */
         scrollbar-width: none;
     }
 

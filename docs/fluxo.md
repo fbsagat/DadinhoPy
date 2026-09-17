@@ -81,7 +81,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
-| `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | 944 |
+| `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | fecha o drawer de configurações |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |
 | `jogador_desconectado` | app.py:699 | cliente | 1835 |

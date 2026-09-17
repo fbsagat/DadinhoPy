@@ -284,188 +284,175 @@
                 </div>
             </div>
 
-            <!-- Fase 33 (M2): no mobile o lobby vira um carrossel horizontal com
-                 scroll-snap — tela 1 = Jogadores, tela 2 = Configurações do
-                 host, tela 3 = Bots IA. Cada card tem o SEU próprio slide
-                 (`col-... lobby-slide`); o desktop mantém os três numa linha
-                 (5/4/3). As três telas existem para host E cliente (no cliente
-                 os controles de config/IA aparecem read-only, como no desktop
-                 — os inputs já vêm desabilitados por `aplicar_master`).
-                 `lobby-linha` é o trilho; as setas e os dots
-                 (`lobby_seta_*`/`lobby_dots`) são o fallback acessível (o swipe
-                 nunca é o único caminho). O trilho NÃO usa a utility Bootstrap
-                 `justify-content-center` (ela tem `!important` e anula o
-                 `flex-start` do carrossel, empurrando o 1º card para fora da
-                 tela). Não usar wrapper/débitos de `display: contents`: quebra
-                 no mobile (2 slides, card fora da tela). -->
-            <div class="container lobby-carrossel">
-                <div class="row g-2 align-items-start lobby-linha">
-
-                    <div class="col-12 col-lg-5 lobby-slide">
-                        <div id="painel_jogador"
-                            class="container my-1 p-2 bg-dark text-light border border-info rounded text-center mx-auto"
-                            style="--bs-bg-opacity: .8; max-width: 420px;">
-                            <h5 class="text-info mb-2" data-i18n="ui.jogadores.titulo">👥 Jogadores</h5>
-                            <div>
-                                <input type="text" id="apelido" class="container form-control text-center mx-auto"
-                                    style="width: 200px;"
-                                    data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
-                                    maxlength="8" autocomplete="nickname">
-                                <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
-                                    data-acao="enviar_apelido">Pronto</button>
-                            </div>
-
-                            <div class="container my-1 p-2 bg-dark text-light border border-info rounded gamer-container"
-                                id="lista_de_jogadores"
-                                style="--bs-bg-opacity: .8; width: 100%; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Inter', sans-serif;">
-                                <small data-i18n="ui.lista.aguardando">Aguardando jogadores...</small>
-                            </div>
-
-                            <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
-                                <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
-                                    data-acao="alternar_pronto">Ficar pronto</button>
-                                <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
-                                    data-acao="iniciar_partida" style="display: none;" disabled>Iniciar partida</button>
-                            </div>
-                        </div>
+            <!-- Menu de sala: card único de Jogadores (ranking por pontos) e o
+                 botão ⚙️ que abre o drawer lateral esquerdo com Configurações +
+                 Jogadores IA. O drawer fica encostado à esquerda para o master
+                 ver a lista de jogadores enquanto ajusta a partida e adiciona
+                 bots. Não há mais carrossel (Config/IA migraram para o drawer). -->
+            <div class="container lobby-sala">
+                <div id="painel_jogador"
+                    class="container my-1 bg-dark text-light border border-info rounded text-center mx-auto"
+                    style="--bs-bg-opacity: .8; max-width: 460px;">
+                    <div class="d-flex align-items-center justify-content-center gap-2 painel-titulo">
+                        <h5 class="text-info mb-0" data-i18n="ui.jogadores.titulo">👥 Jogadores</h5>
+                        <button id="bot_abrir_config" class="btn btn-sm btn-outline-info bot-config"
+                            data-acao="abrir_config_sala" data-i18n-title="ui.config.abrir"
+                            data-i18n-aria-label="ui.config.abrir" title="Configurações da sala"
+                            aria-label="Configurações da sala">⚙️</button>
+                    </div>
+                    <div class="painel-corpo">
+                        <input type="text" id="apelido" class="container form-control text-center mx-auto"
+                            style="width: 200px;"
+                            data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
+                            maxlength="8" autocomplete="nickname">
+                        <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
+                            data-acao="enviar_apelido">Pronto</button>
                     </div>
 
-                    <div class="col-12 col-lg-4 lobby-slide lobby-slide-config">
-                        <div id="painel_config"
-                            class="container my-1 p-2 bg-dark text-light border border-secondary rounded text-center mx-auto"
-                            style="--bs-bg-opacity: .8; max-width: 420px;">
-                            <h5 class="text-info mb-2" data-i18n="ui.config.titulo">Configurações da partida</h5>
-                            <div class="mb-1">
-                                <label class="form-label small d-block" for="config_nome"
-                                    data-i18n="ui.config.nome">Nome da partida</label>
-                                <input type="text" id="config_nome" class="form-control form-control-sm text-center mx-auto"
-                                    maxlength="30" data-i18n-placeholder="ui.config.nome" placeholder="Nome da partida">
-                            </div>
-                            <div class="row g-2 mb-1">
-                                <div class="col-6">
-                                    <label class="form-label small d-block" for="config_dados"
-                                        data-i18n="ui.config.dados">Dados por jogador</label>
-                                    <select id="config_dados" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="1">1</option>
-                                        <option value="2">2</option>
-                                        <option value="3" selected>3</option>
-                                        <option value="4">4</option>
-                                        <option value="5">5</option>
-                                        <option value="6">6</option>
-                                    </select>
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label small d-block" for="config_max"
-                                        data-i18n="ui.config.max">Máximo de jogadores</label>
-                                    <select id="config_max" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="2">2</option>
-                                        <option value="3">3</option>
-                                        <option value="4" selected>4</option>
-                                        <option value="5">5</option>
-                                        <option value="6">6</option>
-                                        <option value="7">7</option>
-                                        <option value="8">8</option>
-                                        <option value="9">9</option>
-                                        <option value="10">10</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-check form-switch d-flex justify-content-center gap-2 mb-1">
-                                <input class="form-check-input" type="checkbox" id="config_coringa" checked>
-                                <label class="form-check-label" for="config_coringa"
-                                    data-i18n="ui.config.coringa">Coringa (1 conta como qualquer)</label>
-                            </div>
-                            <div class="form-check form-switch d-flex justify-content-center gap-2">
-                                <input class="form-check-input" type="checkbox" id="config_publica">
-                                <label class="form-check-label" for="config_publica"
-                                    data-i18n="ui.config.publica">Pública (aparece na busca)</label>
-                            </div>
-                            <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
-                                <input class="form-check-input" type="checkbox" id="config_substituir_ia" checked>
-                                <label class="form-check-label" for="config_substituir_ia"
-                                    data-i18n="ui.config.substituir_ia">Trocar desconectado por IA</label>
-                            </div>
-                            <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
-                                <input class="form-check-input" type="checkbox" id="config_verificacao" checked>
-                                <label class="form-check-label" for="config_verificacao"
-                                    data-i18n="ui.config.verificacao">Verificar dados (provably fair)</label>
-                            </div>
-                            <div class="row g-2 mb-1 mt-1">
-                                <div class="col-12">
-                                    <label class="form-label small d-block" for="config_tempo"
-                                        data-i18n="ui.config.tempo">Tempo máximo de jogada</label>
-                                    <select id="config_tempo" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="0" data-i18n="ui.config.tempo.desligado">Desligado</option>
-                                        <option value="15">15s</option>
-                                        <option value="30">30s</option>
-                                        <option value="60" selected>60s</option>
-                                        <option value="120">120s</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <small class="text-muted d-block mt-1" data-i18n="ui.config.nota">Somente o master edita as
-                                configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
-                        </div>
+                    <div class="container my-1 p-2 bg-dark text-light border border-info rounded gamer-container"
+                        id="lista_de_jogadores"
+                        style="--bs-bg-opacity: .8; width: 100%; box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); font-family: 'Inter', sans-serif;">
+                        <small data-i18n="ui.lista.aguardando">Aguardando jogadores...</small>
                     </div>
 
-                    <div class="col-12 col-lg-3 lobby-slide lobby-slide-ia">
-                        <div id="painel_ia"
-                            class="container my-1 p-2 bg-dark text-light border border-primary rounded text-center mx-auto"
-                            style="--bs-bg-opacity: .8; max-width: 420px;">
-                            <h5 class="text-info mb-2" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
-                            <div class="row g-2 mb-1">
-                                <div class="col-6">
-                                    <label class="form-label small d-block" for="ia_nivel"
-                                        data-i18n="ui.ia.nivel">Nível</label>
-                                    <select id="ia_nivel" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="1" data-i18n="ui.nivel.1">1 - Novato</option>
-                                        <option value="2" data-i18n="ui.nivel.2">2 - Regular</option>
-                                        <option value="3" selected data-i18n="ui.nivel.3">3 - Perito</option>
-                                        <option value="4" data-i18n="ui.nivel.4">4 - Mestre</option>
-                                    </select>
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label small d-block" for="ia_quantidade"
-                                        data-i18n="ui.ia.quantidade">Quantidade</label>
-                                    <select id="ia_quantidade" class="form-select form-select-sm text-center mx-auto">
-                                        <option value="1" selected>1</option>
-                                        <option value="2">2</option>
-                                        <option value="3">3</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="d-flex justify-content-center gap-2 flex-wrap">
-                                <button class="btn btn-sm btn-primary" data-i18n="ui.ia.adicionar"
-                                    data-acao="adicionar_ia">Adicionar IA</button>
-                                <button class="btn btn-sm btn-success" data-i18n="ui.ia.completar"
-                                    data-acao="completar_com_ias">Completar vagas</button>
-                                <button class="btn btn-sm btn-outline-danger" data-i18n="ui.ia.remover"
-                                    data-acao="remover_ias">Remover IAs</button>
-                            </div>
-                            <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
-                                sozinhos. Só o master controla.</small>
-                        </div>
+                    <div class="d-flex justify-content-center gap-2 mt-1 flex-wrap">
+                        <button id="bot_pronto" class="btn btn-warning" data-i18n="js.ficar_pronto"
+                            data-acao="alternar_pronto">Ficar pronto</button>
+                        <button id="iniciar_jogo" class="btn btn-success" data-i18n="ui.iniciar"
+                            data-acao="iniciar_partida" style="display: none;" disabled>Iniciar partida</button>
                     </div>
-
                 </div>
-
-                <!-- Fase 33 (M2): setas discretas + dots do carrossel (fallback
-                     acessível do swipe; só visíveis no mobile). -->
-                <button id="lobby_seta_esq" class="lobby-seta" data-i18n-aria-label="ui.lobby.seta_esq"
-                    aria-label="Painel anterior">‹</button>
-                <button id="lobby_seta_dir" class="lobby-seta" data-i18n-aria-label="ui.lobby.seta_dir"
-                    aria-label="Próximo painel">›</button>
-                <div id="lobby_dots" class="lobby-dots" role="tablist" data-i18n-aria-label="ui.lobby.dots"
-                    aria-label="Painéis do lobby"></div>
-                <div id="lobby_swipe_dica" class="lobby-swipe-dica" data-i18n="ui.lobby.swipe">
-                    Deslize para o lado</div>
 
                 <!-- Fase 42 (N3): link de retorno ao MemeTrigger, discreto, no
                      lobby/espera (a vitória já tem o tagline equivalente). -->
                 <p class="tagline-jogo text-center text-info mt-3 mb-1" data-i18n-html="ui.subtitulo">O jogo oficial do <a
                         href="https://memetrigger.com" target="_blank" rel="noopener" class="tagline-link">MemeTrigger</a>!</p>
             </div>
+            </div>
 
+            <!-- Drawer lateral esquerdo do menu de sala (Configurações + IAs).
+                 Abre pelo ⚙️ do card Jogadores, fecha no ✖, Esc ou clique fora.
+                 Os painéis continuam com os mesmos IDs para `aplicar_master`
+                 desabilitar os controles do não-master. -->
+            <div id="menu_sala" class="sala-drawer" role="dialog" aria-modal="true" aria-hidden="true"
+                data-i18n-aria-label="ui.config.titulo" aria-label="Configurações da partida">
+                <div class="sala-drawer-header">
+                    <span class="fs-5 fw-bold text-info" data-i18n="ui.config.titulo">Configurações da partida</span>
+                    <button id="bot_fechar_config" class="btn btn-outline-light btn-sm"
+                        data-acao="fechar_config_sala" data-i18n-aria-label="ui.menu.fechar"
+                        aria-label="Fechar">✖</button>
+                </div>
+                <div class="sala-drawer-corpo">
+
+                    <div id="painel_config" class="p-2 bg-dark text-light border border-secondary rounded text-center">
+                        <div class="mb-1">
+                            <label class="form-label small d-block" for="config_nome"
+                                data-i18n="ui.config.nome">Nome da partida</label>
+                            <input type="text" id="config_nome" class="form-control form-control-sm text-center mx-auto"
+                                maxlength="30" data-i18n-placeholder="ui.config.nome" placeholder="Nome da partida">
+                        </div>
+                        <div class="row g-2 mb-1">
+                            <div class="col-6">
+                                <label class="form-label small d-block" for="config_dados"
+                                    data-i18n="ui.config.dados">Dados por jogador</label>
+                                <select id="config_dados" class="form-select form-select-sm text-center mx-auto">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3" selected>3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small d-block" for="config_max"
+                                    data-i18n="ui.config.max">Máximo de jogadores</label>
+                                <select id="config_max" class="form-select form-select-sm text-center mx-auto">
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4" selected>4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                    <option value="7">7</option>
+                                    <option value="8">8</option>
+                                    <option value="9">9</option>
+                                    <option value="10">10</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-check form-switch d-flex justify-content-center gap-2 mb-1">
+                            <input class="form-check-input" type="checkbox" id="config_coringa" checked>
+                            <label class="form-check-label" for="config_coringa"
+                                data-i18n="ui.config.coringa">Coringa (1 conta como qualquer)</label>
+                        </div>
+                        <div class="form-check form-switch d-flex justify-content-center gap-2">
+                            <input class="form-check-input" type="checkbox" id="config_publica" checked>
+                            <label class="form-check-label" for="config_publica"
+                                data-i18n="ui.config.publica">Pública (aparece na busca)</label>
+                        </div>
+                        <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
+                            <input class="form-check-input" type="checkbox" id="config_substituir_ia" checked>
+                            <label class="form-check-label" for="config_substituir_ia"
+                                data-i18n="ui.config.substituir_ia">Trocar desconectado por IA</label>
+                        </div>
+                        <div class="form-check form-switch d-flex justify-content-center gap-2 mt-1">
+                            <input class="form-check-input" type="checkbox" id="config_verificacao" checked>
+                            <label class="form-check-label" for="config_verificacao"
+                                data-i18n="ui.config.verificacao">Verificar dados (provably fair)</label>
+                        </div>
+                        <div class="row g-2 mb-1 mt-1">
+                            <div class="col-12">
+                                <label class="form-label small d-block" for="config_tempo"
+                                    data-i18n="ui.config.tempo">Tempo máximo de jogada</label>
+                                <select id="config_tempo" class="form-select form-select-sm text-center mx-auto">
+                                    <option value="0" data-i18n="ui.config.tempo.desligado">Desligado</option>
+                                    <option value="15">15s</option>
+                                    <option value="30">30s</option>
+                                    <option value="60" selected>60s</option>
+                                    <option value="120">120s</option>
+                                </select>
+                            </div>
+                        </div>
+                        <small class="text-muted d-block mt-1" data-i18n="ui.config.nota">Somente o master edita as
+                            configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.</small>
+                    </div>
+
+                    <div id="painel_ia" class="p-2 bg-dark text-light border border-primary rounded text-center">
+                        <h5 class="text-info mb-2" data-i18n="ui.ia.titulo">🤖 Jogadores IA</h5>
+                        <div class="row g-2 mb-1">
+                            <div class="col-6">
+                                <label class="form-label small d-block" for="ia_nivel"
+                                    data-i18n="ui.ia.nivel">Nível</label>
+                                <select id="ia_nivel" class="form-select form-select-sm text-center mx-auto">
+                                    <option value="1" data-i18n="ui.nivel.1">1 - Novato</option>
+                                    <option value="2" data-i18n="ui.nivel.2">2 - Regular</option>
+                                    <option value="3" selected data-i18n="ui.nivel.3">3 - Perito</option>
+                                    <option value="4" data-i18n="ui.nivel.4">4 - Mestre</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small d-block" for="ia_quantidade"
+                                    data-i18n="ui.ia.quantidade">Quantidade</label>
+                                <select id="ia_quantidade" class="form-select form-select-sm text-center mx-auto">
+                                    <option value="1" selected>1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-center gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-primary" data-i18n="ui.ia.adicionar"
+                                data-acao="adicionar_ia">Adicionar IA</button>
+                            <button class="btn btn-sm btn-success" data-i18n="ui.ia.completar"
+                                data-acao="completar_com_ias">Completar vagas</button>
+                            <button class="btn btn-sm btn-outline-danger" data-i18n="ui.ia.remover"
+                                data-acao="remover_ias">Remover IAs</button>
+                        </div>
+                        <small class="text-muted d-block mt-1" data-i18n="ui.ia.nota">Bots entram prontos e jogam
+                            sozinhos. Só o master controla.</small>
+                    </div>
+
+                </div>
             </div>
         </div>
         <!-- TELA JOGADORES FIM -->
