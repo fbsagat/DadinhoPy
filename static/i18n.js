@@ -177,6 +177,9 @@ I18N_DICIONARIOS.en = {
     'ui.tut.verif.summary': '🔒 Dice verification (provably fair) — optional',
     'ui.tut.verif.p1': 'If the host turns on <strong>Verify dice</strong>, the result no longer depends on the server. Before any player contributes, the server commits to a secret number (which it can no longer change); each player generates a secret number in their own browser and reveals it publicly. The combination becomes the seed that defines the dice and who starts — at the end anyone can verify that the server used exactly those numbers.',
     'ui.tut.verif.p2': 'At the end of the game, everything is revealed and the audit appears on the victory screen: any player can check, in their own browser, that the dice really came from that seed. It is an extra transparency feature — to play normally, you don\'t need to touch it.',
+    'ui.tut.ia.summary': '🤖 How the AI plays (it doesn\'t peek)',
+    'ui.tut.ia.p1': 'Bots see only what you see: <strong>their own dice</strong> plus the public table info (the current bet and how many dice each player still has). They <strong>never</strong> see the hidden dice of other players — that\'s why they bluff, doubt wrong and lose, just like a human.',
+    'ui.tut.ia.p2': 'The game code enforces this: the AI engine only ever receives its own dice and public info. Nothing else. No hidden advantage.',
     'ui.tut.dicas_switch': 'Show tips during the game',
     'ui.tut.entendi': "Got it! Let's play 🎲",
 
@@ -615,6 +618,9 @@ I18N_DICIONARIOS['pt-BR'] = {
     'ui.tut.verif.summary': '🔒 Verificação dos dados (provably fair) — opcional',
     'ui.tut.verif.p1': 'Se o master ligar <strong>Verificar dados</strong>, o resultado deixa de depender do servidor. Antes de qualquer jogador contribuir, o servidor compromete um número secreto (que ele não pode mais mudar); cada jogador gera um número secreto no próprio navegador e o revela publicamente. A combinação vira a semente que define os dados e quem começa — no fim, qualquer um confere que o servidor usou exatamente esses números.',
     'ui.tut.verif.p2': 'No fim da partida, tudo é revelado e a auditoria aparece na tela de vitória: qualquer jogador pode conferir, no próprio navegador, que os dados vieram mesmo daquela semente. É um recurso de transparência extra — para jogar normalmente, não precisa mexer nisso.',
+    'ui.tut.ia.summary': '🤖 Como a IA joga (ela não espiona)',
+    'ui.tut.ia.p1': 'Os bots enxergam só o que você vê: <strong>os próprios dados</strong> e a informação pública da mesa (a aposta atual e quantos dados cada jogador ainda tem). Eles <strong>nunca</strong> veem os dados escondidos dos outros — por isso blefam, desconfiam errado e perdem, como um humano.',
+    'ui.tut.ia.p2': 'O código do jogo garante isso: o motor da IA só recebe os próprios dados e a informação pública. Nada além disso. Nenhuma vantagem escondida.',
     'ui.tut.dicas_switch': 'Mostrar dicas durante a partida',
     'ui.tut.entendi': 'Entendi! Vamos jogar 🎲',
 
@@ -1035,6 +1041,9 @@ I18N_DICIONARIOS.es = {
     'ui.tut.verif.summary': '🔒 Verificación de dados (provably fair) — opcional',
     'ui.tut.verif.p1': 'Si el master activa <strong>Verificar dados</strong>, el resultado deja de depender del servidor. Antes de que ningún jugador contribuya, el servidor compromete un número secreto (que ya no puede cambiar); cada jugador genera un número secreto en su propio navegador y lo revela públicamente. La combinación se convierte en la semilla que define los dados y quién empieza: al final, cualquiera comprueba que el servidor usó exactamente esos números.',
     'ui.tut.verif.p2': 'Al final de la partida, todo se revela y la auditoría aparece en la pantalla de victoria: cualquier jugador puede comprobar, en su propio navegador, que los dados vinieron de esa semilla. Es un recurso extra de transparencia; para jugar normalmente no hace falta tocarlo.',
+    'ui.tut.ia.summary': '🤖 Cómo juega la IA (no espía)',
+    'ui.tut.ia.p1': 'Los bots solo ven lo que tú ves: <strong>sus propios dados</strong> y la información pública de la mesa (la apuesta actual y cuántos dados le quedan a cada jugador). <strong>Nunca</strong> ven los dados ocultos de los demás — por eso farolean, se equivocan al desconfiar y pierden, como un humano.',
+    'ui.tut.ia.p2': 'El código del juego lo garantiza: el motor de la IA solo recibe sus propios dados e información pública. Nada más. Ninguna ventaja oculta.',
     'ui.tut.dicas_switch': 'Mostrar consejos durante la partida',
     'ui.tut.entendi': '¡Entendido! Vamos a jugar 🎲',
 
@@ -1455,6 +1464,9 @@ I18N_DICIONARIOS.fr = {
     'ui.tut.verif.summary': '🔒 Vérification des dés (provably fair) — optionnel',
     'ui.tut.verif.p1': "Si le master active <strong>Vérifier les dés</strong>, le résultat ne dépend plus du serveur. Avant que le moindre joueur ne contribue, le serveur s'engage sur un nombre secret (qu'il ne peut plus changer) ; chaque joueur génère un nombre secret dans son propre navigateur et le révèle publiquement. La combinaison devient la graine qui définit les dés et qui commence — à la fin, chacun vérifie que le serveur a bien utilisé exactement ces nombres.",
     'ui.tut.verif.p2': "À la fin de la partie, tout est révélé et l'audit apparaît sur l'écran de victoire : n'importe quel joueur peut vérifier, dans son navigateur, que les dés viennent bien de cette graine. C'est une transparence supplémentaire — pour jouer normalement, pas besoin d'y toucher.",
+    'ui.tut.ia.summary': "🤖 Comment joue l'IA (elle ne triche pas)",
+    'ui.tut.ia.p1': "Les bots ne voient que ce que vous voyez : <strong>leurs propres dés</strong> et l'information publique de la table (la mise en cours et combien de dés il reste à chaque joueur). Ils ne voient <strong>jamais</strong> les dés cachés des autres — c'est pour ça qu'ils bluffent, se trompent en doutant et perdent, comme un humain.",
+    'ui.tut.ia.p2': "Le code du jeu le garantit : le moteur de l'IA ne reçoit que ses propres dés et l'information publique. Rien de plus. Aucun avantage caché.",
     'ui.tut.dicas_switch': 'Afficher les astuces pendant la partie',
     'ui.tut.entendi': 'Compris ! On joue 🎲',
 
@@ -1875,6 +1887,9 @@ I18N_DICIONARIOS['zh-CN'] = {
     'ui.tut.verif.summary': '🔒 骰子验证（可证明公平）——可选',
     'ui.tut.verif.p1': '如果房主开启<strong>验证骰子</strong>，结果就不再取决于服务器。在任何玩家参与之前，服务器先对一个秘密数字做出承诺（之后无法更改）；每位玩家在自己的浏览器中生成一个秘密数字，并将其公开。所有内容组合成决定骰子和先手的种子——最后任何人都能核实服务器确实使用了这些数字。',
     'ui.tut.verif.p2': '对局结束时，一切都会公开，审计会显示在胜利界面上：任何玩家都可以在自己的浏览器中核验骰子确实来自那个种子。这是额外的透明功能——正常游玩无需理会。',
+    'ui.tut.ia.summary': '🤖 AI 怎么玩（它不会偷看）',
+    'ui.tut.ia.p1': '机器人只能看到你所看到的内容：<strong>自己的骰子</strong>以及桌上的公开信息（当前下注和每位玩家还剩几颗骰子）。它们<strong>从不</strong>看到其他玩家隐藏的骰子——所以它们会虚张声势、怀疑出错、也会输，就像人类一样。',
+    'ui.tut.ia.p2': '游戏代码保证了这一点：AI 引擎只会收到自己的骰子和公开信息。仅此而已，没有任何隐藏优势。',
     'ui.tut.dicas_switch': '在对局中显示提示',
     'ui.tut.entendi': '明白了！开始玩 🎲',
 

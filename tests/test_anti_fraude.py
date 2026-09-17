@@ -11,6 +11,7 @@ from tests.base import (
 import anti_fraude
 import observabilidade
 import store
+import ia
 
 
 def _testar_observabilidade():
@@ -206,6 +207,100 @@ def _testar_limite_ip():
                 f"sids restantes: {store.sids_do_ip(ip_teste)}")
 
 
+class _RNGDeterministico:
+    """Substituto de `secrets` para a IA: sequência fixa e reproduzível entre rodadas."""
+
+    def __init__(self, valor):
+        self._valor = int(valor)
+
+    def randbelow(self, n):
+        if not isinstance(n, int) or n <= 0:
+            return 0
+        return min(self._valor, n - 1)
+
+    def choice(self, seq):
+        return seq[0]
+
+
+def _montar_rodada_ia_limpa(escondidos, dados_bot, aposta):
+    """
+    Sala com 1 humano + 1 bot e uma rodada em andamento. O parâmetro
+    `escondidos` preenche o que o servidor sabe mas um jogador não deveria ver
+    (`todos_os_dados`/`dados_por_jogador` da rodada atual) — do jeito que o
+    teste quer: corrompido com faces-sentinela.
+    """
+    from modelos import Lobby, Partida, Rodada, Turno, Jogador
+
+    lobby = Lobby(sala_id="ia_limpa", lobby_numero=1)
+    humano = Jogador(client_id="humano-1")
+    humano.username = "Fulano"
+    humano.dados_qtd = len(escondidos)
+    humano.dados = list(escondidos)
+    bot = Jogador.criar_ia(3, "🤖 Bot")
+    bot.dados_qtd = len(dados_bot)
+    bot.dados = list(dados_bot)
+    # Personalidade fixa: comparações entre cenários precisam do mesmo bot.
+    bot.ia_risco = 0.5
+    bot.ia_agressividade = 0.5
+    lobby.adicionar_jogador(humano)
+    lobby.adicionar_jogador(bot)
+    partida = Partida(do_lobby=lobby, jogadores=[humano, bot], partida_numero=1,
+                      dados_qtd=len(dados_bot))
+    lobby.partidas.append(partida)
+    rodada = Rodada(partida=partida, jogadores=[humano, bot], rodada_numero=1,
+                    vez_atual=humano, com_coringa=True)
+    partida.rodadas.append(rodada)
+    for jogador in (humano, bot):
+        jogador.partida_atual = partida
+        jogador.rodada_atual = rodada
+        jogador.dados_qtd = len(jogador.dados)
+    face, qtd = aposta  # aposta pública feita pelo humano
+    turno = Turno(da_rodada=rodada, dado=face, jogador=humano, dado_qtd=qtd, turno_numero=1)
+    rodada.turnos.append(turno)
+    humano.turno_atual = turno
+    humano.turnos.append(turno)
+    rodada.vez_atual = bot
+    rodada.todos_os_dados = list(escondidos)
+    rodada.dados_por_jogador = {humano.client_id: list(escondidos),
+                                bot.client_id: list(dados_bot)}
+    return lobby, bot, rodada
+
+
+def _testar_ia_nao_espiona():
+    """
+    Honeypot: a IA decide usando só dados próprios + informação pública. Monta
+    a rodada atual duas vezes com os dados escondidos corrompidos de formas
+    opostas (um mundo onde a verdade estaria nos escondidos, outro onde não);
+    com o RNG da IA travado, a decisão tem que ser IDÊNTICA nos dois mundos.
+    Se algum dia o motor ler `todos_os_dados`/`dados_por_jogador` da rodada
+    em andamento, a corrupção muda a decisão e o teste falha.
+    """
+    # (dados_do_bot, aposta(face, qtd), escondidos_A, escondidos_B)
+    # Em cada cenário, A deixa a aposta mentirosa e B a torna verdadeira:
+    # se o motor lesse os escondidos, a decisão mudaria de um mundo pro outro.
+    # Cenário 1: apoio baixo -> honestamente desconfia nos dois.
+    # Cenário 2: apoio alto -> honestamente responde com outra aposta.
+    cenarios = [
+        ([1, 2, 3], (5, 4), [6, 6, 6], [5, 5, 5]),
+        ([5, 5, 1], (5, 5), [2, 2, 2], [5, 5, 5]),
+    ]
+    original = ia.secrets
+    try:
+        for nivel in (1, 2, 3, 4):
+            for rng_valor in (0, 99):
+                for idx, (dados_bot, aposta, escondidos_a, escondidos_b) in enumerate(cenarios):
+                    _, bot_a, rodada_a = _montar_rodada_ia_limpa(escondidos_a, dados_bot, aposta)
+                    _, bot_b, rodada_b = _montar_rodada_ia_limpa(escondidos_b, dados_bot, aposta)
+                    ia.secrets = _RNGDeterministico(rng_valor)
+                    decisao_a = ia.decidir(bot_a, rodada_a, nivel)
+                    decisao_b = ia.decidir(bot_b, rodada_b, nivel)
+                    _checar(f'ia_nao_espiona_n{nivel}_rng{rng_valor}_c{idx}',
+                            decisao_a == decisao_b,
+                            f'A: {decisao_a} | B: {decisao_b}')
+    finally:
+        ia.secrets = original
+
+
 def rodar():
     """Executa todos os testes da Fase 59 e devolve True se OK."""
     _testar_observabilidade()
@@ -217,4 +312,5 @@ def rodar():
     _testar_ip_do_cliente()
     _testar_captcha_misconfig()
     _testar_limite_ip()
+    _testar_ia_nao_espiona()
     return True
