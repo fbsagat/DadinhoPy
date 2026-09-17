@@ -32,6 +32,11 @@ $cmdR = { param([string]$c) & ssh @sshBase $c; if ($LASTEXITCODE -ne 0) { exit $
 # arquivo da VPS, entao comparar depois daria sempre "inalterado" e o tunnel
 # nunca seria recriado. Guardado aqui para decidir o recreate no fim.
 $hashComposeRemotoAntes = (& ssh @sshBase "sudo md5sum /opt/dadinho/docker-compose.yml 2>/dev/null | cut -d' ' -f1").Trim()
+# Mesmo motivo para o nginx.conf: ele e bind-mount de arquivo unico. O tar
+# substitui o arquivo (novo inode), mas o container ja criado continua montado
+# no inode antigo — `up -d nginx` nao recria (a definicao do servico nao mudou)
+# e a config nova nunca entra em vigor. O hash decide o --force-recreate.
+$hashNginxRemotoAntes = (& ssh @sshBase "sudo md5sum /opt/dadinho/nginx/nginx.conf 2>/dev/null | cut -d' ' -f1").Trim()
 
 Write-Host "==> Copiando codigo para /opt/dadinho (tar com excludes) ..." -ForegroundColor Cyan
 # Exclui o que nao vai: VCS, ambiente local, deploy da Vercel e os arquivos
@@ -48,6 +53,17 @@ Write-Host "==> Rebuild da API (image dadinho-api) e do nginx ..." -ForegroundCo
 # Fase 61: `api` tem o `build: .`; api2/3/4 usam a MESMA image `dadinho-api`
 # (sem build próprio) — um build sobe as 4 réplicas.
 & $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx"
+
+# nginx.conf bind-mount de arquivo unico: so o --force-recreate re-resolve o
+# mount para o inode novo. Recreate apenas quando o conteudo mudou (evita
+# derrubar a borda a cada deploy em que so a API mudou).
+$hashNginxLocal = (Get-FileHash "$dirRepo\nginx\nginx.conf" -Algorithm MD5).Hash
+if ($hashNginxLocal -ne $hashNginxRemotoAntes) {
+    Write-Host "==> nginx.conf mudou: recriando nginx ..." -ForegroundColor Yellow
+    & $cmdR "cd /opt/dadinho && sudo docker compose up -d --force-recreate nginx"
+} else {
+    Write-Host "==> nginx.conf inalterado: nginx nao mexido." -ForegroundColor Green
+}
 
 # O tunnel so recria quando a definicao do servico mudou (docker-compose.yml).
 # O config.yml do ingress vive so na VPS e nunca vem do repo — mas o cloudflared
