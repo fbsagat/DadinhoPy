@@ -53,16 +53,22 @@ let chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
 // name="dadinho-api-url">` (injetado pelo servidor). Quando a API roda na VPS
 // separada do frontend, o io() conecta na origem dela; vazio = mesmo host.
 const api_url = (document.querySelector('meta[name="dadinho-api-url"]') || {}).content || '';
-// WebSocket primeiro: no serverless da Vercel o long-polling quebra (cada
-// request de poll pode cair numa instância sem a sessão Engine.IO e o cliente
-// entra em loop de reconexão). O polling fica só como fallback de rede.
+// WebSocket como transporte ÚNICO (Fase 66/E1, ADR-008): no serverless da
+// Vercel o long-polling quebra (cada request de poll pode cair numa instância
+// sem a sessão Engine.IO) e, na VPS multi-réplica, o polling pode ser
+// fragmentado entre réplicas quando o IP real muda no meio da conexão (rede
+// móvel/CGNAT) — a conexão nunca fecha e a tela "trava" sem erro. Com WS puro
+// a tentativa inteira é UM upgrade HTTP: uma única decisão de roteamento do
+// nginx, independente do sticky por IP. Redes que bloqueiam WS cru perdem o
+// fallback de polling — a falha vira um `connect_error` explícito (Fase 65/M1)
+// em vez de um hang silencioso.
 // Fase 59 (captcha no connect, Cloudflare Turnstile): quando o servidor injeta
 // <meta name="dadinho-turnstile-sitekey">, o connect é adiado até o token sair
 // (a API recusa o handshake sem ele). Sem a meta, nada muda.
 const captcha_sitekey = (document.querySelector('meta[name="dadinho-turnstile-sitekey"]') || {}).content || '';
 const socket = io(api_url || undefined, {
     autoConnect: !captcha_sitekey,
-    transports: ['websocket', 'polling'],
+    transports: ['websocket'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
 });
 
@@ -116,9 +122,26 @@ if (captcha_sitekey) {
 // automática repetiria o handshake num loop com o mesmo erro. Erro transitório
 // (queda de rede, réplica reiniciando, ping timeout) NÃO desconecta — o
 // socket.io continua tentando com backoff (o status_conexao sinaliza).
+//
+// Fase 65 (M1): erro genérico (sem `motivo`) também precisa sinalizar — antes
+// caía num `return` silencioso e a tela parecia 100% normal enquanto o socket
+// reconectava, daí o "trava sem erro" (ex.: handshake fragmentado entre
+// réplicas, Fase 64). `connect_error` dispara a cada tentativa de conexão que
+// falha (inclusive a primeira), então é o contador confiável: enquanto for
+// oscilação breve mostra "reconectando"; depois de `TENTATIVAS_SEM_CONEXAO`
+// falhas seguidas, vira um estado explícito de "sem conexão".
+const TENTATIVAS_SEM_CONEXAO = 5;
+let _tentativas_reconexao = 0;
+
 socket.on('connect_error', function (erro) {
     const dados = (erro && erro.data) || null;
     if (!dados || !dados.motivo || !dados.motivo.chave) {
+        _tentativas_reconexao += 1;
+        if (_tentativas_reconexao >= TENTATIVAS_SEM_CONEXAO) {
+            _atualizar_status_conexao('js.sem_conexao', 'text-danger');
+        } else {
+            _atualizar_status_conexao('js.reconectando', 'text-warning');
+        }
         return;
     }
     socket.disconnect();
@@ -482,13 +505,39 @@ function rastrear_funil(evento, dados) {
     } catch (e) { /* analytics nunca deve quebrar o jogo */ }
 }
 
+// Fase 65 (M2/M3): watchdog de resposta. `criar_sala`/`listar_partidas`
+// dependem da conexão viva; se a resposta não chega em `TEMPO_LIMITE_RESPOSTA_MS`
+// (handshake fragmentado, Fase 64), o usuário não via nada — o clique parecia
+// "travar". O watchdog avisa com opção de tentar de novo, mas NUNCA reemite
+// sozinho (se a resposta só estiver atrasada, reemitir duplicaria a ação).
+const TEMPO_LIMITE_RESPOSTA_MS = 6000;
+let _watchdog_criar_sala = null;
+let _watchdog_buscar = null;
+
+function _cancelar_watchdog(timer_id) {
+    if (timer_id !== null) {
+        clearTimeout(timer_id);
+    }
+    return null;
+}
+
 function criar_sala() {
     // Fase 9: o código é gerado no servidor (charset sem ambíguos + colisão);
     // ao receber 'sala_criada', o cliente navega para a sala criada.
     socket.emit('criar_sala');
+    _watchdog_criar_sala = _cancelar_watchdog(_watchdog_criar_sala);
+    _watchdog_criar_sala = setTimeout(function () {
+        _watchdog_criar_sala = null;
+        mostrar_alerta(t('msg.criar_sala_timeout'), 'confirmar').then(function (tentar) {
+            if (tentar) {
+                criar_sala();
+            }
+        });
+    }, TEMPO_LIMITE_RESPOSTA_MS);
 }
 
 socket.on('sala_criada', function (data) {
+    _watchdog_criar_sala = _cancelar_watchdog(_watchdog_criar_sala);
     if (data && data.sala) {
         rastrear_funil('sala_criada');
         ir_para_sala(data.sala);
@@ -588,6 +637,17 @@ function buscar_partidas() {
     };
     salvar_filtros_busca(filtros);
     socket.emit('listar_partidas', { filtros: filtros, sala_atual: sala_atual });
+    // Fase 65 (M3): mesma proteção do `criar_sala` — a busca depende da conexão
+    // e antes ficava em silêncio se a resposta não chegasse.
+    _watchdog_buscar = _cancelar_watchdog(_watchdog_buscar);
+    _watchdog_buscar = setTimeout(function () {
+        _watchdog_buscar = null;
+        mostrar_alerta(t('msg.buscar_timeout'), 'confirmar').then(function (tentar) {
+            if (tentar) {
+                buscar_partidas();
+            }
+        });
+    }, TEMPO_LIMITE_RESPOSTA_MS);
 }
 
 restaurar_filtros_busca();
@@ -598,6 +658,7 @@ function entrar_partida(codigo) {
 }
 
 socket.on('partidas_listadas', function (data) {
+    _watchdog_buscar = _cancelar_watchdog(_watchdog_buscar);
     const lista = document.getElementById('lista_partidas');
     lista.innerHTML = '';
     const partidas = data.partidas || [];
@@ -2119,12 +2180,17 @@ socket.on('retomar_negado', function (data) {
 });
 
 // Indicadores de conexão/reconexão (heartbeat visual).
-socket.on('connect', function () {
+function _atualizar_status_conexao(chave, classe) {
     const status = document.getElementById('status_conexao');
     if (status) {
-        status.textContent = t('js.conectado');
-        status.className = 'd-block mb-2 text-success';
+        status.textContent = t(chave);
+        status.className = 'd-block mb-2 ' + classe;
     }
+}
+
+socket.on('connect', function () {
+    _tentativas_reconexao = 0;
+    _atualizar_status_conexao('js.conectado', 'text-success');
     // Fase D2: reconnect com sid novo (morte de instância) ainda tem a chave
     // guardada — o placeholder foi criado com snapshot ADIADO (`tem_chave=1`);
     // rearmar `retomar_enviado` faz o `connect_start` seguinte reemitir a
@@ -2144,11 +2210,7 @@ socket.on('connect', function () {
 });
 
 socket.on('disconnect', function () {
-    const status = document.getElementById('status_conexao');
-    if (status) {
-        status.textContent = t('js.reconectando');
-        status.className = 'd-block mb-2 text-warning';
-    }
+    _atualizar_status_conexao('js.reconectando', 'text-warning');
 });
 
 socket.on("update_username", function (data) {

@@ -123,8 +123,9 @@ Causa: `gevent-websocket` instalado na imagem. Com ele presente o python-enginei
 deixa de usar o `simple-websocket` e passa a exigir `environ['wsgi.websocket']`,
 que só existe no worker `geventwebsocket.gunicorn.workers.GeventWebSocketWorker`
 — o Dockerfile usa o worker `gevent` puro, que não fornece essa chave. O cliente
-pede `transports: ['websocket','polling']` e o socket.io **não cai no polling**
-quando o WebSocket falha, então a conexão trava em loop de reconexão.
+pede `transports: ['websocket']` (Fase 66/ADR-008) e, quando o WebSocket falha,
+o socket.io **não tem fallback de polling** — a conexão trava em loop de
+reconexão (agora sinalizado pela Fase 65/M1).
 
 Correção: manter `gevent-websocket` **fora** de `requirements.txt` (o engineio
 usa o `simple-websocket`, que funciona com o worker `gevent`). A regressão está
@@ -245,6 +246,40 @@ evento suspeito.
 - **Logs de auditoria:** eventos suspeitos saem no stdout da API
   (`observabilidade.py`, JSON redigido): `docker compose logs api | grep -i
   suspeit`.
+
+### 9.1. Cliente "trava" ao criar sala / sticky por IP quebrado (Fase 64)
+
+Sintoma (relato original): em **celular**, clicar em "Criar sala" (ou "Buscar
+partidas") ocasionalmente não produz efeito nenhum — tela normal, sem erro no
+console. Causa suspeita: em rede móvel o `Cf-Connecting-Ip` pode mudar no meio
+de uma conexão (CGNAT da operadora, troca de torre, alternância wifi↔dados);
+com `hash $ip_real consistent;` (ADR-006), as requests de polling da MESMA
+tentativa de conexão caem em réplicas diferentes, que não compartilham a sessão
+Engine.IO — o handshake nunca fecha.
+
+**Assinatura no log (D1/D2):** o campo `upstream` (réplica que atendeu) varia
+entre requests próximas no tempo do MESMO `ip_real`.
+
+```bash
+# 1. Pegue o ip_real do cliente (log JSON do nginx) e veja a sequência.
+sudo docker compose logs --since 30m nginx | grep '"ip_real":"203.0.113.7"' | tail -40
+
+# 2. Mapeie o IP:porta do upstream para a réplica (o nome não vai no log).
+for c in dadinho-api dadinho-api-2 dadinho-api-3 dadinho-api-4; do
+  printf '%s %s\n' "$c" "$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$c"):8000"
+done
+```
+
+O que olhar: se `upstream` **muda** entre requests de `/socket.io/` separadas
+por poucos segundos para o mesmo `ip_real`, é o bug confirmado (Fase 66 corrige).
+Se `upstream` fica fixo e ainda assim trava, o problema é outro (timeout de
+handshake / réplica ruim — §5/§5.1).
+
+**Reprodução controlada (D3):** no Chrome DevTools com emulação mobile, use
+"Network Conditions" para simular latência/perda alta (isola timeout de
+handshake × roteamento) — e, se possível, alterne a rede do celular **wifi →
+dados móveis no meio do carregamento da página** (troca de IP de verdade). Antes
+da correção deve reproduzir o hang; depois não pode mais.
 
 ## 10. Custo / alertas disparando
 

@@ -96,7 +96,7 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 ## Deploy/entrypoint
 
 - `api/index.py` exporta `application = app.wsgi_app` (middleware Socket.IO); `vercel.json` usa builder `@vercel/python` com rota catch-all. `app.secret_key` vem de `DADINHO_SECRET_KEY` (fallback dev `supersecretkey`).
-- Transporte: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `true`; `=0` desliga o upgrade). O cliente pede `['websocket', 'polling']` (`static/script.js`) — Vercel suporta WebSocket nativamente desde jun/2026; o WS prende a conexão numa instância; o long-polling quebrava porque cada request de poll caía numa instância sem a sessão Engine.IO (`Invalid session`).
+- Transporte: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `true`; `=0` desliga o upgrade). O cliente pede `['websocket']` (transporte **único**, `static/script.js`; Fase 66/ADR-008) — Vercel suporta WebSocket nativamente desde jun/2026; o WS prende a conexão numa instância; o long-polling quebrava porque cada request de poll caía numa instância sem a sessão Engine.IO (`Invalid session`), e na VPS multi-réplica o polling fragmentava quando o IP real mudava no meio da conexão (rede móvel). O erro de WS agora é sinalizado ao usuário (Fase 65/M1).
 
 ## Deploy na VPS (Fase 46)
 

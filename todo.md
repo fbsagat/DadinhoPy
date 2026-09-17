@@ -983,3 +983,162 @@ Verificação:
 - Skills/ADRs/runbook são **texto**: a verificação é o cross-check acima + o
   teste manual de que eles respondem aos sintomas reais (rodar a triagem §3 numa
   VPS de verdade quando houver incidente).
+
+# TODO — Dadinho: bug crítico "criar sala trava no mobile" (Fases 64–66)
+
+Investigação a partir do relato: clique em "Criar sala" trava ocasionalmente, reproduzido
+em celular. Mesma convenção: `[ ]` pendente · `[x]` concluído · `[~]` em andamento.
+
+## Diagnóstico (leia antes de aplicar qualquer fix)
+
+**Hipótese principal, com alta confiança:** desde a Fase 61 / ADR-006
+(`docs/adr/006-gevent-4-replicas-sticky.md`), a API roda em 4 réplicas atrás do
+`nginx/nginx.conf`, roteadas por `upstream dadinho_api { hash $ip_real consistent; }`
+— necessário porque a sessão Engine.IO (handshake + polling + upgrade do
+WebSocket) vive só na memória de UMA réplica. O próprio ADR assume "o IP real é
+estável" como premissa da decisão.
+
+Em rede móvel essa premissa **não se sustenta**: o IP público visto pelo
+Cloudflare (`Cf-Connecting-Ip`) pode mudar no meio de uma conexão por CGNAT da
+operadora, troca de torre, ou alternância wifi↔dados. Quando isso acontece
+durante o handshake, requisições sequenciais da MESMA tentativa de conexão
+podem hashear para réplicas diferentes — que não compartilham a sessão Engine.IO
+entre si — e a conexão nunca fecha de fato.
+
+Isso é agravado por `static/script.js:119-126`
+(`socket.on('connect_error', ...)`): o handler só reage quando o servidor manda
+um `motivo`/`chave` explícito (recusa por captcha/limite de IP — Fase 59). Um
+erro de transporte genérico — exatamente o caso de handshake fragmentado entre
+réplicas — cai no `return` silencioso da linha 122: nenhuma atualização de
+`status_conexao`, nenhum alerta. O socket.io-client continua tentando sozinho
+(reconexão automática, backoff padrão), mas a tela parece 100% normal e o
+clique em "criar sala" não produz efeito visível nenhum — daí o "trava" sem
+erro no console. Explica tanto o "ocasionalmente" (só quando a rede do celular
+está instável naquele instante) quanto o "num celular" (troca de IP em rede
+móvel é comum; em wifi/desktop é raro).
+
+---
+
+## Fase 64 — Confirmar a hipótese antes de mexer em produção
+
+Objetivo: hoje não há como provar, só pelos logs atuais, que o handshake de um
+cliente específico está sendo fragmentado entre réplicas diferentes. Confirmar
+isso primeiro evita aplicar uma correção estrutural (Fase 66) às cegas.
+
+- [x] **D1 — Logar a réplica de destino**: adicionar `$upstream_addr` ao
+  `log_format dadinho_json` em `nginx/nginx.conf` (campo novo, ex.:
+  `"upstream":"$upstream_addr"`). Hoje o log já tem `ip_real`/`uri`/`status`,
+  mas não registra qual réplica (`api`/`api2`/`api3`/`api4`) atendeu cada
+  requisição.
+- [x] **D2 — Correlacionar no runbook**: em `docs/runbook.md`, seção 9 (Abuso/bot/
+  rate limit) ou uma nova subseção, documentar o comando de verificação:
+  `docker compose logs nginx | grep '"ip_real":"<ip-do-usuário>"'` e conferir se
+  o campo `upstream` varia entre requisições próximas no tempo (poucos
+  segundos) para o mesmo `ip_real` — isso é a assinatura do bug. Feito em §9.1
+  (inclui o map IP:porta → réplica via `docker inspect`).
+- [ ] **D3 — Reproduzir com throttling** (requer teste manual): no Chrome DevTools mobile emulation,
+  usar "Network Conditions" para simular perda de pacote/latência alta (não
+  reproduz troca de IP diretamente, mas ajuda a isolar se o problema é
+  timeout de handshake vs. roteamento) — e, se possível, testar trocando de
+  wifi para dados móveis no meio do carregamento da página (reproduz a troca
+  de IP de verdade).
+
+Verificação: com D1 em produção, pedir para o usuário que relatou o bug
+reproduzir de novo e, junto com o horário aproximado, localizar as linhas do
+log correspondentes — confirmar se `upstream` mudou entre requisições da mesma
+tentativa de conexão.
+
+---
+
+## Fase 65 — Mitigação imediata no cliente (sem mudar a infra)
+
+Objetivo: mesmo que a Fase 66 (correção estrutural) leve mais tempo pra validar
+com segurança, ninguém deveria ficar preso numa tela sem nenhum sinal de erro.
+Isso pode subir independente do diagnóstico da Fase 64.
+
+- [x] **M1 — `connect_error` genérico também sinaliza**: em
+  `static/script.js:119-126`, quando `erro` não tem `motivo.chave` (transporte
+  genérico, não recusa intencional), atualizar `status_conexao` para
+  "reconectando" (mesmo texto/classe já usados em `disconnect`, linha ~2153-2158)
+  em vez de retornar em silêncio. Contar tentativas consecutivas — implementado
+  contando no próprio `connect_error` (dispara a cada tentativa que falha,
+  inclusive a primeira; mais confiável que `socket.io.on('reconnect_attempt')`);
+  a partir de 5 tentativas sem sucesso, trocar a cor/texto para
+  algo mais explícito (ex.: "sem conexão — tentando reconectar") em vez do
+  "reconectando" indefinido de sempre.
+- [x] **M2 — Watchdog no `criar_sala`**: em `static/script.js:485-489`
+  (`function criar_sala()`), guardar o instante do emit; se `sala_criada` não
+  chegar em ~6s, mostrar um alerta (`mostrar_alerta`, já usado em outros
+  fluxos) oferecendo "Tentar de novo" — em vez de deixar o clique
+  silenciosamente sem efeito. Cuidado para não reemitir automaticamente sem
+  o usuário pedir (evita duplicar `criar_sala` se a resposta só está
+  atrasada, não perdida).
+- [x] **M3 — Mesma lógica para `listar_partidas`**: o evento de busca
+  (`socket.emit('listar_partidas', ...)`) tem exatamente o mesmo risco
+  (`evento_leitura`, mesma dependência de conexão) — vale o mesmo watchdog de
+  timeout, já que provavelmente trava pelo mesmo motivo se o usuário tentar
+  buscar em vez de criar.
+
+Verificação: em dev local, forçar um `connect_error` genérico (ex.: derrubar o
+servidor por alguns segundos com o cliente já carregado) e confirmar que
+`status_conexao` reflete o problema; testar `criar_sala` com o servidor
+propositalmente sem responder ao evento (comentar o `emit` no handler por um
+teste local) e confirmar que o alerta de timeout aparece em ~6s.
+
+---
+
+## Fase 66 — Correção estrutural do roteamento sticky
+
+Objetivo: resolver a causa raiz (premissa de IP estável não vale para clientes
+móveis), não só mascarar o sintoma. Duas opções, com trade-offs diferentes —
+decisão do mantenedor após ver os dados da Fase 64.
+
+- [x] **E1 — Opção A: WebSocket como transporte único** (`transports:
+  ['websocket']` em vez de `['websocket', 'polling']`, `static/script.js:65`).
+  Com WS puro, a conexão inteira é UM único upgrade HTTP — uma única decisão
+  de roteamento do nginx por tentativa de conexão, não uma sequência de
+  requisições de polling que podem hashear para réplicas diferentes entre si.
+  Isso torna o sticky-por-IP quase irrelevante para a correção (só passa a
+  importar pra distribuição de carga, não pra funcionar). Trade-off: redes que
+  bloqueiam WebSocket bruto (algumas corporativas/escolares, raramente
+  operadoras móveis) perdem o fallback de polling — mas hoje, com o roteamento
+  quebrando o polling de qualquer forma nesse cenário, o resultado prático já
+  é falha; a diferença é que viraria um `connect_error` explícito (pego pela
+  Fase 65/M1) em vez de um hang silencioso. **Escolhida pelo mantenedor** (A).
+- [x] **E2 — Opção B: sticky por cookie em vez de IP**. **Rejeitada** em favor
+  da Opção A (registrado no ADR-008): exigiria `withCredentials: true` no
+  cliente (cross-origin Vercel↔VPS), CORS com credentials e cookie
+  `SameSite=None; Secure` — mais partes móveis e risco para ganho marginal.
+  (Mantida descrita aqui caso o polling volte a ser necessário.)
+- [x] **E3 — Atualizar o ADR-006**: a premissa "IP real é estável" não vale
+  para clientes móveis. Seguindo a convenção de ADR imutável (README), a
+  revisão virou **ADR-008** (`docs/adr/008-websocket-unico-transporte.md`),
+  referenciado a partir do ADR-006 (status `Aceito (revisado por ADR-008)`) e do
+  índice.
+
+Verificação: `python verificar.py` continua verde (mudança é só transporte/
+proxy, não lógica de jogo); testar em produção (ou staging) alternando a rede
+do celular entre wifi e dados móveis durante o carregamento da página — antes
+da correção deveria reproduzir o hang (confirmando o diagnóstico da Fase 64);
+depois, a conexão deve se recuperar (Opção A: reconectar limpo; Opção B:
+manter a sessão mesmo com o IP mudando). Repetir o teste de `docker compose
+logs nginx` da Fase 64/D2 e confirmar que `upstream` não varia mais dentro de
+uma mesma tentativa de conexão.
+
+## Fase 64–66 — estado da implementação (2026-09-17)
+
+- **Local (feito):** `python verificar.py` 100% verde (38s) — inclui `node
+  --check static/script.js` + `i18n.js`, cobertura i18n das 3 chaves novas
+  (`js.sem_conexao`, `msg.criar_sala_timeout`, `msg.buscar_timeout`) e a
+  integração completa. `nginx -t` **não** rodou localmente (daemon do Docker
+  desligado na máquina); a mudança no `log_format` é aditiva (um campo
+  `$upstream_addr`) e a validação fica no deploy da VPS (`docs/runbook.md` §4).
+- **Pendente (produção/manual):** D3 (reprodução com throttling/troca de rede);
+  pedir ao usuário que relatou o bug para reproduzir com D1 em produção e
+  correlacionar o `upstream` (§9.1 do runbook); retestar no celular alternando
+  wifi↔dados; `docker compose logs nginx` confirmando `upstream` estável por
+  tentativa de conexão; `docker compose up -d --build api api2 api3 api4 nginx`
+  para aplicar o `log_format` novo.
+- **Fase 66:** Opção A adotada pelo mantenedor (`transports: ['websocket']`),
+  registrada no ADR-008 (ADR-006 marcado como revisado). Nenhuma mudança no
+  nginx além do log; o sticky por IP segue só para distribuição de carga.

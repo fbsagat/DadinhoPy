@@ -25,8 +25,9 @@ sem conhecer o motivo original.
 | [003](003-nginx-borda-rate-limit-ip-real.md) | Nginx como borda na VPS com rate limit por IP real | Aceito |
 | [004](004-anti-fraude-e-captcha-opt-in.md) | Anti-fraude heurístico + observabilidade; captcha opt-in | Aceito |
 | [005](005-performance-store-e-rejeicao-pool-ia.md) | Performance do store (cache/batch/compressão/LRU) e rejeição do pool de threads da IA | Aceito |
-| [006](006-gevent-4-replicas-sticky.md) | Múltiplos workers cooperativos: gevent + 4 réplicas + sticky por IP | Aceito |
+| [006](006-gevent-4-replicas-sticky.md) | Múltiplos workers cooperativos: gevent + 4 réplicas + sticky por IP | Aceito (revisado por ADR-008) |
 | [007](007-redis-local-spof-adiado.md) | Redis local é SPOF documentado; HA adiado | Adiado |
+| [008](008-websocket-unico-transporte.md) | WebSocket como transporte único (revisa o sticky por IP do ADR-006) | Aceito |
 
 ## Template
 

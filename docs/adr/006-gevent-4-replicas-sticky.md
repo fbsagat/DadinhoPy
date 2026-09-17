@@ -1,6 +1,6 @@
 # ADR-006 — Múltiplos workers cooperativos: gevent + 4 réplicas + sticky por IP
 
-- **Status:** Aceito
+- **Status:** Aceito (revisado por ADR-008)
 - **Contexto:** Fase 61 do `todo.md` (substitui o `gthread -w 1` de 100 threads da Fase 46)
 - **Decisores:** mantenedor
 
