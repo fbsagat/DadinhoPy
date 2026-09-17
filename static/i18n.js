@@ -349,7 +349,7 @@ I18N_DICIONARIOS.en = {
     'msg.conf.qtd.zero': 'there was none',
     'msg.conf.qtd.um': 'there was {qtd}',
     'msg.conf.qtd.muitos': 'there were {qtd}',
-    'msg.conf.saiu': " {nome} has no dice left and left the game 🤣🤣🤣",
+    'msg.conf.saiu': " {nome} has no dice left and left the game",
 
     // Faces do dado
     'face.1.singular': 'ace',
@@ -780,7 +780,7 @@ I18N_DICIONARIOS['pt-BR'] = {
     'msg.conf.qtd.zero': 'não havia nenhum',
     'msg.conf.qtd.um': 'havia {qtd}',
     'msg.conf.qtd.muitos': 'haviam {qtd}',
-    'msg.conf.saiu': ' {nome} não tem mais dados e saiu da partida 🤣🤣🤣',
+    'msg.conf.saiu': ' {nome} não tem mais dados e saiu da partida',
 
     'face.1.singular': 'ás',
     'face.1.plural': 'ases',
@@ -1200,7 +1200,7 @@ I18N_DICIONARIOS.es = {
     'msg.conf.qtd.zero': 'no había ninguno',
     'msg.conf.qtd.um': 'había {qtd}',
     'msg.conf.qtd.muitos': 'había {qtd}',
-    'msg.conf.saiu': ' {nome} se quedó sin dados y salió de la partida 🤣🤣🤣',
+    'msg.conf.saiu': ' {nome} se quedó sin dados y salió de la partida',
 
     'face.1.singular': 'as',
     'face.1.plural': 'ases',
@@ -1620,7 +1620,7 @@ I18N_DICIONARIOS.fr = {
     'msg.conf.qtd.zero': "il n'y en avait aucun",
     'msg.conf.qtd.um': 'il y en avait {qtd}',
     'msg.conf.qtd.muitos': 'il y en avait {qtd}',
-    'msg.conf.saiu': " {nome} n'a plus de dés et quitte la partie 🤣🤣🤣",
+    'msg.conf.saiu': " {nome} n'a plus de dés et quitte la partie",
 
     'face.1.singular': 'as',
     'face.1.plural': 'as',
@@ -2040,7 +2040,7 @@ I18N_DICIONARIOS['zh-CN'] = {
     'msg.conf.qtd.zero': '一颗都没有',
     'msg.conf.qtd.um': '只有 {qtd} 颗',
     'msg.conf.qtd.muitos': '只有 {qtd} 颗',
-    'msg.conf.saiu': ' {nome} 没有骰子了，退出对局 🤣🤣🤣',
+    'msg.conf.saiu': ' {nome} 没有骰子了，退出对局',
 
     'face.1.singular': '一点',
     'face.1.plural': '一点',

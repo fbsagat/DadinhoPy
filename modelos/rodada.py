@@ -262,7 +262,7 @@ class Rodada:
             txt_add_1 = ''
             if jogador.dados_qtd == 1:
                 saiu = perdedor
-                txt_add_1 = f' {perdedor} não tem mais dados e saiu da partida 🤣🤣🤣'
+                txt_add_1 = f' {perdedor} não tem mais dados e saiu da partida'
 
             txt = (
                 f'{vencedor} apostou {ultimo_turno.dado_qtd} {faces_dado_nomes[ultimo_turno.dado_face]} e '
@@ -276,7 +276,7 @@ class Rodada:
             txt_add_1 = ''
             if ultimo_turno.do_jogador.dados_qtd == 1:
                 saiu = perdedor
-                txt_add_1 = f' {perdedor} não tem mais dados e saiu da partida 🤣🤣🤣'
+                txt_add_1 = f' {perdedor} não tem mais dados e saiu da partida'
 
             quantidades = {
                 0: f"não havia nenhum",
