@@ -1644,6 +1644,10 @@ def jogar_dados(dados, lobby, jogador):
         # vez de abortar em silêncio — destrava a rolagem (Fase 22).
         emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
              to=jogador.client_id, ignore_queue=True)
+        # Fase 72: repõe também a pill de confirmação da rolagem. Só o primeiro
+        # branch a emitia; sem isto, um retry de resultado perdido devolvia os
+        # dados mas deixava o status desatualizado (pill "não definida").
+        emitir_status_rolagem(lobby)
         return
     jogador.joguei_dados = True
     # Fase 22: mostra em tempo real quem já rolou e quem ainda falta.

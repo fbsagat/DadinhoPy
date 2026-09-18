@@ -1602,6 +1602,39 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
 let rolagem_pedida = false;
 let rolagem_animada = false;
 
+// Fase 72: watchdog da rolagem — fecha o deadlock do "Jogar dados". O servidor
+// é idempotente no re-clique (app.py:1641-1647), mas o cliente trava o emit e
+// desativa o botão (ver `jogar_dados`): se o `jogar_dados` se perde no
+// transporte/cooldown/lock, o jogador fica preso até o `autojogar`. Este timer
+// devolve o botão após alguns segundos, no mesmo espírito de
+// `aposta`/`desconfiar`/OK, que nunca desativam por causa de evento perdido.
+// `jogar_dados_resultado` e `construtor_dados` cancelam o timer.
+const ROLAGEM_RETRY_MS = 6000;
+let timer_rolagem_retry = null;
+
+function cancelar_retry_rolagem() {
+    if (timer_rolagem_retry !== null) {
+        clearTimeout(timer_rolagem_retry);
+        timer_rolagem_retry = null;
+    }
+}
+
+function armar_retry_rolagem() {
+    cancelar_retry_rolagem();
+    timer_rolagem_retry = setTimeout(function () {
+        timer_rolagem_retry = null;
+        // Resultado chegou (rolagem_animada) — nada a destravar.
+        if (rolagem_animada) {
+            return;
+        }
+        rolagem_pedida = false;
+        const botao = document.getElementById('dadobotao');
+        if (botao) {
+            botao.disabled = false;
+        }
+    }, ROLAGEM_RETRY_MS);
+}
+
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
     const espectador = data.espectador;
@@ -1611,6 +1644,7 @@ socket.on('construtor_dados', function (data) {
     // Nova rodada/partida: rearma a rolagem do cliente.
     rolagem_pedida = false;
     rolagem_animada = false;
+    cancelar_retry_rolagem();
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
     tela_jogar_dados.innerHTML = ""
@@ -2484,6 +2518,7 @@ socket.on("update_username", function (data) {
 
 socket.on("jogar_dados_resultado", function (data) {
     parar_timer_jogada(); // Fase 21: já rolou (manual ou automático), zera o contador.
+    cancelar_retry_rolagem(); // Fase 72: resultado chegou, desarma o watchdog.
     // A rolagem já foi feita (manual, `autojogar` ou reenvio idempotente):
     // trava o botão "Jogar dados" desta rodada para o jogador não clicar de novo.
     desativar_botao_dados();
@@ -4026,13 +4061,17 @@ function jogar_dados() {
     // Fase 55: trava o emit no cliente para ESTA rodada — um segundo clique
     // não re-dispara o `jogar_dados` (que parecia rolar de novo). O servidor
     // continua idempotente para o caso de o evento se perder (cooldown/rede);
-    // o `construtor_dados` rearma a flag a cada rodada.
+    // o `construtor_dados` rearma a flag a cada rodada e o watchdog da Fase 72
+    // destrava o botão se o resultado não chegar.
     if (rolagem_pedida) {
         return;
     }
     rolagem_pedida = true;
     desativar_botao_dados();
     socket.emit('jogar_dados', { chave: chave_secreta });
+    // Fase 72: se o resultado não chegar, devolve o botão para o jogador
+    // reenviar — o servidor deduplica e reentrega dados + pill.
+    armar_retry_rolagem();
     garantir_contexto_audio();
 }
 
