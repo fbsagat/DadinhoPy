@@ -561,11 +561,18 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=Tru
                     # ResponseError) herdam de RedisError, não de OSError; a
                     # classe entra na tupla lazy (`store.erros_de_rede`) para não
                     # importar o pacote no boot da Vercel.
-                    store.erros_de_rede()):
+                    store.erros_de_rede()) as erro:
                 # Aborto no meio de uma mutação: o objeto vivo do cache de re-sync
                 # pode ter sido poluído — descarta para a próxima leitura recarregar.
                 if sala_id is not None:
                     store.invalidar_cache_sala(sala_id)
+                # Fase 73: o aborto silencioso do lock distribuído (ex.:
+                # `retomar_identidade` logo após o refresh, quando o disconnect do
+                # socket antigo ainda segura o lock) deixava o cliente preso sem
+                # snapshot. Logar com o nome do handler dá a dimensão do problema.
+                observabilidade.log_redigido(
+                    evento='handler_abortado', handler=getattr(func, '__name__', ''),
+                    client_id=client_id, sala_id=sala_id, erro=type(erro).__name__)
                 return
         return wrapper
     if func is not None:
@@ -918,7 +925,7 @@ def handle_connect():
                 if ia.processar(lobby):
                     salvar_sala(lobby)
         except (store.TravaIndisponivel, store.ConflitoDeEstado, store.erros_de_rede(),
-                OSError, http.client.HTTPException):
+                OSError, http.client.HTTPException) as erro:
             # Lock distribuído ocupado/indisponível, save stale (Fase 52), ou
             # falha do Redis local da VPS (Fase 46): aborta o connect. O cliente
             # reconecta com backoff e o heartbeat re-sincroniza da mesma forma
@@ -926,6 +933,14 @@ def handle_connect():
             # Fase 60 (P2/P3): o aborto pode ter deixado caches/estado em processo
             # inconsistentes — descarta para a próxima leitura recarregar fresco.
             store.invalidar_cache_sala(sala_id)
+            # Fase 73: sem log, o aborto era invisível — impossível distinguir a
+            # lentidão do refresh (contenda de lock) de um cold start. O
+            # `connect_start` não sai, mas o socket fica conectado; o watchdog do
+            # cliente derruba/reabre a conexão. Estes campos deixam contar a
+            # frequência no `docker logs`.
+            observabilidade.log_redigido(
+                evento='connect_abortado', client_id=client_id, sala_id=sala_id,
+                erro=type(erro).__name__)
             return
 
 

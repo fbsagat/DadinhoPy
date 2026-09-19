@@ -882,6 +882,10 @@ socket.on('partidas_listadas', function (data) {
 });
 
 socket.on('sala_cheia', function () {
+    // Fase 73: resposta terminal do connect (sem `connect_start`) — desarma o
+    // watchdog antes de criar a sala nova.
+    _watchdog_connect_start = _cancelar_watchdog(_watchdog_connect_start);
+    _watchdog_connect_tentativas = 0;
     // Sala pedida lotada: em vez de travar no alerta, cria uma sala nova.
     mostrar_alerta(t('msg.sala_cheia'), 'aviso')
         .then(() => criar_sala());
@@ -2358,6 +2362,9 @@ socket.on("connect_start", function (data) {
     // Fase D3: registra a conexão atendida — o `connect` local pode chegar
     // depois (ver a guarda no handler de `connect`).
     sid_ultimo_connect_start = socket.id;
+    // Fase 73: o handshake desta conexão andou — desarma o watchdog (o
+    // contador só zera quando a identidade é confirmada, abaixo).
+    _watchdog_connect_start = _cancelar_watchdog(_watchdog_connect_start);
     // Facilidade: nova conexão, a config salva pode ser reaplicada numa sala nova.
     _config_local_aplicada = false;
     // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
@@ -2401,14 +2408,22 @@ socket.on("connect_start", function (data) {
     if (retomar_enviado) {
         // Segundo connect_start (pós-retomada): chave_secreta já é a real.
         chave_confirmada = true;
+        // Fase 73: identidade confirmada — zera as tentativas do watchdog.
+        _watchdog_connect_tentativas = 0;
     } else if (chave_resumo && data && data.sala) {
         retomar_enviado = true;
         // Placeholder: chave_secreta é temporária, ação mutável agora falharia.
         chave_confirmada = false;
         socket.emit('retomar_identidade', { chave: chave_resumo });
+        // Fase 73: o primeiro `connect_start` é do placeholder — a identidade
+        // real e o snapshot só vêm no segundo. Se a retomada abortar em silêncio,
+        // o watchdog reabre a conexão (o contador NÃO zera aqui, senão o loop
+        // placeholder→aborto nunca atingiria o teto).
+        _armar_watchdog_connect_start();
     } else {
         // Sem retomada (sala nova / home): a chave já corresponde ao servidor.
         chave_confirmada = true;
+        _watchdog_connect_tentativas = 0;
     }
     const textInput = document.getElementById("apelido");
     const botaapelido = document.getElementById('botapel');
@@ -2427,6 +2442,10 @@ socket.on("connect_start", function (data) {
 // Fase D2: `chave_resumo` passa a apontar para a chave do placeholder, para um
 // reconnect com sid novo (morte de instância) retomar a identidade correta.
 socket.on('retomar_negado', function (data) {
+    // Fase 73: o servidor já reemitiu o snapshot do placeholder — a tela monta,
+    // não precisa reabrir a conexão.
+    _watchdog_connect_start = _cancelar_watchdog(_watchdog_connect_start);
+    _watchdog_connect_tentativas = 0;
     // Fase 30: o motivo explica por que a retomada falhou (vaga perdida por
     // inatividade nesta sala vs. sessão de outra sala).
     const motivo = (data && data.motivo && data.motivo.chave)
@@ -2451,6 +2470,40 @@ function _atualizar_status_conexao(chave, classe) {
     }
 }
 
+// Fase 73: watchdog do handshake da sala. `handle_connect` e
+// `retomar_identidade` abortam em SILÊNCIO quando o lock distribuído está tomado
+// (`TravaIndisponivel`) ou o save fica stale (`ConflitoDeEstado`): o socket segue
+// CONECTADO, mas o `connect_start` nunca chega e a sala não monta. Sem isto, a
+// recuperação dependia do ping timeout do socket.io (~20s+) ou de um reload
+// manual — era a lentidão percebida ao dar refresh numa sala. Aqui, se o
+// `connect_start` não chega em `TEMPO_LIMITE_CONNECT_MS`, a conexão é derrubada e
+// reaberta (mesmo efeito de um F5, sem a espera). Limitado a
+// `MAX_TENTATIVAS_WATCHDOG_CONNECT` para não martelar o servidor; depois disso o
+// status vira "sem conexão" (reabrir a aba/voltar do background reconecta).
+const TEMPO_LIMITE_CONNECT_MS = 9000;
+const MAX_TENTATIVAS_WATCHDOG_CONNECT = 4;
+let _watchdog_connect_start = null;
+let _watchdog_connect_tentativas = 0;
+
+function _armar_watchdog_connect_start() {
+    _watchdog_connect_start = _cancelar_watchdog(_watchdog_connect_start);
+    _watchdog_connect_start = setTimeout(function () {
+        _watchdog_connect_start = null;
+        if (_conexao_recusada || !socket.connected) {
+            return;
+        }
+        if (_watchdog_connect_tentativas >= MAX_TENTATIVAS_WATCHDOG_CONNECT) {
+            socket.disconnect();
+            _atualizar_status_conexao('js.sem_conexao', 'text-danger');
+            return;
+        }
+        _watchdog_connect_tentativas += 1;
+        _atualizar_status_conexao('js.reconectando', 'text-warning');
+        socket.disconnect();
+        socket.connect();
+    }, TEMPO_LIMITE_CONNECT_MS);
+}
+
 socket.on('connect', function () {
     _tentativas_reconexao = 0;
     _conexao_recusada = false;
@@ -2470,6 +2523,9 @@ socket.on('connect', function () {
         retomar_enviado = false;
         // Segura ações mutáveis até o connect_start seguinte validar a chave.
         chave_confirmada = false;
+        // Fase 73: conexão nova — se o `connect_start` não chegar (connect
+        // abortado no servidor), o watchdog derruba/reabre a conexão.
+        _armar_watchdog_connect_start();
     }
 });
 

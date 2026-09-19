@@ -220,6 +220,30 @@ Sintoma: uma sala específica não evolui; logs com `ConflitoDeEstado` ou
   **Não** edite o blob à mão — é serialização de `Lobby` (ADR-005); uma sala
   quebrada deve ser descartada (`del`) e recriada, nunca "consertada".
 
+### 8.1. Refresh lento numa sala (Fase 73)
+
+Sintoma: dar F5 numa sala demora (alguns segundos a dezenas) mas a tela volta;
+abrir a home numa aba nova é rápido. O refresh é o único fluxo com **dois
+round-trips** (`handle_connect` placeholder + `retomar_identidade`), cada um com
+lock + leitura fresca. Quando o `disconnect` do socket antigo (não fechado no
+unload — `closeOnBeforeunload:false`, Fase 68) ainda segura o lock, o handler
+novo aborta e **fica conectado sem `connect_start`**.
+
+- **Confirmar a causa nos logs da API** (eventos novos, JSON):
+  ```bash
+  sudo docker compose logs --tail=500 api | grep -E 'connect_abortado|handler_abortado'
+  ```
+  O campo `erro` diz a classe (`TravaIndisponivel` = contenda de lock,
+  `ConflitoDeEstado` = save stale, `ConnectionError`/`TimeoutError` = Redis).
+  Muitos `handler_abortado` com `handler:"retomar_identidade"` logo após
+  refresh = a hipótese de contenda. Se não há aborts, o atraso é rede/cold start.
+- **Cliente:** desde a Fase 73 há watchdog de `connect_start` (`script.js`): sem
+  resposta em ~9s ele derruba/reabre a conexão (até 4 tentativas, depois mostra
+  "sem conexão"). Se o usuário ainda relata demora, veja no DevTools a contagem
+  de `connect_error` entre o F5 e a volta.
+- **Não** aumentar `TRAVA_TENTATIVAS` às cegas: contenda alta indica que o
+  `ia.processar`/save está segurando o lock por muito tempo (ver ADR-005).
+
 ## 9. Abuso / bot / rate limit
 
 Sintoma: usuários legítimos com erro 5xx ao conectar; pico de conexões; logs de
