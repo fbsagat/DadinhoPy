@@ -27,6 +27,7 @@ sempre pública — aparece na tela pra todo mundo o jogo inteiro.
 """
 
 import math
+import random
 import secrets
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -85,9 +86,10 @@ IMPULSO_CORAGEM_NATURAL = 0.35
 PESO_MEDO_CORAGEM = 0.35
 AJUSTE_PISO_MAXIMO = 0.15
 
-# Apelidos dos bots: sorteados a cada criação, misturando designações
-# robóticas puras com nomes humanos "robotizados" (prefixo/sufixo/leet).
-# A unicidade fica a cargo de Lobby.verificar_apelido.
+# Apelidos dos bots: misturam designações robóticas puras com nomes humanos
+# "robotizados" (prefixo/sufixo/leet). As listas abaixo são só a MATÉRIA-PRIMA:
+# o que vai para o jogo é o POOL, montado uma vez no import e já podado no
+# limite de apelido. A unicidade fica a cargo de `nome_livre`.
 NOMES_ROBOTICOS = [
     'Chip', 'Bolt', 'Neo', 'Zeta', 'Vex', 'Kilo', 'Orb', 'Pino', 'Byte',
     'Hex', 'Volt', 'Nix', 'Zen', 'Dado', 'Asimo', 'Teco', 'Bino',
@@ -108,30 +110,102 @@ SUFIXOS_HIBRIDOS = ['Bot', '-9000', '.exe', ' Tron', '-X', ' 2.0', 'Tech', '-Byt
 
 _TABELA_LEET = str.maketrans('aAeEiIoOsS', '4433110055')
 
+# Marcador do bot: faz parte do apelido guardado (é o que o narrador usa para
+# saber quem é máquina) e come orçamento. Dos 8 caracteres, 2 são do marcador
+# ('🤖' + espaço) e sobram 6 para o nome em si — por isso o sabor híbrido rende
+# pouco aqui ('Robô Ana' passaria de 8) e o pool pende para as designações
+# robóticas.
+MARCADOR_IA = '🤖 '
+ORCAMENTO_NOME = funcoes_gerais.LIMITE_APELIDO - len(MARCADOR_IA)
 
-def _nome_robotico():
-    """Nome puramente robótico: designação (ex.: 'BOT-42') ou apelido avulso."""
-    if secrets.randbelow(2):
-        prefixo = secrets.choice(PREFIXOS_ROBO)
-        return f"{prefixo}-{secrets.randbelow(99) + 1:02d}"
-    return secrets.choice(NOMES_ROBOTICOS)
+
+def _montar_pool():
+    """
+    Pool de apelidos de bot que JÁ cabem em `funcoes_gerais.LIMITE_APELIDO`.
+
+    O corte é por construção: cada lista é filtrada pelo orçamento aqui no
+    import, e nunca mais em runtime. O caminho anterior compunha o nome sorteando
+    as partes uma a uma e 36% dos resultados nasciam acima do limite — sem forma
+    de corrigir, a não ser jogando fora o nome e sorteando outro.
+
+    Cada entrada sai com o marcador e é o apelido COMPLETO que vai para o
+    Jogador, o que faz a checagem de unicidade uma comparação direta.
+    """
+    nomes = []
+    for nome in NOMES_ROBOTICOS:
+        if len(nome) <= ORCAMENTO_NOME:
+            nomes.append(nome)
+    for prefixo in PREFIXOS_ROBO:
+        # Designação 'BOT-42': 1 dígito com prefixo de 3, 2 dígitos com prefixo
+        # de 2. `10 ** digitos` (e não `+ 1`) porque o número é preenchido com
+        # zeros à esquerda — `100` viraria um terceiro dígito e estouraria o
+        # orçamento sem o corte acima.
+        for digitos in (1, 2):
+            if len(prefixo) + 1 + digitos > ORCAMENTO_NOME:
+                continue
+            for numero in range(1, 10 ** digitos):
+                nomes.append(f"{prefixo}-{numero:0{digitos}d}")
+    for nome in NOMES_HUMANOS:
+        if len(nome) <= ORCAMENTO_NOME:
+            nomes.append(nome.translate(_TABELA_LEET))  # 'Ana' -> '4n4'
+        for prefixo in PREFIXOS_HIBRIDOS:
+            if len(prefixo) + 1 + len(nome) <= ORCAMENTO_NOME:
+                nomes.append(f"{prefixo} {nome}")
+        for sufixo in SUFIXOS_HIBRIDOS:
+            if len(nome) + len(sufixo) <= ORCAMENTO_NOME:
+                nomes.append(f"{nome}{sufixo}")
+    # Deduplica mantendo a ordem e embaralha: o sorteio de `nome_livre` caminha
+    # índices consecutivos do pool, e sem o embaralhamento duas IAs da mesma
+    # sala sairiam com 'XJ-42' e 'XJ-43' — nomes vizinhos na lista, nomes
+    # quase iguais na tela. A semente é fixa: o pool precisa ser o mesmo em
+    # todas as instâncias, não um sorteio novo a cada boot.
+    unicos = list(dict.fromkeys(nomes))
+    random.Random('dadinho:pool:nomes').shuffle(unicos)
+    return tuple(f"{MARCADOR_IA}{nome}" for nome in unicos)
 
 
-def _nome_hibrido():
-    """Nome humano robotizado (ex.: 'Robô Ana', 'Lucas.exe', 'C4rl4')."""
-    nome = secrets.choice(NOMES_HUMANOS)
-    estilo = secrets.randbelow(3)
-    if estilo == 0:
-        return f"{secrets.choice(PREFIXOS_HIBRIDOS)} {nome}"
-    if estilo == 1:
-        return f"{nome}{secrets.choice(SUFIXOS_HIBRIDOS)}"
-    return nome.translate(_TABELA_LEET)
+POOL = _montar_pool()
 
 
 def gerar_nome():
-    """Apelido aleatório de bot (robótico ou híbrido), já com o marcador 🤖."""
-    apelido = _nome_robotico() if secrets.randbelow(2) else _nome_hibrido()
-    return f"🤖 {apelido}"
+    """Sorteia um apelido de bot no pool (sempre dentro do limite, sem retry)."""
+    return POOL[secrets.randbelow(len(POOL))]
+
+
+def _nomes_em_uso(lobby):
+    """Set dos apelidos ocupados na sala (jogadores + espectadores)."""
+    return ({jogador.username for jogador in lobby.jogadores if jogador.username}
+            | {espectador.username for espectador in lobby.espectadores
+               if espectador.username})
+
+
+def nome_livre(lobby, apelido=None):
+    """
+    Apelido de bot que é único na sala e cabe no limite — sem busca.
+
+    O candidato é conferido contra um `set` montado UMA vez e, se estiver
+    ocupado, o sorteio caminha o pool a partir de um índice aleatório. Como o
+    pool é maior que a sala, ele sempre acha um livre: são poucas conferências
+    de `set` numa lista com dezenas de itens, não varredura de nome em nome.
+    No caminho normal o laço sai no primeiro passo.
+
+    Não existe sufixo '_1' para bot: ele só estouraria o limite (o
+    `Lobby.verificar_apelido` dos humanos cresce o nome sem teto, mas para eles
+    os 8 caracteres já vêm garantidos na validação do apelido).
+    """
+    em_uso = _nomes_em_uso(lobby)
+    inicio = secrets.randbelow(len(POOL))
+    candidato = apelido
+    for passo in range(len(POOL)):
+        if candidato is None:
+            candidato = POOL[(inicio + passo) % len(POOL)]
+        if candidato not in em_uso:
+            return candidato
+        candidato = None  # ocupado: volta a sortear a partir do índice
+    # Pool inteiro ocupado é impossível (verificar.py garante pool > sala), mas
+    # devolve o último candidato em vez de None — `None` travaria `pode_iniciar`
+    # em `sem_apelido`.
+    return candidato
 
 
 def sorteiar_personalidade(jogador):
@@ -162,7 +236,7 @@ def adicionar_bots(lobby, nivel, quantidade):
     for _ in range(quantidade):
         if len(lobby.jogadores) >= limite:
             break
-        username = lobby.verificar_apelido(gerar_nome())
+        username = nome_livre(lobby)
         jogador = Jogador.criar_ia(nivel, username)
         lobby.adicionar_jogador(jogador)
         criados.append(jogador)

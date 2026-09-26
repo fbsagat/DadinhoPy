@@ -368,6 +368,56 @@ def verificar_tema():
 
 
 # ---------------------------------------------------------------------------
+# 4c) apelido de IA: pool podado no limite, único e maior que a sala
+# ---------------------------------------------------------------------------
+def verificar_nomes_ia():
+    print("4c) pool de apelidos de IA (limite de 8 caracteres)")
+    import ia
+    import funcoes_gerais
+    from modelos.lobby import MAX_JOGADORES, Lobby
+    from modelos.jogador import Jogador
+
+    limite = funcoes_gerais.LIMITE_APELIDO
+    # O caminho antigo compunha o nome em runtime e 36% saíam com 9+ caracteres
+    # (máx. 14). O pool é podado no import, então a invariante é do CONJUNTO:
+    # se alguém mexer nas listas de matéria-prima, o erro aparece aqui.
+    estourados = [nome for nome in ia.POOL if len(nome) > limite]
+    _checar(f"todo apelido do pool cabe em {limite}", not estourados,
+            f"{len(estourados)} estourado(s): {estourados[:5]}")
+    _checar("pool sem entradas repetidas", len(set(ia.POOL)) == len(ia.POOL),
+            f"{len(ia.POOL)} entradas, {len(set(ia.POOL))} distintas")
+    _checar("todo apelido do pool traz o marcador 🤖",
+            all(nome.startswith(ia.MARCADOR_IA) for nome in ia.POOL), "")
+
+    # `nome_livre` só acha nome livre se o pool for maior que a sala: é o que
+    # garante o retorno em caminho finito e o que impede um bot sem apelido
+    # (que trava `pode_iniciar` em `sem_apelido`).
+    maior_sala = MAX_JOGADORES + funcoes_gerais.MAX_ESPECTADORES
+    _checar(f"pool maior que a sala ({len(ia.POOL)} > {maior_sala})",
+            len(ia.POOL) > maior_sala, f"pool com {len(ia.POOL)} entradas")
+
+    lobby = Lobby(sala_id="nomes", lobby_numero=1)
+    # Sala lotada de bots: cada um tem que sair com nome próprio, dentro do
+    # limite — é o caminho que `adicionar_bots` percorre de verdade.
+    for _ in range(MAX_JOGADORES):
+        jogador = Jogador.criar_ia(3, ia.nome_livre(lobby))
+        lobby.adicionar_jogador(jogador)
+    apelidos = [jogador.username for jogador in lobby.jogadores]
+    _checar(f"{MAX_JOGADORES} bots na sala -> {MAX_JOGADORES} apelidos distintos",
+            len(set(apelidos)) == len(apelidos), str(apelidos))
+    _checar(f"{MAX_JOGADORES} bots na sala -> todo apelido no limite",
+            all(isinstance(nome, str) and 0 < len(nome) <= limite
+                for nome in apelidos), str(apelidos))
+    # Nome Explicitamente ocupado: `nome_livre` pula e devolve outro do pool.
+    ocupado = lobby.jogadores[0].username
+    _checar("apelido ocupado -> devolve outro do pool",
+            ia.nome_livre(lobby, ocupado) != ocupado, "")
+    # `nome_livre` sem candidato também nunca devolve `None`.
+    _checar("nunca devolve None (bot sem apelido trava a partida)",
+            all(ia.nome_livre(lobby) is not None for _ in range(50)), "")
+
+
+# ---------------------------------------------------------------------------
 # 5) Integração (Fases 6 e 7)
 # ---------------------------------------------------------------------------
 
@@ -388,6 +438,7 @@ def main():
     verificar_gevent()
     verificar_roundtrip()
     verificar_tema()
+    verificar_nomes_ia()
     verificar_integracao()
     verificar_cross_instance()
     verificar_anti_fraude()

@@ -12,6 +12,11 @@ from modelos.partida import Partida
 from modelos.rodada import Rodada
 from modelos.turno import Turno
 
+# Teto de jogadores por sala (fonte única do número). O master só consegue
+# configurar até aqui, e o `ia.nome_livre` depende disso para prometer que
+# sempre sobra apelido livre no pool (verificar.py).
+MAX_JOGADORES = 10
+
 
 class Lobby:
     """
@@ -437,7 +442,7 @@ class Lobby:
         try:
             if 'max_jogadores' in dados:
                 valor = int(dados['max_jogadores'])
-                if 2 <= valor <= 10:
+                if 2 <= valor <= MAX_JOGADORES:
                     config['max_jogadores'] = valor
                     aplicado = True
         except (ValueError, TypeError):
