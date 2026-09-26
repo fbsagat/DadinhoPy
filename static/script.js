@@ -2678,7 +2678,34 @@ function iniciar_partida() {
 let contexto_audio = null;
 let promessa_resume_audio = null;
 
-function garantir_contexto_audio() {
+function contexto_audio_rodando() {
+    return !!contexto_audio && contexto_audio.state === 'running';
+}
+
+// Espera o `resume` em curso, mas no máximo este prazo: um resume preso não
+// pode travar o início da música (o próximo gesto refaz a tentativa). Nunca
+// rejeita.
+const ESPERA_RESUME_MS = 1200;
+
+function esperar_resume_audio() {
+    const atual = promessa_resume_audio;
+    if (!atual) {
+        return Promise.resolve();
+    }
+    return Promise.race([
+        atual.then(() => {}, () => {}),
+        new Promise((resolve) => { setTimeout(resolve, ESPERA_RESUME_MS); }),
+    ]);
+}
+
+// `gesto=true` só para quem está num gesto do usuário (`desbloquear_audio`).
+// A função também roda fora de gesto (os efeitos de `tocar_som` vêm de
+// socket.on), e um `resume()` aberto sem gesto fica pendente indefinidamente em
+// alguns navegadores — sem resolver no clique seguinte. O guard de
+// `promessa_resume_audio` evita duplicar o `resume`, mas ele NÃO pode valer
+// para quem está num gesto: assim o `resume` é refeito a cada toque/tecla até
+// o contexto ficar de fato 'running' (era o que impedia a música de ligar).
+function garantir_contexto_audio(gesto) {
     if (typeof (window.AudioContext) === 'undefined' && typeof (window.webkitAudioContext) === 'undefined') {
         return false;
     }
@@ -2689,12 +2716,19 @@ function garantir_contexto_audio() {
     // Retoma o contexto e guarda a promessa: o `resume` é assíncrono, e
     // começar uma fonte com o contexto ainda 'suspended' engole o som de
     // forma intermitente (iOS em especial). Quem for tocar aguarda a promessa.
-    if (contexto_audio.state === 'suspended' && !promessa_resume_audio) {
-        promessa_resume_audio = contexto_audio.resume();
-        promessa_resume_audio.then(
-            () => { promessa_resume_audio = null; },
-            () => { promessa_resume_audio = null; },
-        );
+    if (contexto_audio.state === 'suspended' && (gesto || !promessa_resume_audio)) {
+        // A identidade da promessa importa: com `gesto=true` o `resume` é
+        // reencaminhado a cada toque, e sem esta comparação a promessa antiga,
+        // ao resolver, apagaria a flag da nova e o `resume` em voo deixaria de
+        // ser aguardado por quem vai tocar.
+        const em_voo = contexto_audio.resume();
+        promessa_resume_audio = em_voo;
+        const encerrar = () => {
+            if (promessa_resume_audio === em_voo) {
+                promessa_resume_audio = null;
+            }
+        };
+        em_voo.then(encerrar, encerrar);
     }
     return true;
 }
@@ -3574,6 +3608,11 @@ function parsear_midi(buffer) {
         }
     });
 
+    // Ordena por início: o sequenciador em tempo real percorre a lista com um
+    // índice só (notas passadas nunca voltam), o que só vale se `inicio` for
+    // crescente. A ordem original é a de note-off. O sort é estável, então notas
+    // simultâneas mantêm a ordem de encerramento (não muda o que se ouve).
+    notas.sort(function (a, b) { return a.inicio - b.inicio; });
     return { notas: notas, duracao: tick_para_segundos(fim_tick, tempos, ppq) };
 }
 
@@ -3669,6 +3708,47 @@ function criar_buffer_ruido(ctx, segundos) {
     return buffer;
 }
 
+// Desliga uma voz: desconecta todos os nós que ela criou. No motor antigo
+// (render offline) isso não importava porque o grafo inteiro era descartado a
+// cada tema; em tempo real as vozes se acumulariam a cada volta (2.7k gains
+// por ciclo) e o `parar_musica` precisa cortar o som imediatamente.
+function desligar_voz(nos) {
+    return function () {
+        for (let i = 0; i < nos.length; i++) {
+            try {
+                nos[i].disconnect();
+            } catch (erro) {
+                // já desconectado
+            }
+        }
+    };
+}
+
+// Ancora o fim da voz: para todas as fontes em `fim` e, quando a primeira
+// delas termina, tira os nós do grafo. Sem isso as vozes se acumulariam a cada
+// volta do tema (2.7k gains por ciclo) e o `parar_musica` não cortaria o som.
+function agendar_voz(fontes, fim, nos) {
+    const desligar = desligar_voz(nos);
+    let primeira = null;
+    for (let i = 0; i < fontes.length; i++) {
+        const fonte = fontes[i];
+        if (!primeira) {
+            primeira = fonte;
+            fonte.onended = function () {
+                desligar();
+                vozes_musica.delete(desligar);
+            };
+        }
+        try {
+            fonte.stop(fim);
+        } catch (erro) {
+            // fonte já parada
+        }
+    }
+    vozes_musica.add(desligar);
+    return desligar;
+}
+
 // Percussão animada (tímpano/tom e bongôs/congas senoidais; caixa/chimbais com ruído).
 function agendar_percussao(ctx, seco, reverb, altura, velocidade, t0, ruido) {
     const vel = Math.max(0.2, velocidade / 127);
@@ -3689,8 +3769,7 @@ function agendar_percussao(ctx, seco, reverb, altura, velocidade, t0, ruido) {
         ganho.connect(seco);
         ganho.connect(envio);
         osc.start(t0);
-        osc.stop(t0 + 0.26);
-        return;
+        return agendar_voz([osc], t0 + 0.26, [envio, osc, ganho]);
     }
     if (altura === 47 || altura === 35 || altura === 36 || altura === 41 || altura === 43) {
         const osc = ctx.createOscillator();
@@ -3705,8 +3784,7 @@ function agendar_percussao(ctx, seco, reverb, altura, velocidade, t0, ruido) {
         ganho.connect(seco);
         ganho.connect(envio);
         osc.start(t0);
-        osc.stop(t0 + (grave ? 1.2 : 0.7));
-        return;
+        return agendar_voz([osc], t0 + (grave ? 1.2 : 0.7), [envio, osc, ganho]);
     }
     const fonte = ctx.createBufferSource();
     fonte.buffer = ruido;
@@ -3740,18 +3818,18 @@ function agendar_percussao(ctx, seco, reverb, altura, velocidade, t0, ruido) {
     ganho.connect(seco);
     ganho.connect(envio);
     fonte.start(t0);
-    fonte.stop(t0 + duracao + 0.02);
+    return agendar_voz([fonte], t0 + duracao + 0.02, [envio, fonte, filtro, ganho]);
 }
 
-function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
-    const t0 = nota_midi.inicio;
-    const t1 = nota_midi.inicio + nota_midi.dur;
+function agendar_nota(ctx, seco, reverb, nota_midi, ruido, quando) {
+    const t0 = quando;
+    const dur = nota_midi.dur;
+    const t1 = t0 + dur;
     if (nota_midi.canal === 9) {
-        agendar_percussao(ctx, seco, reverb, nota_midi.altura, nota_midi.velocidade, t0, ruido);
-        return;
+        return agendar_percussao(ctx, seco, reverb, nota_midi.altura, nota_midi.velocidade, t0, ruido);
     }
     const perfil = perfil_do_programa(nota_midi.programa);
-    const ataque = Math.min(perfil.ataque, Math.max(0.01, nota_midi.dur * 0.6));
+    const ataque = Math.min(perfil.ataque, Math.max(0.01, dur * 0.6));
     const pico = Math.max(0.0002, perfil.ganho * (nota_midi.velocidade / 127));
 
     const filtro = ctx.createBiquadFilter();
@@ -3789,6 +3867,8 @@ function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
         lfo_ganho.gain.value = perfil.vibrato * 6;
         lfo.connect(lfo_ganho);
     }
+    const nos = [filtro, ganho, mistura];
+    const fontes = [];
     perfil.ondas.forEach(function (onda, indice) {
         const osc = ctx.createOscillator();
         osc.type = onda;
@@ -3801,11 +3881,17 @@ function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
         }
         osc.connect(mistura);
         osc.start(t0);
-        osc.stop(parada);
+        fontes.push(osc);
     });
     if (lfo) {
         lfo.start(t0);
-        lfo.stop(parada);
+        fontes.push(lfo);
+    }
+    // Tudo que a voz criou entra em `nos`, senão sobra GainNode vivo a cada
+    // nota com vibrato (o gain do LFO é o esquecido clássico).
+    nos.push.apply(nos, fontes);
+    if (lfo_ganho) {
+        nos.push(lfo_ganho);
     }
     filtro.connect(ganho);
 
@@ -3815,6 +3901,7 @@ function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
         pan.pan.value = pan_do_canal(nota_midi.canal);
         ganho.connect(pan);
         saida = pan;
+        nos.push(pan);
     }
     saida.connect(seco);
     if (perfil.envio_reverb > 0) {
@@ -3822,51 +3909,142 @@ function agendar_nota(ctx, seco, reverb, nota_midi, ruido) {
         envio.gain.value = perfil.envio_reverb;
         saida.connect(envio);
         envio.connect(reverb);
+        nos.push(envio);
     }
+    return agendar_voz(fontes, parada, nos);
 }
 
-// Renderiza o MIDI inteiro para um AudioBuffer (permite loop sem cliques).
-async function renderizar_musica(buffer) {
-    const dados = parsear_midi(buffer);
-    if (!dados.notas.length || dados.duracao <= 0) {
-        return null;
+// --- Motor de música em tempo real -----------------------------------------
+// Antes (Fase 33): o MIDI inteiro era renderizado num `OfflineAudioContext` e
+// reproduzido como um `AudioBuffer` em loop. O render dos 48,4s do tema
+// consumia ~30s de CPU bloqueante, então a música só começava dezenas de
+// segundos depois do clique. Agora o MIDI é só parseado (~ms) e as notas são
+// agendadas uma a uma no `AudioContext` vivo, como um sequenciador: o primeiro
+// som sai em poucos milissegundos e o custo acompanha as notas que tocam.
+
+const VOLUME_CICLO_MUSICA = 0.85; // ganho da cadeia mestra, igual ao render antigo
+const FADE_ENTRADA_MUSICA = 0.06; // some/vem suave no início de cada volta
+const FADE_SAIDA_MUSICA = 0.3; // e no fim, para o loop não estalar
+const ANTECEDENCIA_MUSICA = 0.6; // até onde à frente as vozes são criadas
+const ANTECEDENCIA_OCULTA_MUSICA = 15; // aba oculta: o setInterval é estrangulado
+const INTERVALO_BOMBA_MUSICA = 120; // de quanto em quanto tempo a bomba agenda
+const TOLERANCIA_NOTA_MUSICA = 0.05; // nota mais atrasada que ainda vale a pena tocar
+const TROCA_TEMA_MUSICA = 0.3; // fade para trocar o tema sem estalar
+
+// Monta a cadeia mestra uma vez por contexto: seco -> mestre (fade do loop) ->
+// compressor -> ganho (volume) -> destino, com o reverb em paralelo no mestre.
+function montar_cadeia_musica() {
+    if (cadeia_musica) {
+        return cadeia_musica;
     }
-    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OfflineCtx) {
-        return null;
-    }
-    const taxa = 44100;
-    const offline = new OfflineCtx(2, Math.ceil(dados.duracao * taxa), taxa);
-    const mestre = offline.createGain();
-    mestre.gain.setValueAtTime(0.0001, 0);
-    mestre.gain.exponentialRampToValueAtTime(0.85, 0.06);
-    if (dados.duracao > 0.6) {
-        mestre.gain.setValueAtTime(0.85, dados.duracao - 0.3);
-        mestre.gain.exponentialRampToValueAtTime(0.0001, dados.duracao);
-    }
-    const compressor = offline.createDynamicsCompressor();
+    const mestre = contexto_audio.createGain();
+    mestre.gain.value = 0.0001;
+    const compressor = contexto_audio.createDynamicsCompressor();
     compressor.threshold.value = -18;
     compressor.knee.value = 30;
     compressor.ratio.value = 2.5;
     compressor.attack.value = 0.006;
     compressor.release.value = 0.25;
-    mestre.connect(compressor).connect(offline.destination);
+    const ganho = contexto_audio.createGain();
+    ganho.gain.value = volume_musica / 100;
+    mestre.connect(compressor);
+    compressor.connect(ganho);
+    ganho.connect(contexto_audio.destination);
 
-    // Reverb de sala: bus wet alimentado por envio de cada timbre.
-    const reverb = offline.createConvolver();
-    reverb.buffer = criar_impulso_reverb(offline, 2.8, 3.0);
-    const retorno_reverb = offline.createGain();
+    // Reverb de sala: bus wet alimentado pelo envio de cada timbre.
+    const reverb = contexto_audio.createConvolver();
+    reverb.buffer = criar_impulso_reverb(contexto_audio, 2.8, 3.0);
+    const retorno_reverb = contexto_audio.createGain();
     retorno_reverb.gain.value = 0.32;
-    reverb.connect(retorno_reverb).connect(mestre);
-    const seco = offline.createGain();
+    reverb.connect(retorno_reverb);
+    retorno_reverb.connect(mestre);
+    const seco = contexto_audio.createGain();
     seco.gain.value = 0.85;
     seco.connect(mestre);
 
-    const ruido = criar_buffer_ruido(offline, 1.2);
-    dados.notas.forEach(function (n) {
-        agendar_nota(offline, seco, reverb, n, ruido);
-    });
-    return await offline.startRendering();
+    cadeia_musica = {
+        mestre: mestre,
+        seco: seco,
+        reverb: reverb,
+        ruido: criar_buffer_ruido(contexto_audio, 1.2)
+    };
+    ganho_musica = ganho;
+    return cadeia_musica;
+}
+
+// Ancora um ciclo em `base` (tempo do AudioContext) e programa o fade da
+// virada. `imediato` reanora sem esperar o ciclo recomeçar (recuperação de
+// atraso): o envelope começa em `currentTime` em vez de `base`, senão a
+// rampa nasceria no passado. `saindo` entra com fade em vez de degrau — usado
+// na troca de tema, para não cortar o que já estava tocando.
+function ancorar_ciclo_musica(base, imediato, saindo) {
+    const ganho = cadeia_musica.mestre.gain;
+    const agora = contexto_audio.currentTime;
+    const inicio = imediato ? agora : Math.max(base, agora + 0.02);
+    // O cancelamento é em `inicio + epsilon` de propósito: `inicio` é
+    // exatamente onde o fade-out do ciclo anterior termina, e cancelar a partir
+    // dele apagaria a rampa (o ganho cairia de 0,85 para 0 num sample, que é o
+    // estalo que o fade existe para evitar).
+    ganho.cancelScheduledValues(inicio + 0.0005);
+    if (saindo) {
+        ganho.linearRampToValueAtTime(0.0001, inicio);
+    } else {
+        ganho.setValueAtTime(0.0001, inicio);
+    }
+    ganho.exponentialRampToValueAtTime(VOLUME_CICLO_MUSICA, inicio + FADE_ENTRADA_MUSICA);
+    const corte = base + tema_musica.duracao - FADE_SAIDA_MUSICA;
+    if (corte > inicio + FADE_ENTRADA_MUSICA) {
+        ganho.setValueAtTime(VOLUME_CICLO_MUSICA, corte);
+        ganho.exponentialRampToValueAtTime(0.0001, base + tema_musica.duracao);
+    }
+    sequencia_musica = { base: base, indice: 0 };
+}
+
+// Sequenciador: agenda as notas do ciclo atual que estão dentro da janela de
+// antecedência e, ao fechar o ciclo, ancora o próximo com o fade da virada.
+function bombear_musica() {
+    if (!musica_rodando || !tema_musica || !cadeia_musica || !contexto_audio_rodando()) {
+        return;
+    }
+    const agora = contexto_audio.currentTime;
+    const notas = tema_musica.notas;
+    // A janela é sempre finita. Com a aba oculta o `setInterval` é estrangulado
+    // (chama no máximo 1x/s e, em aba congelada, para) enquanto a thread de
+    // áudio continua: um horizonte maior que isso evita que a música cale, mas
+    // um horizonte até o fim do ciclo drenaria a lista inteira a cada disparo e
+    // ancoraria ciclos sem parar (milhões de nós). A recuperação de atraso abaixo
+    // cobre o que o estrangulamento deixou passar.
+    const horizonte = Math.min(
+        sequencia_musica.base + tema_musica.duracao,
+        agora + (document.hidden ? ANTECEDENCIA_OCULTA_MUSICA : ANTECEDENCIA_MUSICA)
+    );
+    // Recuperação de atraso: aba em segundo plano, GC longo ou travada do
+    // relógio limitam o `setInterval`, mas o áudio (que roda na thread de
+    // áudio) segue. Reancorar a linha do tempo é melhor que despejar de uma
+    // vez as notas que passaram — senão voltam todas juntas, atrasadas.
+    if (agora > sequencia_musica.base + tema_musica.duracao) {
+        const atraso = agora - sequencia_musica.base;
+        const ciclos = Math.floor(atraso / tema_musica.duracao);
+        ancorar_ciclo_musica(sequencia_musica.base + ciclos * tema_musica.duracao, true);
+    }
+    while (sequencia_musica.indice < notas.length) {
+        const nota = notas[sequencia_musica.indice];
+        const quando = sequencia_musica.base + nota.inicio;
+        if (quando > horizonte) {
+            break;
+        }
+        sequencia_musica.indice++;
+        if (quando < agora - TOLERANCIA_NOTA_MUSICA) {
+            continue; // já passou: descarta em vez de atrasar a voze
+        }
+        agendar_nota(
+            contexto_audio, cadeia_musica.seco, cadeia_musica.reverb,
+            nota, cadeia_musica.ruido, Math.max(quando, agora)
+        );
+    }
+    if (sequencia_musica.indice >= notas.length) {
+        ancorar_ciclo_musica(sequencia_musica.base + tema_musica.duracao, false);
+    }
 }
 
 // Aplica o volume escolhido à música em reprodução (ou guarda para a próxima).
@@ -3877,11 +4055,21 @@ function aplicar_volume_musica() {
 }
 
 let ganho_musica = null;
-let fonte_musica = null;
-let buffer_musica = null;
+let cadeia_musica = null;
+let tema_musica = null; // { notas, duracao } do parsear_midi (não é mais AudioBuffer)
+let sequencia_musica = { base: 0, indice: 0 };
+let vozes_musica = new Set(); // limpezas das vozes vivas (corte imediato ao parar)
+let musica_rodando = false;
+let relogio_musica = null;
 let promessa_musica = null;
+let promessa_inicio_musica = null;
+let falha_musica_em = 0;
 let seed_musica = null;
 let relogio_tema = null;
+
+// Não martela /tema.mid a cada clique quando o fetch está falhando: a próxima
+// tentativa só sai depois desta janela (o preload não é afetado).
+const ESPERA_RECARGA_MUSICA_MS = 15000;
 
 // Lê os segundos de `public, max-age=N` devolvidos pela rota /tema.mid.
 function segundos_ate_cache(cc) {
@@ -3899,9 +4087,22 @@ function agendar_verificacao_tema(cc) {
     relogio_tema = setTimeout(verificar_tema_atual, (espera + 5) * 1000);
 }
 
-// Busca e renderiza o MIDI vigente em `buffer_musica`, guardando o seed do
-// tema. A concorrência é deduplicada por `promessa_musica`; roda no preload
-// (para o clique ligar a música na hora) e no re-check da virada de 12h.
+// Aplica o tema novo em `tema_musica`. Caminho único do preload e do re-check
+// da virada de 12h: se a música está tocando, reanora o ciclo com fade (parar e
+// reiniciar abriria um estalo no meio da troca); se não está, quem manda é o
+// gesto — `iniciar_musica` só liga sozinho com o contexto já rodando.
+function aplicar_tema_musica(tema_novo) {
+    tema_musica = tema_novo;
+    if (musica_rodando && cadeia_musica) {
+        ancorar_ciclo_musica(contexto_audio.currentTime + TROCA_TEMA_MUSICA, false, true);
+    } else if (musica_ativada && contexto_audio_rodando()) {
+        iniciar_musica();
+    }
+}
+
+// Busca o MIDI vigente, parseia e guarda o seed do tema. A concorrência é
+// deduplicada por `promessa_musica`; roda no preload (para o clique ligar a
+// música na hora) e no re-check da virada de 12h.
 async function carregar_musica() {
     if (promessa_musica) {
         return promessa_musica;
@@ -3912,19 +4113,24 @@ async function carregar_musica() {
             if (!resposta.ok) {
                 throw new Error('HTTP ' + resposta.status);
             }
-            const buffer_novo = await renderizar_musica(await resposta.arrayBuffer());
-            if (!buffer_novo) {
+            const tema_novo = parsear_midi(await resposta.arrayBuffer());
+            if (!tema_novo || !tema_novo.notas.length || tema_novo.duracao <= 0) {
                 throw new Error('MIDI vazio');
             }
-            buffer_musica = buffer_novo;
+            falha_musica_em = 0;
             const seed_novo = resposta.headers.get('X-Dadinho-Tema-Seed');
             if (seed_novo) {
                 seed_musica = seed_novo;
             }
             agendar_verificacao_tema(resposta.headers.get('Cache-Control') || '');
+            // O clique no botão pode ter vindo antes do parse terminar. Como
+            // aqui não existe gesto, `aplicar_tema_musica` só inicia sozinho se
+            // o contexto já estiver rodando; senão quem começa é o próximo
+            // clique/tecla (`desbloquear_audio`), sem novo clique no botão.
+            aplicar_tema_musica(tema_novo);
         } catch (erro) {
             console.error('Falha ao carregar a música:', erro);
-            buffer_musica = null;
+            falha_musica_em = Date.now();
             agendar_verificacao_tema('');
         }
     })();
@@ -3935,42 +4141,61 @@ async function carregar_musica() {
     }
 }
 
+// Deduplica por `promessa_inicio_musica`: o botão, o desbloqueio por gesto e o
+// fim do preload podem pedir o início ao mesmo tempo, e cada pedido criaria a
+// sua própria fonte (música dobrada).
 async function iniciar_musica() {
-    if (!musica_ativada || fonte_musica || !garantir_contexto_audio()) {
+    if (promessa_inicio_musica) {
+        return promessa_inicio_musica;
+    }
+    promessa_inicio_musica = iniciar_musica_agora();
+    try {
+        await promessa_inicio_musica;
+    } finally {
+        promessa_inicio_musica = null;
+    }
+}
+
+async function iniciar_musica_agora() {
+    if (!musica_ativada || musica_rodando || !garantir_contexto_audio()) {
         return;
     }
-    if (!buffer_musica) {
+    if (!tema_musica) {
+        if (falha_musica_em && (Date.now() - falha_musica_em) < ESPERA_RECARGA_MUSICA_MS) {
+            return;
+        }
         await carregar_musica();
     }
-    if (!buffer_musica || !musica_ativada || fonte_musica) {
+    if (!tema_musica || !musica_ativada || musica_rodando) {
         return;
     }
-    // Só agenda a fonte depois de o contexto estar de fato 'running' — senão
+    // Só agenda as vozes depois de o contexto estar de fato 'running' — senão
     // o start() cai no contexto suspenso e some (problema intermitente, iOS).
     if (promessa_resume_audio) {
-        try {
-            await promessa_resume_audio;
-        } catch (erro) {
-            // segue na tentativa mesmo se o resume recusar
-        }
+        await esperar_resume_audio();
     }
-    if (!musica_ativada || fonte_musica) {
+    if (!musica_ativada || musica_rodando) {
         return;
     }
-    if (!ganho_musica) {
-        ganho_musica = contexto_audio.createGain();
-        ganho_musica.gain.value = volume_musica / 100;
-        ganho_musica.connect(contexto_audio.destination);
+    if (!contexto_audio_rodando()) {
+        // O `resume` não resolveu (foi aberto fora de gesto). Em vez de tocar
+        // no vazio, deixa o pedido para o próximo clique/tecla, que reabre o
+        // `resume` dentro do gesto (`gesto=true` em `garantir_contexto_audio`).
+        return;
     }
-    fonte_musica = contexto_audio.createBufferSource();
-    fonte_musica.buffer = buffer_musica;
-    fonte_musica.loop = true;
-    fonte_musica.connect(ganho_musica);
-    fonte_musica.start();
+    montar_cadeia_musica();
+    vozes_musica.clear();
+    // 50ms de folga: o primeiro som entra praticamente junto com o clique.
+    ancorar_ciclo_musica(contexto_audio.currentTime + 0.05, false);
+    musica_rodando = true;
+    bombear_musica();
+    if (!relogio_musica) {
+        relogio_musica = setInterval(bombear_musica, INTERVALO_BOMBA_MUSICA);
+    }
 }
 
 // Quando o Cache-Control expira, a janela de 12h pode ter virado: revalida o
-// tema e, se o seed mudou, recarrega a composição e troca a fonte sem reload.
+// tema e, se o seed mudou, troca a composição sem reload.
 async function verificar_tema_atual() {
     relogio_tema = null;
     try {
@@ -3980,14 +4205,10 @@ async function verificar_tema_atual() {
         }
         const seed_novo = resposta.headers.get('X-Dadinho-Tema-Seed');
         if (seed_novo && seed_musica && seed_novo !== seed_musica) {
-            const buffer_novo = await renderizar_musica(await resposta.arrayBuffer());
-            if (buffer_novo) {
-                buffer_musica = buffer_novo;
+            const tema_novo = parsear_midi(await resposta.arrayBuffer());
+            if (tema_novo && tema_novo.notas.length) {
                 seed_musica = seed_novo;
-                parar_musica();
-                if (musica_ativada) {
-                    iniciar_musica();
-                }
+                aplicar_tema_musica(tema_novo);
             }
         }
         agendar_verificacao_tema(resposta.headers.get('Cache-Control') || '');
@@ -3998,16 +4219,26 @@ async function verificar_tema_atual() {
 }
 
 function parar_musica() {
-    if (!fonte_musica) {
+    if (relogio_musica) {
+        clearInterval(relogio_musica);
+        relogio_musica = null;
+    }
+    if (!musica_rodando) {
         return;
     }
-    try {
-        fonte_musica.stop();
-    } catch (erro) {
-        // fonte já finalizada
+    musica_rodando = false;
+    // Sem `stop()` collective (o motor agora é nota a nota): cada voz se
+    // desconecta na hora, o que corta o som como o `fonte_musica.stop()` fazia.
+    vozes_musica.forEach(function (desligar) { desligar(); });
+    vozes_musica.clear();
+    if (cadeia_musica) {
+        // Rede de segurança: corta o mestre em 20ms (e não num degrau) caso
+        // alguma voz tenha sobrevivido ao desligamento das vozes.
+        const ganho = cadeia_musica.mestre.gain;
+        const agora = contexto_audio.currentTime;
+        ganho.cancelScheduledValues(agora);
+        ganho.linearRampToValueAtTime(0.0001, agora + 0.02);
     }
-    fonte_musica.disconnect();
-    fonte_musica = null;
 }
 
 // Botão próprio da música: liga/desliga sem afetar os efeitos sonoros.
@@ -4057,9 +4288,9 @@ if (botao_menu_musica) {
     botao_menu_musica.addEventListener('click', alternar_musica);
 }
 
-// Pré-carrega o tema em segundo plano para o clique ligar a música na hora,
-// sem depender do fetch + render do MIDI no primeiro toque. O AudioContext só
-// é criado/retomado no gesto (`garantir_contexto_audio` em `iniciar_musica`).
+// Pré-carrega e parseia o tema em segundo plano para o clique ligar a música na
+// hora, sem depender do fetch + parse do MIDI no primeiro toque. O AudioContext
+// só é criado/retomado no gesto (`garantir_contexto_audio` em `iniciar_musica`).
 carregar_musica();
 
 // Volume da música (0 a 100), persistido entre sessões — sliders do topo e do
@@ -4098,14 +4329,18 @@ sincronizar_sliders_volume_musica();
 
 // A política de autoplay dos navegadores exige um gesto do usuário: a música
 // começa no primeiro clique/toque/tecla e segue em loop até ser desligada.
+// O listener NÃO é `{once:true}`: ele também é a rede de segurança para o
+// pedido de início que ficou pendente (tema ainda baixando/parseando, ou
+// `resume` preso fora de gesto — o clique no botão só resolve o que já está
+// pronto).
 function desbloquear_audio() {
-    garantir_contexto_audio();
+    garantir_contexto_audio(true);
     if (musica_ativada) {
         iniciar_musica();
     }
 }
-window.addEventListener('pointerdown', desbloquear_audio, { once: true });
-window.addEventListener('keydown', desbloquear_audio, { once: true });
+window.addEventListener('pointerdown', desbloquear_audio);
+window.addEventListener('keydown', desbloquear_audio);
 
 function jogar_dados() {
     // Fase D: identidade ainda não confirmada (retomada em andamento) — o

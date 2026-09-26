@@ -52,7 +52,7 @@ console.log('idiomas=' + Object.keys(d).length + ' chaves=' + en.length);
 
 
 def verificar_node():
-    print("2) node --check static/*.js + cobertura i18n")
+    print("2) node --check static/*.js + cobertura i18n + motor da musica")
     node = shutil.which("node")
     if node is None:
         print("  [PULADO] Node não está no PATH")
@@ -68,6 +68,45 @@ def verificar_node():
         capture_output=True, text=True,
     )
     _checar("cobertura i18n", resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
+    verificar_musica(node)
+
+
+_CODIGO_MUSICA = r"""
+// Guarda de regressão do motor da música: ele é um sequenciador em tempo real
+// no AudioContext vivo. Voltar ao OfflineAudioContext reintroduz os ~30s de
+// render bloqueante (a música só ligava dezenas de segundos depois do clique).
+const fs = require('fs');
+// Comentários citam o termo antigo para explicar a troca; o que interessa é o
+// código. Remove `//` e `/* */` antes de procurar.
+const cru = fs.readFileSync(process.argv[1], 'utf8');
+const code = cru.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const exige = [
+  ['function bombear_musica', 'sem o agendador de notas'],
+  ['setInterval(bombear_musica', 'a bomba não está no relógio'],
+  ['function ancorar_ciclo_musica', 'sem ancoragem de ciclo/fade do loop'],
+  ['notas.sort(', 'as notas não estão ordenadas por início (o sequenciador exige)'],
+  ['function agendar_voz', 'as vozes não se limpam (vazam nós a cada volta)'],
+];
+let faltando = 0;
+for (const [marca, erro] of exige) {
+  if (code.indexOf(marca) < 0) { console.error(erro + ': falta ' + marca); faltando++; }
+}
+if (code.indexOf('OfflineAudioContext') >= 0) {
+  console.error('OfflineAudioContext voltou: renderizar o tema inteiro trava a aba por ~30s');
+  faltando++;
+}
+if (faltando) process.exit(1);
+console.log('motor em tempo real ok');
+"""
+
+
+def verificar_musica(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_MUSICA, os.path.join(RAIZ, "static", "script.js")],
+        capture_output=True, text=True,
+    )
+    _checar("motor da musica (tempo real)", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
 
 
@@ -95,6 +134,9 @@ _CODIGO_BOOT = (
     "cc=tema.headers.get('Cache-Control','');"
     "assert cc.startswith('public, max-age='), cc;"
     "assert int(cc.split('=',1)[1])>0, 'max-age nao acompanha a janela';"
+    "pagina=r.get_data(as_text=True);"
+    "preload='as=\"fetch\" href=\"/tema.mid\"';"
+    "assert preload in pagina, 'sem preload do tema (a musica ligaria atrasada)';"
     "print('BOOT_OK')"
 )
 

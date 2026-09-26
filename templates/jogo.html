@@ -29,6 +29,12 @@
     <link rel="preconnect" href="https://challenges.cloudflare.com">
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async></script>
     {% endif %}
+    <!-- O tema musical (/tema.mid) é buscado e parseado assim que o script.js
+         roda, para o botão da música ligar o som na hora. O preload tira
+         a rede (e o serverless do /tema.mid) do caminho crítico: a resposta fica
+         no cache antes do fetch. O `crossorigin` é obrigatório para o preload
+         casar com o `fetch()` do script.js e não baixar o MIDI duas vezes. -->
+    <link rel="preload" as="fetch" href="/tema.mid" crossorigin="anonymous">
     <title>{{ og.titulo }}</title>
 
     <!-- SEO: descrição/canonical (o `<title>` e o OG dinâmico por sala vêm do
