@@ -824,8 +824,17 @@ function abrir_busca() {
 }
 
 function fechar_busca() {
-    document.getElementById('tela_busca').style.display = 'none';
-    document.getElementById('tela_jogadores').style.display = 'block';
+    // Fase corrente: só fecha a busca se ela estiver aberta. O handler global
+    // de ESC chama isto em todas as telas; sem o guard, `tela_jogadores`
+    // (lobby) volta a ficar visível por cima da partida (bug: lobby aparece
+    // no meio do jogo ao apertar ESC fora da busca).
+    const tela_busca = document.getElementById('tela_busca');
+    const tela_jogadores = document.getElementById('tela_jogadores');
+    if (!tela_busca || tela_busca.style.display !== 'block' || !tela_jogadores) {
+        return;
+    }
+    tela_busca.style.display = 'none';
+    tela_jogadores.style.display = 'block';
 }
 
 function buscar_partidas() {
