@@ -785,6 +785,34 @@ def verificar_bot_prudente():
         _restaurar_emit(salvo)
 
 
+def verificar_tempo_pensamento():
+    print("4e) tempo de pensamento: humano na mesa atrasa, mesa só de bots acelera")
+    import narrador
+
+    # Determiniza o sorteio da faixa (randbelow(n) -> 0 => atraso = faixa[0]) e
+    # restaura o `secrets` original no fim. O que se afirma é a RELAÇÃO entre os
+    # três caminhos, não o valor: com humano é mais lento, só bots mais rápido.
+    original = narrador.secrets
+    narrador.secrets = type("FakeSecrets", (), {"randbelow": staticmethod(lambda n: 0)})()
+    try:
+        base = narrador.FAIXAS_PENSAMENTO[3][0]
+        com_humano = narrador.tempo_pensamento(3, jogador=None, so_ias=False)
+        so_ias = narrador.tempo_pensamento(3, jogador=None, so_ias=True)
+        _checar("humano na mesa multiplica a pausa por FATOR_COM_HUMANO",
+                com_humano == int(base * narrador.FATOR_COM_HUMANO) > base,
+                f"base={base} com_humano={com_humano}")
+        _checar("mesa só de bots acelera (0.70) e fica abaixo do humano",
+                so_ias == int(base * 0.70) < com_humano,
+                f"so_ias={so_ias} com_humano={com_humano}")
+        # A personalidade continua modulando dentro de cada regime.
+        bot = type("Bot", (), {"is_ia": True, "ia_risco": 1.0, "ia_agressividade": 1.0})()
+        agressivo = narrador.tempo_pensamento(3, jogador=bot, so_ias=False)
+        _checar("personalidade ousada/agressiva decide mais rápido",
+                agressivo < com_humano, f"agressivo={agressivo} com_humano={com_humano}")
+    finally:
+        narrador.secrets = original
+
+
 # ---------------------------------------------------------------------------
 # 5) Integração (Fases 6 e 7)
 # ---------------------------------------------------------------------------
@@ -808,6 +836,7 @@ def main():
     verificar_tema()
     verificar_nomes_ia()
     verificar_bot_prudente()
+    verificar_tempo_pensamento()
     verificar_integracao()
     verificar_cross_instance()
     verificar_anti_fraude()

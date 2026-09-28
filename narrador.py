@@ -21,14 +21,20 @@ import secrets
 
 # Faixa de tempo (ms) que um bot "pensa" antes de agir. Quanto mais inteligente
 # o nível, maior a pausa (dá a sensação de raciocínio mais elaborado). O range
-# é propositalmente largo: a personalidade do bot e a situação da mesa
-# (só bots com dados) encolhem ou esticam esse tempo a cada lance.
+# é propositalmente largo: a personalidade do bot e a situação da mesa encolhem
+# ou esticam esse tempo a cada lance.
 FAIXAS_PENSAMENTO = {
     1: (800, 1650),
     2: (1050, 2185),
     3: (1400, 2720),
     4: (1800, 3560),
 }
+
+# Fator aplicado quando há humano com dados na mesa (`so_ias` False): a pausa
+# maior dá tempo de o humano ler a fala e raciocinar sobre a mesa antes do
+# próximo lance. É o oposto da aceleração de mesa só de bots abaixo — sem
+# humano, o fator 0.70 mantém o ritmo mais vivo.
+FATOR_COM_HUMANO = 1.8
 
 NOMES_FACES = {
     1: ('ás', 'ases'),
@@ -50,7 +56,9 @@ def tempo_pensamento(nivel, jogador=None, so_ias=False):
     Atraso (ms) de pensamento do bot; maior nos níveis mais inteligentes.
     A personalidade modula o ritmo: bots ousados/agressivos decidem mais rápido
     (impulso), ponderados/cautelosos demoram mais — mais imprevisibilidade.
-    Quando só restam IAs com dados na partida (`so_ias`), o jogo acelera.
+    Quando há humano com dados na mesa (`so_ias` False), a pausa é multiplicada
+    por `FATOR_COM_HUMANO` para o humano ter tempo de acompanhar; quando só
+    restam IAs com dados (`so_ias`), o jogo acelera (0.70).
     """
     try:
         nivel = int(nivel)
@@ -64,6 +72,8 @@ def tempo_pensamento(nivel, jogador=None, so_ias=False):
         atraso = int(atraso * (1.0 - 0.18 * risco - 0.12 * agressividade))
     if so_ias:
         atraso = int(atraso * 0.70)
+    else:
+        atraso = int(atraso * FATOR_COM_HUMANO)
     return max(120, atraso)
 
 
