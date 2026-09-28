@@ -897,15 +897,8 @@ socket.on('iniciar_negado', function (data) {
     mostrar_alerta(t('msg.iniciar_negado', { motivo: texto }), 'aviso');
 });
 
-// Facilidade: o apelido é lembrado entre sessões (localStorage) e entre abas
-// da mesma sessão (sessionStorage, fallback para sessões antigas).
-const apelidoSalvo = localStorage.getItem('dadinho_apelido') || sessionStorage.getItem('dadinho_apelido');
-if (apelidoSalvo) {
-    const apelidoInput = document.getElementById('apelido');
-    if (apelidoInput) {
-        apelidoInput.value = apelidoSalvo;
-    }
-}
+// O pré-preenchimento e a persistência do apelido ficam no bloco
+// `atualizar_botao_apelido` (lá embaixo), junto do estado do botão.
 
 // Selo de verificação de integridade (provably fair) na sala de espera.
 function renderizar_badge_fair(config) {
@@ -1059,16 +1052,11 @@ socket.on("update_user_list", (data) => {
             bot_pronto.disabled = data.status === 'jogando';
         }
         // Apelido editável na espera quantas vezes o jogador quiser, mas travado
-        // ao ficar pronto (e destravado ao desfazer o pronto).
-        const apelidoInput = document.getElementById('apelido');
-        const botaapelido = document.getElementById('botapel');
-        const apelido_travado = data.status === 'jogando' || eu_pronto;
-        if (apelidoInput) {
-            apelidoInput.disabled = apelido_travado;
-        }
-        if (botaapelido) {
-            botaapelido.disabled = apelido_travado;
-        }
+        // ao ficar pronto (e destravado ao desfazer o pronto). O input e o botão
+        // têm o estado (ok/lápis, enabled) desenhado num lugar só —
+        // `atualizar_botao_apelido`.
+        apelido_travado = data.status === 'jogando' || eu_pronto;
+        atualizar_botao_apelido();
 
         const iniciar_jogo = document.getElementById('iniciar_jogo');
         if (iniciar_jogo) {
@@ -2395,12 +2383,11 @@ socket.on("connect_start", function (data) {
     // página 0; na home (sem sala) ele some.
     atualizar_botao_sair();
     if (data && data.username) {
-        // Reconexão retomada: devolve o apelido pro jogador.
+        // Reconexão retomada: o servidor já tem o apelido deste jogador, então
+        // o botão entra no lápis direto (sem depender do prefill do storage).
+        // Numa sala nova `username` vem None e o "ok" continua de pé.
         nome_jogador = data.username;
-        const apelidoInput = document.getElementById('apelido');
-        if (apelidoInput && !apelidoInput.value) {
-            apelidoInput.value = data.username;
-        }
+        confirmar_apelido(data.username);
     }
     // Fase D: com uma sessão anterior guardada, retoma a identidade logo após
     // o connect (uma vez por conexão). O servidor troca o placeholder pela
@@ -2425,14 +2412,10 @@ socket.on("connect_start", function (data) {
         chave_confirmada = true;
         _watchdog_connect_tentativas = 0;
     }
-    const textInput = document.getElementById("apelido");
-    const botaapelido = document.getElementById('botapel');
-    if (textInput) {
-        textInput.disabled = false; // Habilita o input de apelido para todos, incluindo o master
-    }
-    if (botaapelido) {
-        botaapelido.disabled = false;
-    }
+    // Destrava o apelido para todos, incluindo o master (o `update_user_list`
+    // seguinte é quem trava de novo, conforme status/pronto).
+    apelido_travado = false;
+    atualizar_botao_apelido();
     aplicar_master();
 });
 
@@ -2570,6 +2553,9 @@ window.addEventListener('online', _resync_apos_background);
 
 socket.on("update_username", function (data) {
     nome_jogador = data.nome_jogador;
+    // Confirmação (e eventual sufixo de colisão) do apelido: fecha o editor e
+    // deixa o botão no lápis, com o input exibindo o valor que o servidor aceitou.
+    confirmar_apelido(data.nome_jogador);
 })
 
 socket.on("jogar_dados_resultado", function (data) {
@@ -2654,20 +2640,147 @@ socket.on('jogador_desconectado', function (data) {
     setTimeout(() => socket.emit('verificar_desconectados', { chave: chave_secreta }), grace_ms);
 });
 
+// ---------------------------------------------------------------------------
+// Apelido: o input e o botão de confirmação dividem a mesma linha
+// (`.apelido-linha` no template) e o botão é o próprio estado da edição:
+//
+//   sem apelido  → input editável, botão "ok" (salva)
+//   confirmado   → input em `readonly` só exibindo o valor, botão lápis
+//                  (clicar/tocar no input reabre a edição e vira "ok")
+//
+// O apelido continua trocável quantas vezes quiser na espera; o travamento
+// (jogando ou com o "ficar pronto" marcado) vem do `update_user_list`.
+// ---------------------------------------------------------------------------
+const ICONE_LAPIS = '✏️';
+let apelido_confirmado = false;
+let apelido_editando = false;
+let apelido_travado = false;
+// Último valor confirmado — o que o servidor respondeu, que pode vir sufixado em
+// colisão ("Nome_1"). É o que o input exibe e o que o `blur` compara para saber
+// se a edição pode fechar sozinha.
+let apelido_confirmado_texto = '';
+
+function atualizar_botao_apelido() {
+    const input = document.getElementById('apelido');
+    const botao = document.getElementById('botapel');
+    if (!input || !botao) {
+        return;
+    }
+    const editando = !apelido_confirmado || apelido_editando;
+    input.readOnly = !editando;
+    input.disabled = apelido_travado;
+    botao.disabled = apelido_travado;
+    botao.classList.toggle('papel', !editando);
+    const rotulo = editando ? t('ui.apelido_ok') : ICONE_LAPIS;
+    const dica = editando ? t('ui.apelido_ok') : t('ui.apelido_editar');
+    botao.textContent = rotulo;
+    botao.title = dica;
+    botao.setAttribute('aria-label', dica);
+}
+
+function abrir_edicao_apelido() {
+    const input = document.getElementById('apelido');
+    if (!input || apelido_travado) {
+        return;
+    }
+    apelido_editando = true;
+    atualizar_botao_apelido();
+    input.focus();
+    input.select();
+}
+
+// Confirmação do servidor: o apelido salvo (já com o sufixo de colisão, se
+// houve) vira o valor exibido e fecha o editor. Não mexe no localStorage — ali
+// fica o que o jogador digitou, senão a próxima sessão já nasceria com o
+// "Nome_1" e o servidor empilharia outro sufixo em cima.
+function confirmar_apelido(texto) {
+    apelido_confirmado = true;
+    apelido_confirmado_texto = texto || '';
+    const input = document.getElementById('apelido');
+    // Digitação em curso (reabriu a edição antes da resposta chegar): não
+    // sobrescreve nem trava o campo no meio da palavra — o próximo "ok" ou o
+    // blur fecham a edição com o valor novo.
+    if (!input || document.activeElement !== input) {
+        if (input) {
+            input.value = apelido_confirmado_texto;
+        }
+        apelido_editando = false;
+    } else if (input.value.trim() === apelido_confirmado_texto) {
+        apelido_editando = false;
+    }
+    atualizar_botao_apelido();
+}
+
 // Função para enviar apelido ao servidor
 function enviar_apelido() {
-    const textInput = document.getElementById("apelido");
-    let apelido = textInput.value.trim();
-    if (apelido) {
-        localStorage.setItem('dadinho_apelido', apelido); // Lembra entre sessões
-        sessionStorage.setItem('dadinho_apelido', apelido); // Mantém entre trocas de sala
-        socket.emit('apelido', { apelido_msg: textInput.value });
-        // O input não é desativado aqui: o apelido pode ser trocado quantas
-        // vezes quiser na espera; o travamento acontece ao ficar pronto.
-    } else {
-        mostrar_alerta(t('msg.preencha_nome'), 'aviso');
+    const input = document.getElementById("apelido");
+    if (!input || apelido_travado) {
+        return;
     }
+    if (apelido_confirmado && !apelido_editando) {
+        // O input está em `readonly` exibindo o apelido confirmado: não há o que
+        // salvar, é preciso abrir a edição antes.
+        return;
+    }
+    const apelido = input.value.trim();
+    if (!apelido) {
+        mostrar_alerta(t('msg.preencha_nome'), 'aviso');
+        return;
+    }
+    localStorage.setItem('dadinho_apelido', apelido); // Lembra entre sessões
+    sessionStorage.setItem('dadinho_apelido', apelido); // Mantém entre trocas de sala
+    // Vai trimmed: o servidor valida o texto cru e cairia em 'NOME_BUGADO'.
+    socket.emit('apelido', { apelido_msg: apelido });
+    // O input não é desativado aqui: o apelido pode ser trocado quantas vezes
+    // quiser na espera; o travamento acontece ao ficar pronto. Quem fecha o
+    // editor é o `update_username` de confirmação — se o servidor recusar, o
+    // input segue editável e o botão segue em "ok".
 }
+
+// Clique no botão: "ok" salva, o lápis abre a edição.
+function alternar_apelido() {
+    if (apelido_travado) {
+        return;
+    }
+    if (!apelido_confirmado || apelido_editando) {
+        enviar_apelido();
+        return;
+    }
+    abrir_edicao_apelido();
+}
+
+const input_apelido = document.getElementById('apelido');
+if (input_apelido) {
+    // Tocar no input em modo leitura também abre a edição (o lápis é o atalho
+    // explícito, mas o campo continua sendo clicável).
+    input_apelido.addEventListener('focus', function () {
+        if (apelido_confirmado && !apelido_editando && !apelido_travado) {
+            apelido_editando = true;
+            atualizar_botao_apelido();
+            input_apelido.select();
+        }
+    });
+    // Sair com o valor intacto fecha o editor; com valor diferente, fica em
+    // edição esperando o "ok" para não perder o que foi digitado.
+    input_apelido.addEventListener('blur', function () {
+        if (apelido_confirmado && input_apelido.value.trim() === apelido_confirmado_texto) {
+            apelido_editando = false;
+        }
+        atualizar_botao_apelido();
+    });
+}
+
+// Facilidade: o apelido é lembrado entre sessões (localStorage) e entre abas
+// da mesma sessão (sessionStorage, fallback para sessões antigas). O texto vem
+// pré-preenchido, mas o botão só vira lápis quando o SERVIDOR confirma o
+// apelido (`update_username`/`connect_start`) — marcar como confirmado aqui
+// deixaria quem entra numa sala nova sem nunca apertar o "ok", e o servidor
+// ficaria sem apelido (`pode_iniciar` preso em `sem_apelido`).
+const apelidoSalvo = localStorage.getItem('dadinho_apelido') || sessionStorage.getItem('dadinho_apelido');
+if (apelidoSalvo && input_apelido) {
+    input_apelido.value = apelidoSalvo.trim();
+}
+atualizar_botao_apelido();
 
 function iniciar_partida() {
     tocar_som_variante('embaralhar', [1, 2]);
@@ -5027,7 +5140,7 @@ document.addEventListener('click', function (evento) {
 // aqui também — senão o clique não faz nada.
 window.Dadinho = {
     sair_da_sala, criar_sala, abrir_busca, copiar_link_sala,
-    enviar_apelido, alternar_pronto, iniciar_partida,
+    alternar_apelido, alternar_pronto, iniciar_partida,
     adicionar_ia, completar_com_ias, remover_ias,
     buscar_partidas, fechar_busca,
     conferencia_final, vencedor_final,

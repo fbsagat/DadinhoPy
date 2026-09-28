@@ -52,7 +52,7 @@ console.log('idiomas=' + Object.keys(d).length + ' chaves=' + en.length);
 
 
 def verificar_node():
-    print("2) node --check static/*.js + cobertura i18n + motor da musica")
+    print("2) node --check static/*.js + cobertura i18n + acoes do HTML + motor da musica")
     node = shutil.which("node")
     if node is None:
         print("  [PULADO] Node não está no PATH")
@@ -70,6 +70,7 @@ def verificar_node():
     _checar("cobertura i18n", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
     verificar_musica(node)
+    verificar_acoes_html(node)
 
 
 _CODIGO_MUSICA = r"""
@@ -107,6 +108,47 @@ def verificar_musica(node):
         capture_output=True, text=True,
     )
     _checar("motor da musica (tempo real)", resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
+
+
+# ---------------------------------------------------------------------------
+# 2b) todo `data-acao` do HTML tem função exportada em `window.Dadinho`
+# ---------------------------------------------------------------------------
+# O template não usa `onclick` inline (o CSP estrito bloquearia): o clique é
+# delegado por `data-acao` e resolvido em `window.Dadinho`. Uma ação nova no
+# HTML sem export correspondente é silenciosamente ignorada no clique — o
+# botão "aparece" e não faz nada. Este guard fecha essa classe de bug.
+_CODIGO_ACOES = r"""
+const fs = require('fs');
+const html = fs.readFileSync(process.argv[1], 'utf8');
+const js = fs.readFileSync(process.argv[2], 'utf8');
+const acoes = new Set();
+const reAcao = /data-acao="([^"]+)"/g;
+let m;
+while ((m = reAcao.exec(html)) !== null) acoes.add(m[1]);
+// `fechar_alerta` é resolvido no próprio delegate (lê `data-resultado`).
+acoes.delete('fechar_alerta');
+const bloco = js.match(/window\.Dadinho\s*=\s*\{([\s\S]*?)\n\};/);
+if (!bloco) { console.error('window.Dadinho nao encontrado em script.js'); process.exit(1); }
+const exportadas = new Set();
+const reNome = /([A-Za-z_$][\w$]*)/g;
+while ((m = reNome.exec(bloco[1])) !== null) exportadas.add(m[1]);
+const faltando = [...acoes].filter((a) => !exportadas.has(a)).sort();
+if (faltando.length) {
+  console.error('data-acao sem export em window.Dadinho: ' + faltando.join(', '));
+  process.exit(1);
+}
+console.log('acoes=' + acoes.size);
+"""
+
+
+def verificar_acoes_html(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_ACOES, os.path.join(RAIZ, "templates", "jogo.html"),
+         os.path.join(RAIZ, "static", "script.js")],
+        capture_output=True, text=True,
+    )
+    _checar("data-acao do HTML exportado em window.Dadinho", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
 
 

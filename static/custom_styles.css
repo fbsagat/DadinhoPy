@@ -1376,6 +1376,48 @@ h5,
     border-bottom: 1px solid rgba(13, 202, 240, 0.25);
 }
 
+/* Apelido: input e botão de confirmação na mesma linha. O botão é o estado da
+   edição — "ok" salva, o lápis reabre a edição do apelido já salvo. */
+.apelido-linha {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.apelido-linha .form-control {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Sem apelido confirmado o input é campo de digitação; confirmado, ele só
+   exibe o valor (o readonly do Bootstrap deixaria o campo cinza-claro, fora
+   do tema escuro do painel). */
+.apelido-linha .form-control[readonly] {
+    background-color: var(--cor-painel-alto);
+    color: #fff;
+    cursor: default;
+}
+
+.bot-apelido {
+    flex: 0 0 auto;
+    min-width: 3.75rem;
+    line-height: 1;
+}
+
+/* Estado lápis: mesmo tratamento do ⚙️ (transparente, sem o lift do `.btn`). */
+.bot-apelido.papel,
+.bot-apelido.papel:hover,
+.bot-apelido.papel:focus,
+.bot-apelido.papel:active,
+.bot-apelido.papel:focus-visible {
+    background: transparent;
+    border: none;
+    color: var(--cor-info);
+    box-shadow: none;
+    outline: none;
+    transform: none;
+}
+
 /* Botão ⚙️ do card Jogadores: simples, sem borda e sem a animação de hover/
    active do `.btn` (translateY/scale); só mantém a posição absoluta em relação
    ao cabeçalho — por isso o `transform: translateY(-50%)` é repetido no hover. */

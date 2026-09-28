@@ -134,7 +134,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../static/custom_styles.css?v=20260917">
+    <link rel="stylesheet" href="../static/custom_styles.css?v=20260928">
 </head>
 
 <body>
@@ -329,13 +329,16 @@
                             data-i18n-aria-label="ui.config.abrir" title="Configurações da sala"
                             aria-label="Configurações da sala">⚙️</button>
                     </div>
-                    <div class="painel-corpo">
-                        <input type="text" id="apelido" class="container form-control text-center mx-auto"
-                            style="width: 200px;"
+                    <div class="painel-corpo apelido-linha">
+                        <input type="text" id="apelido" class="form-control text-center"
                             data-i18n-placeholder="ui.apelido_placeholder" placeholder="Escreva seu nome..."
                             maxlength="8" autocomplete="nickname">
-                        <button id="botapel" class="btn btn-primary mt-2" data-i18n="ui.apelido_pronto"
-                            data-acao="enviar_apelido">Pronto</button>
+                        <!-- Rótulo/tooltip/aria são do JS (`atualizar_botao_apelido`):
+                             o botão alterna entre "ok" e o lápis conforme o estado
+                             da edição, e um `data-i18n` fixo sobrescreveria o
+                             lápis quando o i18n roda no DOMContentLoaded. -->
+                        <button id="botapel" class="btn btn-primary bot-apelido" data-acao="alternar_apelido"
+                            title="ok" aria-label="ok">ok</button>
                     </div>
 
                     <div class="container my-1 p-2 bg-dark text-light border border-info rounded gamer-container"
@@ -758,7 +761,8 @@
                 <section>
                     <h5 data-i18n="ui.tut.lobby.t">🏠 Sala de espera (lobby)</h5>
                     <ul class="mb-1">
-                        <li data-i18n-html="ui.tut.lobby.li1">Escolha um apelido e clique em <strong>Pronto</strong>.</li>
+                        <li data-i18n-html="ui.tut.lobby.li1">Escolha um apelido e confirme em <strong>ok</strong>
+                            (o <strong>lápis</strong> ao lado edita depois).</li>
                         <li data-i18n-html="ui.tut.lobby.li2">O <strong>master</strong> define: nome, dados por jogador,
                             máximo de jogadores, coringa e se a partida é pública.</li>
                         <li data-i18n-html="ui.tut.lobby.li3">Todos (menos o master) devem clicar em <strong>Ficar
@@ -891,8 +895,8 @@
     </div>
     <!-- PAINEL DE DICAS FIM -->
 
-    <script src="/static/i18n.js?v=20260917"></script>
-    <script src="/static/script.js?v=20260917"></script>
+    <script src="/static/i18n.js?v=20260928"></script>
+    <script src="/static/script.js?v=20260928"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous">
