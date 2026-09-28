@@ -1490,6 +1490,11 @@ socket.on("mudar_pagina", function (data) {
         // `autojogar` ao zerar.
         if (sou_da_vez) {
             iniciar_timer_jogada(tempo_turno_max, true);
+            // Fase 76: quem abre a ordem da rodada recebeu o `meu_turno` lá
+            // atrás, ainda na conferência/vitória (para a tela de jogar dados),
+            // então o bip da vez não saiu. Aqui a decisão aparece de fato — é a
+            // hora do aviso. A trava garante um bip só.
+            tocar_bip_sua_vez();
         } else if (tempo_turno_max > 0) {
             iniciar_timer_jogada(tempo_turno_max, false);
         }
@@ -2023,6 +2028,123 @@ let tempo_turno_max = 0;     // limite/restante do turno (vem no `meu_turno`/`es
 let vez_atual_nome = '';
 let tempo_conf_vit = 0;      // limite da conferência/vitória (vem no `cards_conferencia`/`vencedor_da_partida`, Fase 22)
 
+// ---------------------------------------------------------------------------
+// Bip da vez e bip de tempo acabando (Fase 76).
+// Mesmo arquivo nos dois papéis (`beep.mp3`): uma vez quando a vez é minha e,
+// depois, uma vez por segundo do contador regressivo de "jogada automática",
+// mais forte e mais apertado conforme o relógio aperta. Só cliente — o servidor
+// já manda os segundos restantes do relógio (`tempo_max`), que é o suficiente
+// para graduar o bip sem evento novo.
+// ---------------------------------------------------------------------------
+// Trava do bip da vez: um por turno. `meu_turno` pode ser REEMITIDO pelo
+// dispatcher quando o heartbeat percebe que o indicador de vez se perdeu entre
+// instâncias (Fase D2, `emitir_dispatcher_turno`) — sem esta trava o jogador
+// levaria dois bips no mesmo turno. Rearmada em `espera_turno` (a vez passou
+// para outro) e no boot (para o `meu_turno` do snapshot pós-refresh bipar).
+let bip_vez_pendente = true;
+// Janela do bip de tempo: fração do relógio, com piso/teto para não comer o
+// turno inteiro (tempo curto) nem ficar colado no `text-bg-danger` do contador
+// (tempo longo). O teto de 20s faz a janela cobrir 1/3 do turno de 60s (o
+// padrão) e 1/6 do de 120s. O piso de 9s importa: com a janela curta, os
+// níveis esparsos (4s/3s) não encaixam nenhum bip e a rampa perde o degrau —
+// no relógio mais curto que a sala oferece (15s) ainda é preciso caber a rampa
+// inteira, e é o que o piso garante.
+const FRACAO_JANELA_BIP = 0.45;
+const JANELA_BIP_MIN = 9;
+const JANELA_BIP_MAX = 20;
+// A rampa desce até o último segundo: com o piso de 1s entre bips, o tom
+// audível do `beep.mp3` (~0,4s) termina antes da jogada automática e não
+// encavala com a explosão de sons do zero (era o que a rajada de 450ms fazia).
+const BIP_MINIMO_RESTANTE = 1;
+// Níveis do bip de tempo, do mais calmo ao mais apertado:
+// [fração restante mínima da janela, intervalo entre bips (ms), volume].
+// Quatro degraus (4s → 3s → 2s → 1s) para a aceleração ser CONTÍNUA e não
+// dois saltos: os vãos entre bips encolhem de forma monótona e o trecho final
+// fica em 1 bip por segundo.
+// O relógio que manda é o do contador (passa de 1 em 1), então o intervalo
+// precisa ser um múltiplo inteiro de 1000ms — 4000ms = bipa a cada 4 ticks,
+// 1000ms = a cada tick. Bipa no MESMO tick que redesenha o número, então o
+// som cai junto com a contagem da tela; um `setTimeout` próprio (o que era
+// antes) derivava do contador e acabava bipando em cima do número errado.
+// PISO DE 1 SEGUNDO: o tom audível dura ~0,4s e abaixo disso os avisos se
+// fundem numa rajada contínua em vez de soar como bipes distintos.
+const NIVEIS_BIP_TEMPO = [
+    [0.80, 4000, 0.22],
+    [0.60, 3000, 0.36],
+    [0.30, 2000, 0.55],
+    [0.00, 1000, 0.78],
+];
+let tempo_total_jogada = 0;   // duração do relógio atual, para derivar a janela
+let ultimo_bip_seg = -1;     // contador no último bip (mede o vão, -1 = nenhum)
+
+function janela_bip_tempo() {
+    if (tempo_total_jogada <= 0) {
+        return 0;
+    }
+    return Math.min(JANELA_BIP_MAX,
+        Math.max(JANELA_BIP_MIN, Math.ceil(tempo_total_jogada * FRACAO_JANELA_BIP)));
+}
+
+// Nível do bip para `seg` segundos restantes, ou null fora da janela.
+function nivel_bip_tempo(seg) {
+    const janela = janela_bip_tempo();
+    if (janela <= 0 || seg > janela || seg < BIP_MINIMO_RESTANTE) {
+        return null;
+    }
+    const fracao = seg / janela;
+    for (const [minimo, intervalo, volume] of NIVEIS_BIP_TEMPO) {
+        if (fracao > minimo) {
+            return { intervalo: intervalo, volume: volume };
+        }
+    }
+    const ultimo = NIVEIS_BIP_TEMPO[NIVEIS_BIP_TEMPO.length - 1];
+    return { intervalo: ultimo[1], volume: ultimo[2] };
+}
+
+// Bip do contador, chamado no MESMO tick que redesenha o número regressivo
+// (`atualizar_contador_jogada`) — o bip é função do valor que está na tela.
+// Só na página de turnos (2) e só para quem está na vez. A rolagem (1) tem
+// `rolar_dados` a cada 1,2s e a conferência/vitória (3/4) estouram sons a cada
+// confirmação — o bip intercalado com eles soava como travamento, e o relógio
+// dessas telas é de quem já jogou (não é "o tempo dele" acabando). Quem só
+// acompanha o turno (`meu === false`) e o espectador ficam mudos.
+function bipar_contador_jogada(seg) {
+    if (!timer_meu_autojogar || indiceAtual !== 2) {
+        return;
+    }
+    const nivel = nivel_bip_tempo(seg);
+    if (!nivel) {
+        return;
+    }
+    // Espaçamento medido no PRÓPRIO contador, não por módulo: `seg` é inteiro e
+    // cai de 1 em 1, então o vão real é `ultimo_bip_seg - seg`. Filtrar por
+    // `seg % passos` era mais curto mas bipava no primeiro tick de cada nível —
+    // o que encurtava o vão logo na virada (a 30s dava 3s > 1s > 2s) e a
+    // aceleração voltava a andar para trás. Medindo o vão, a rampa encolhe de
+    // forma monótona até 1 bip por segundo.
+    const passos = nivel.intervalo / 1000;
+    if (ultimo_bip_seg >= 0 && (ultimo_bip_seg - seg) < passos) {
+        return;
+    }
+    ultimo_bip_seg = seg;
+    tocar_som('beep', nivel.volume);
+}
+
+// Bip da vez: só na página de turnos (2), que é onde o jogador tem algo a
+// decidir. No começo da rodada o servidor já emite `meu_turno` para quem abre
+// a ordem (`Rodada.criar_rodada` -> `atualizar_front_pro_da_vez`) e a tela de
+// jogar dados só vem DEPOIS (`mudar_pagina(1)`): sem esta trava o bip disparava
+// enquanto a mesa ainda estava rolando os dados, e o jogador ouvia "sua vez"
+// sem ter nada para fazer. Fora da página 2 a trava fica de pé e o bip sai no
+// `mudar_pagina(2)`, quando a decisão aparece de fato.
+function tocar_bip_sua_vez() {
+    if (!bip_vez_pendente) {
+        return;
+    }
+    bip_vez_pendente = false;
+    tocar_som('beep');
+}
+
 function atualizar_contador_jogada() {
     const el = document.getElementById('contador_jogada');
     if (!el) {
@@ -2067,10 +2189,17 @@ function iniciar_timer_jogada(segundos, meu) {
     // turno (`espera_turno`): o observador exibe o contador mas não emite.
     timer_meu_autojogar = meu !== false;
     tempo_autojogar_seg = Math.max(0, Math.floor(Number(segundos) || 0));
+    tempo_total_jogada = tempo_autojogar_seg;
     if (tempo_autojogar_seg <= 0) {
         return;
     }
     atualizar_contador_jogada();
+    // Fase 76: o bip acompanha o contador. Fica logo ao lado de cada
+    // `atualizar_contador_jogada` do relógio, então o som e o número da tela
+    // mudam no mesmo tick e não há como derivarem um do outro. `-1` dá o bip
+    // logo no primeiro tick, sem esperar o intervalo do nível.
+    ultimo_bip_seg = -1;
+    bipar_contador_jogada(tempo_autojogar_seg);
     timer_autojogar = setInterval(function () {
         tempo_autojogar_seg -= 1;
         atualizar_contador_jogada();
@@ -2079,11 +2208,15 @@ function iniciar_timer_jogada(segundos, meu) {
             if (timer_meu_autojogar) {
                 socket.emit('autojogar', { chave: chave_secreta });
             }
+            return;
         }
+        bipar_contador_jogada(tempo_autojogar_seg);
     }, 1000);
 }
 
 function parar_timer_jogada() {
+    tempo_total_jogada = 0;
+    ultimo_bip_seg = -1;
     if (timer_autojogar) {
         clearInterval(timer_autojogar);
         timer_autojogar = null;
@@ -2105,6 +2238,15 @@ socket.on('meu_turno', function (data) {
     // contador da rolagem (`construtor_dados`/`mudar_pagina`).
     sou_da_vez = true;
     tempo_turno_max = Number(data.tempo_max) || 0;
+    // Bip da vez, uma vez por turno — só quando a decisão já está na tela
+    // (`tocar_bip_sua_vez` cuida da trava e da página). O servidor emite
+    // `atualizar_turno` (o "Piece Impact" do dado que acabou de ser apostado)
+    // antes de `meu_turno` em `Rodada.apostar_turno` — então o bip cai DEPOIS
+    // do impacto. A trava também segura o reemit do dispatcher (Fase D2), que
+    // traria um segundo bip no mesmo turno.
+    if (indiceAtual === 2) {
+        tocar_bip_sua_vez();
+    }
     // Fase D2: registro quem o cliente acredita estar na vez (o heartbeat usa
     // isso para pedir um `meu_turno` reenviado se o indicador se perder).
     vez_atual_nome = String(data.username || '');
@@ -2143,6 +2285,9 @@ socket.on('espera_turno', function (data) {
     const painel_jogada = document.getElementById('painel_jogada');
     const painel_aguarde = document.getElementById('painel_aguarde');
     sou_da_vez = false; // Fase 21: não é mais a minha vez.
+    // A vez saiu daqui: o próximo `meu_turno` (turno novo) volta a ter direito
+    // ao bip da vez. Sem isto o bip tocaria só uma vez na partida inteira.
+    bip_vez_pendente = true;
     // Fase 21: o contador do turno agora aparece para todos — quem espera vê o
     // mesmo relógio do da vez, mas sem emitir `autojogar` ao zerar.
     tempo_turno_max = Number(data.tempo_max) || 0;
@@ -3045,6 +3190,7 @@ const sons_disponiveis = {
     nova_rodada_2: 'nova_rodada_2.mp3',
     distribuir_1: 'distribuir_1.mp3',
     distribuir_2: 'distribuir_2.mp3',
+    beep: 'beep.mp3',
 };
 const sons = {};
 
@@ -3666,8 +3812,11 @@ function aplicar_volume_som() {
 }
 
 // Toca um efeito sonoro do jogo a partir de static/sons/. Os arquivos são
-// carregados sob demanda e reutilizados (cache em 'sons').
-function tocar_som(nome) {
+// carregados sob demanda e reutilizados (cache em 'sons'). `ganho_relativo`
+// (padrão 1) é um multiplicador sobre o volume escolhido pelo jogador: o bip
+// de tempo usa isso para subir de intensidade conforme o relógio aperta, sem
+// sair da preferência de volume.
+function tocar_som(nome, ganho_relativo) {
     if (!som_ativado) {
         return;
     }
@@ -3677,10 +3826,11 @@ function tocar_som(nome) {
     }
     if (!sons[nome]) {
         sons[nome] = new Audio(`../static/sons/${arquivo}`);
-        sons[nome].volume = volume_som / 100;
         sons[nome].load();
     }
     const audio = sons[nome];
+    const ganho = ganho_relativo === undefined ? 1 : ganho_relativo;
+    audio.volume = Math.min(1, (volume_som / 100) * ganho);
     audio.currentTime = 0;
     audio.play().catch(() => {});
 }

@@ -52,7 +52,7 @@ console.log('idiomas=' + Object.keys(d).length + ' chaves=' + en.length);
 
 
 def verificar_node():
-    print("2) node --check static/*.js + cobertura i18n + acoes do HTML + motor da musica")
+    print("2) node --check static/*.js + cobertura i18n + acoes do HTML + sons + motor da musica")
     node = shutil.which("node")
     if node is None:
         print("  [PULADO] Node não está no PATH")
@@ -70,7 +70,56 @@ def verificar_node():
     _checar("cobertura i18n", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
     verificar_musica(node)
+    verificar_sons(node)
     verificar_acoes_html(node)
+
+
+# ---------------------------------------------------------------------------
+# 2a) todo arquivo de static/sons/ está registrado em `sons_disponiveis`
+# ---------------------------------------------------------------------------
+# `tocar_som` é silencioso quando o nome não está no mapa (`sons_disponiveis[nome]`
+# devolve undefined e a função retorna) e o `new Audio` de um arquivo inexistente
+# também não dá erro visível — um `.mp3` novo copiado para a pasta, ou uma
+# entrada com o nome do arquivo digitado errado, simplesmente não toca nada.
+# Este guard fecha essa classe de bug nos dois sentidos.
+_CODIGO_SONS = r"""
+const fs = require('fs'), path = require('path');
+const js = fs.readFileSync(process.argv[1], 'utf8');
+const dir = process.argv[2];
+// Comentários citam nomes de som ao explicar a troca; o que interessa é o mapa.
+const code = js.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const bloco = code.match(/const\s+sons_disponiveis\s*=\s*\{([\s\S]*?)\n\};/);
+if (!bloco) { console.error('sons_disponiveis nao encontrado em script.js'); process.exit(1); }
+const mapeados = new Map();
+const reEntrada = /([A-Za-z_$][\w$]*)\s*:\s*'([^']+)'/g;
+let m;
+while ((m = reEntrada.exec(bloco[1])) !== null) mapeados.set(m[2], m[1]);
+let faltando = 0;
+for (const arquivo of fs.readdirSync(dir).filter((f) => f.endsWith('.mp3')).sort()) {
+  if (!mapeados.has(arquivo)) {
+    console.error('static/sons/' + arquivo + ' sem entrada em sons_disponiveis (nunca toca)');
+    faltando++;
+  }
+}
+for (const [arquivo, nome] of [...mapeados].sort()) {
+  if (!fs.existsSync(path.join(dir, arquivo))) {
+    console.error('sons_disponiveis.' + nome + ' aponta para ' + arquivo + ', que nao existe');
+    faltando++;
+  }
+}
+if (faltando) process.exit(1);
+console.log('sons=' + mapeados.size);
+"""
+
+
+def verificar_sons(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_SONS, os.path.join(RAIZ, "static", "script.js"),
+         os.path.join(RAIZ, "static", "sons")],
+        capture_output=True, text=True,
+    )
+    _checar("sons de static/sons/", resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
 
 
 _CODIGO_MUSICA = r"""
