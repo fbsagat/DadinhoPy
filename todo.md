@@ -58,7 +58,7 @@ Extras corrigidos no caminho (não listados originalmente):
 Objetivo: existem N salas simultâneas no mesmo processo; prepara o split por sala que a Vercel exigirá.
 
 - [x] Adicionar conceito de **sala** no modelo: identificar sala por URL/parâmetro (ex.: `/?sala=<id>` ou `/<sala>`), criar e juntar.
-- [x] Usar Socket.IO rooms de verdade: `join_room`/`leave_room` no connect/disconnect; trocar `emit(..., broadcast=True)` do namespace global por `emit(..., to=sala)` em toda a cadeia (`funcoes_gerais.py`, `modelos.py`, `app.py`).
+- [x] Usar Socket.IO rooms de verdade: `join_room`/`leave_room` no connect/disconnect; trocar `emit(..., broadcast=True)` do namespace global por `emit(..., to=sala)` em toda a cadeia (`funcoes_gerais.py`, `modelos/`, `app.py`).
 - [x] `lobby_unico` vira um registro múltiplo (ex.: dict sala → `Lobby`), removendo o singleton global.
 - [x] Frontend: tela de criar/entrar sala (estender tela 0 ou nova tela), sem contas (apelido por sessão continua valendo).
 - [x] Isolar estados por sala: `conferiram`/`conferiram_vencedor`/`master`/listas de jogadores não podem vazar entre salas.
@@ -105,13 +105,13 @@ Notas/limitações registradas (aceitos para o público casual):
 - Quem entra no meio da partida conta em `len(lobby.jogadores)` para a conferência de vitória (precisa clicar "Ok" mesmo não tendo jogado) — comportamento pré-existente mantido.
 - Snapshot reinvoca apenas os handlers clientes já existentes (nenhum evento novo no `script.js`), e o branch da página 4 retorna antes do `emit('espectador')` final — espectador na tela de vitória mantém o "Ok".
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; round-trip de serialização da árvore `Lobby`; `node --check static\script.js`; boot `VERCEL=1` respondendo 200; e teste de integração via `flask_socketio.test_client` cobrindo lobby→página 2→aposta→conferência→resume por chave→dedup e desconexões no meio do jogo (da vez cai → vez avança; quem não rolou cai → rolagem destrava). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase4.py`.
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; round-trip de serialização da árvore `Lobby`; `node --check static\script.js`; boot `VERCEL=1` respondendo 200; e teste de integração via `flask_socketio.test_client` cobrindo lobby→página 2→aposta→conferência→resume por chave→dedup e desconexões no meio do jogo (da vez cai → vez avança; quem não rolou cai → rolagem destrava). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase4.py`.
 
 ## Fase 5 — Sala de espera, configurações e busca de partidas ✅ concluída
 
 Objetivo: transformar a tela 0 numa sala de espera de verdade (nome da partida, configurações pelo master, botão "ficar pronto" com trava de início) e adicionar a busca/listagem de partidas públicas com filtros.
 
-- [x] **Modelo (`modelos.py`)** — `Lobby` ganha `nome`, `status` ("espera"/"jogando"), `criado_em` e `config` (dados_qtd, max_jogadores, com_coringa, publica); `Jogador` ganha `pronto`. `Lobby.definir_config` valida os valores; `Lobby.pode_iniciar()` devolve `(bool, motivo)` com as regras (>=2 jogadores, todos com apelido, todos os não-master prontos, dentro do limite); `Lobby.resumo_partida()` monta o resumo público da listagem. `Partida`/`Rodada` agora respeitam `config.com_coringa` (persistido na serialização, `versao` do Lobby bumpada p/ 2).
+- [x] **Modelo (`modelos/`)** — `Lobby` ganha `nome`, `status` ("espera"/"jogando"), `criado_em` e `config` (dados_qtd, max_jogadores, com_coringa, publica); `Jogador` ganha `pronto`. `Lobby.definir_config` valida os valores; `Lobby.pode_iniciar()` devolve `(bool, motivo)` com as regras (>=2 jogadores, todos com apelido, todos os não-master prontos, dentro do limite); `Lobby.resumo_partida()` monta o resumo público da listagem. `Partida`/`Rodada` agora respeitam `config.com_coringa` (persistido na serialização, `versao` do Lobby bumpada p/ 2).
 - [x] **Listagem/filtros (`funcoes_gerais.py`)** — `listar_resumos_partidas(filtros, sala_atual)` lê `store.listar_lobbys()` e filtra por busca (nome/código), status, vaga, coringa e ordenação (recentes/jogadores/nome); privadas não aparecem. `atualizar_lista_usuarios` agora também envia `nome`, `status`, `config`, `prontos`, `pode_iniciar` e `motivo`.
 - [x] **Eventos (`app.py`)** — `configurar_partida` (master + `chave_secreta`), `ficar_pronto` (toggle com `chave_secreta`) e `listar_partidas` (somente leitura). `iniciar_partida` passou a exigir `pode_iniciar()` (senão emite `iniciar_negado`) e a usar `config.dados_qtd`. Connect recusa sala de espera cheia (`max_jogadores`) com `sala_cheia`; `construir_partida` marca `status='jogando'` e `resetar_para_lobby` volta para `espera` + zera prontidão (com `atualizar_lista_usuarios` no `vencedor_final`).
 - [x] **Frontend** — Tela 0 virou sala de espera: título da partida, badges de status/prontidão, painel de configurações (somente master edita; auto-save via `change`), botão "Ficar pronto" e trava do "Iniciar partida". Nova tela **Buscar partidas** (client-side, fora do ciclo de páginas do servidor): filtros (nome/código, status, coringa, ordenar, com vaga) e lista com botão Entrar/Lotada/Assistir; `mudar_pagina` fecha a busca ao receber navegação do servidor.
@@ -122,7 +122,7 @@ Notas/limitações registradas (aceitos para o público casual):
 - Salas privadas não aparecem na busca; quem tem o link (`?sala=`) entra direto.
 - Sala cheia bloqueia novo connect na sala de espera; entrar no meio de partida em andamento só pelo link direto (vira espectador).
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (versão 2, config + prontos + status + com_coringa); regras de `pode_iniciar`; filtros de listagem (busca/privada/status/coringa/vaga); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` (master configura, não-master não, pronto libera início, partida inicia, busca lista a sala). Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase5.py` e `teste_integracao_fase5.py`.
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (versão 2, config + prontos + status + com_coringa); regras de `pode_iniciar`; filtros de listagem (busca/privada/status/coringa/vaga); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` (master configura, não-master não, pronto libera início, partida inicia, busca lista a sala). Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase5.py` e `teste_integracao_fase5.py`.
 
 ---
 
@@ -136,15 +136,15 @@ Objetivo: eliminar os travamentos por desconexão e fechar os vetores de trapaç
 
 - [x] **B1 — Desconexão no meio da partida não pode travar a conferência.** `handle_disconnect` (`app.py`) remove o jogador de `partida.jogadores`, mas **não** de `rodada.jogadores`; `conferencia_final` compara `rodada.conferiram == len(rodada.jogadores)` (`app.py:317`) e o fantasma impede a conferência de fechar. Fix: remover o desconectado de `rodada.jogadores` e decrementar `conferiram` se ele já tinha confirmado.
 - [x] **B2 — Contador de vitória defasado após desconexão.** `vencedor_final` compara `lobby.conferiram_vencedor == len(lobby.jogadores)` (`app.py:337`); se o desconectado já tinha `confirmou_vencedor=True`, o contador fica maior que o lobby e o "Ok" da vitória nunca libera o reset. Fix: recalcular contadores no disconnect (ou comparar por conjunto de `client_id` confirmados).
-- [x] **B3 — Validação de aposta (anti-trapaça).** `Rodada.construir_turno` (`modelos.py:685-691`) aceita `dado` fora de 1–6 e `quantidade < 1`; payload malformado (`dado` ausente/não-numérico) estoura `ValueError`/`KeyError` no handler. Apostar **"0 ases"** no 1º turno é aceito (`modelos.py:908-912`) e é vitória garantida ao ser desafiado (`quantidade >= qtd` vira `count >= 0`, `modelos.py:752`). Fix: usar `validar_numero`/range + `try/except`, rejeitando a jogada com `jogada_invalida`.
+- [x] **B3 — Validação de aposta (anti-trapaça).** `Rodada.construir_turno` (`modelos/:685-691`) aceita `dado` fora de 1–6 e `quantidade < 1`; payload malformado (`dado` ausente/não-numérico) estoura `ValueError`/`KeyError` no handler. Apostar **"0 ases"** no 1º turno é aceito (`modelos/:908-912`) e é vitória garantida ao ser desafiado (`quantidade >= qtd` vira `count >= 0`, `modelos/:752`). Fix: usar `validar_numero`/range + `try/except`, rejeitando a jogada com `jogada_invalida`.
 - [x] **B4 — `foguetear` deve checar `partida.vencedor_final`** (`app.py:353` checa `rodada.vencedor` hoje). Em partida encerrada por desconexão (`app.py:113`), `rodada.vencedor` é `None` e o "Comemorar" do vencedor não dispara.
-- [x] **B6 — `bool("false") == True` em `definir_config`** (`modelos.py:318-322`): aceitar somente bool real para `com_coringa`/`publica`.
+- [x] **B6 — `bool("false") == True` em `definir_config`** (`modelos/:318-322`): aceitar somente bool real para `com_coringa`/`publica`.
 - [x] **B7 — Snapshot da página 2 em rodada 2+** deve usar `dados_qtd` por jogador em `construtor_html` (`funcoes_gerais.py:114` hoje usa `partida.dados_qtd` base).
 
 Extras corrigidos no caminho (não listados originalmente):
 - Guard de página no desbloqueio de rolagem do `handle_disconnect`: o bloco "se a rolagem só esperava este jogador" rodava em qualquer página — na conferência/vitória (3/4) todos já rolaram e a desconexão reverteria a tela para os turnos (página 2). Agora só roda com `lobby.pagina == 1`.
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (versão 2, config com bools reais); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo aposta inválida/"0 ases"/payload malformado (B3), bools reais em `definir_config` (B6), desconexão na conferência e nova rodada sem fantasma (B1), snapshot de rodada 2+ com `reset_rodada` por jogador (B7), desconexão na vitória e reset liberado (B2) e vencedor por desconexão soltando fogos (B4). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase6.py`.
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (versão 2, config com bools reais); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo aposta inválida/"0 ases"/payload malformado (B3), bools reais em `definir_config` (B6), desconexão na conferência e nova rodada sem fantasma (B1), snapshot de rodada 2+ com `reset_rodada` por jogador (B7), desconexão na vitória e reset liberado (B2) e vencedor por desconexão soltando fogos (B4). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase6.py`.
 
 ## Fase 7 — Robustez serverless e segurança dos handlers ✅ concluída
 
@@ -154,14 +154,14 @@ Objetivo: garantir consistência do estado distribuído e uniformizar autentica�
 - [x] **A3 — `chave_secreta` em todos os handlers mutáveis.** `jogar_dados`, `iniciar_partida`, `conferencia_final`, `vencedor_final` e `foguetear_click` agora exigem a chave (mesmo padrão de `aposta`/`desconfiar`/`configurar_partida`/`ficar_pronto`); `joguei_dados` já checava. Front-end atualizado para enviar `chave` nos 5 eventos.
 - [x] **A6 — Guard de "já rolou" em `jogar_dados`.** Idempotência explícita por rodada: com `jogador.joguei_dados` já `True` (ou sem rodada), o evento é ignorado — spam de rolagem não re-rola nem sobrescreve os dados.
 - [x] **V3 — Tratamento de payload malformado em todos os handlers.** Decorator `evento_mutavel` (escrita) e `evento_leitura` (leitura) com `try/except (ValueError, TypeError, KeyError, AttributeError)` + aborto silencioso, e guards `dados = dados or {}` / `isinstance(dict)` nos pontos de parse. Nenhum evento estoura exceção com payload `None`/não-dict.
-- [x] **A5 — `secrets.choice` para `jogador_sorteado`** (`modelos.py:503`), espelhando `Jogador.jogar_dados`; `import random` removido de `modelos.py`.
+- [x] **A5 — `secrets.choice` para `jogador_sorteado`** (`modelos/:503`), espelhando `Jogador.jogar_dados`; `import random` removido de `modelos/`.
 - [x] **V2 — Rate limit/cooldown leve por sid.** `funcoes_gerais.tem_cooldown` (janela 0,5s em eventos de escrita, 2s na busca `listar_partidas`), aplicado nos decorators dos handlers — protege o free tier da Upstash (500k comandos/mês) contra spam/scripts.
 
 Extras corrigidos no caminho (não listados originalmente):
 - Ordem dos decorators: `@socketio.on` registra um wrapper interno e devolve a função original, então precisa ficar **por fora** de `@evento_mutavel`/`@evento_leitura` (senão o handler registrado não passava pelo cooldown/lock/segurança).
 - `escolher_apelido` ganhou o wrapper `evento_mutavel` (estava sem cooldown/lock/segurança).
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (árvore com partida/rodada e `jogador_sorteado`); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo A3 (chave errada recusada em todos os novos handlers + foguetear), A6 (re-rolar ignorado), V3 (payloads `None`/não-dict não estouram e o fluxo segue), V2 (cooldown real por sid) e partida completa até vitória com confirmações autenticadas. Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase7.py`.
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (árvore com partida/rodada e `jogador_sorteado`); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo A3 (chave errada recusada em todos os novos handlers + foguetear), A6 (re-rolar ignorado), V3 (payloads `None`/não-dict não estouram e o fluxo segue), V2 (cooldown real por sid) e partida completa até vitória com confirmações autenticadas. Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase7.py`.
 
 ## Fase 8 — Performance e escala do store (Upstash) ✅ concluída
 
@@ -180,7 +180,7 @@ Notas/limitações registradas (aceitos para o público casual):
 - O resumo da busca é um snapshot no momento em que a sala muda (connect/disconnect/config/pronto/início) — leve defasagem aceita; a busca já revalidava os filtros por leitura.
 - TTL de 7 dias (sala/resumo) e 1 dia (SID): salas ativas renovam a cada `salvar_sala`, então só órfãs expiram; salas de espera paradas por >7 dias sem nenhum evento expiram (casual, aceito).
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização; boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` (connect→resumo em espera→iniciar→resumo `jogando`→busca usa o índice) + camada Upstash validada contra um Redis REST fake (SET/GET/DEL/INCR/SCAN em body-style e path-style). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase8.py`.
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização; boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` (connect→resumo em espera→iniciar→resumo `jogando`→busca usa o índice) + camada Upstash validada contra um Redis REST fake (SET/GET/DEL/INCR/SCAN em body-style e path-style). Script heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase8.py`.
 
 ## Fase 9 — UX e melhorias de negócio ✅ concluída
 
@@ -199,7 +199,7 @@ Notas/limitações registradas (aceitos para o público casual):
 - O código de sala é checado, mas não reservado no store: há uma janela de colisão ínfima entre a checagem e o connect (casual, aceito).
 - Espectadores que entram no meio contam em `len(lobby.jogadores)` para a conferência de vitória (precisam clicar "Ok") — comportamento pré-existente da Fase 4, agora mais visível com o "Assistir" liberado.
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (com `desconectado_em`); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo gerador/evento de código, `rodada_n` real, grace (desconexão marca → reconexão limpa → expurgo remove → vencedor declarado → sala sem ativos removida) e espectador pela busca. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase9.py` e `teste_fase9b.py` (Fase 7 revalidada com `teste_fase7.py`).
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py api/index.py`; `node --check static\script.js`; round-trip de serialização (com `desconectado_em`); boot `VERCEL=1` respondendo 200; integração via `flask_socketio.test_client` cobrindo gerador/evento de código, `rodada_n` real, grace (desconexão marca → reconexão limpa → expurgo remove → vencedor declarado → sala sem ativos removida) e espectador pela busca. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\teste_fase9.py` e `teste_fase9b.py` (Fase 7 revalidada com `teste_fase7.py`).
 
 ## Fase 10 — Limpeza, organização e tooling ✅ concluída
 
@@ -213,7 +213,7 @@ Objetivo: pagar dívida técnica e dar verificação automatizada ao projeto (ho
 - [x] **Script único de verificação** no repo (`py_compile` + `node --check` + boot `VERCEL=1` respondendo 200 + integração `flask_socketio.test_client` cobrindo Fase 6/7) — consolidar os scripts heap de `Temp` no projeto.
 
 Extras no caminho (não listados originalmente):
-- `sala_room()` virou uma função única em `modelos.py` (fonte do prefixo `sala_`); `Lobby.sala_room` delega e `funcoes_gerais` importa, eliminando a duplicata.
+- `sala_room()` virou uma função única em `modelos/` (fonte do prefixo `sala_`); `Lobby.sala_room` delega e `funcoes_gerais` importa, eliminando a duplicata.
 - A migração de versão é aplicada em `Lobby.de_dict` (`_migrar` sobe de v1/v2 até `VERSAO_ATUAL`); formato mais novo não é rebaixado. `Rodada.jogaram_dados` saiu da serialização sem exigir migração (leitura usa defaults).
 - O helper de autenticação (`autenticar`) também centraliza o guard de master; `escolher_apelido`/`verificar_desconectados` usam `extrair_chave=None` (eventos sem chave).
 
@@ -223,14 +223,14 @@ Verificação (local, `.venv`): `python verificar.py` (script único, no repo) �
 
 Objetivo: bots server-side para preencher partidas reais e permitir testes sem vários navegadores.
 
-- [x] **Modelo (`modelos.py`)** — `Jogador.is_ia`/`ia_nivel` serializados (`versao` 3); `Jogador.criar_ia(nivel, username)`; `Lobby.definir_master` ignora bots; `Lobby.tem_humano()` (GC de sala só com bots); `resetar_para_lobby` mantém bots prontos; configs `substituir_desconectado_por_ia` e `ia_nivel_padrao` em `config_padrao`/`definir_config`.
+- [x] **Modelo (`modelos/`)** — `Jogador.is_ia`/`ia_nivel` serializados (`versao` 3); `Jogador.criar_ia(nivel, username)`; `Lobby.definir_master` ignora bots; `Lobby.tem_humano()` (GC de sala só com bots); `resetar_para_lobby` mantém bots prontos; configs `substituir_desconectado_por_ia` e `ia_nivel_padrao` em `config_padrao`/`definir_config`.
 - [x] **Validação pura** — `Rodada.jogada_valida` extraída de `Turno.verificar_validade_da_jogada` (que passa a delegar, mantendo o efeito do 1º turno); a IA usa a versão pura para gerar apostas legais.
 - [x] **Motor (`ia.py`)** — `decidir` com 4 níveis: 1 Novato (aleatório), 2 Regular (aposta mínima + heurística binomial imperfeita), 3 Perito (binomial, limiar 0,40, aposta mais defensável), 4 Mestre (limiar 0,30 subindo em disputas longas + aposta de pressão com P≥0,60). Só usa os próprios dados + informação pública (nunca `rodada.todos_os_dados`).
 - [x] **Orquestrador** — `ia.processar(lobby)` roda dentro do request (sem threads/timers) e avança rolagem/apostas/conferência/vitória até precisar de humano; chamado em `iniciar_partida`, `joguei_dados`, `aposta`, `desconfiar`, `conferencia_final`, `vencedor_final`, `handle_connect` e no expurgo da graça. `handle_disconnect` remove sala sem humano; bots confirmam nas páginas 3/4.
 - [x] **Eventos/UI** — `adicionar_ia`/`completar_com_ias`/`remover_ia` (master + `chave_secreta`, só na espera); painel 🤖 no lobby (nível, quantidade, adicionar/completar/remover) e switch "Trocar desconectado por IA".
 - [x] **Substituição na graça** — `_substituir_por_ia`: com a opção ligada e havendo outro humano ativo, o desconectado vira bot (preserva dados/turno) em vez de sair.
 
-Verificação (local, `.venv`): `py_compile` de `app.py modelos.py funcoes_gerais.py store.py ia.py simular_ia.py api/index.py`; `node --check static/script.js`; boot respondendo 200; simulador headless `python simular_ia.py` (milhares de partidas — hierarquia 4>3>2>1 consistente em 1-4 dados e com/sem coringa, sem travamentos); integração `flask_socketio.test_client` com 1 humano + 2 bots até o fim (humano virou espectador, bots fecharam e voltaram ao lobby); testes de serialização v3, `definir_master`, prontidão dos bots após reset e substituição por IA. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\` (`teste_integracao_ia.py`, `teste_modelo_ia.py`, `teste_substituicao_ia.py`, `sweep_ia.py`).
+Verificação (local, `.venv`): `py_compile` de `app.py modelos/ funcoes_gerais.py store.py ia.py simular_ia.py api/index.py`; `node --check static/script.js`; boot respondendo 200; simulador headless `python simular_ia.py` (milhares de partidas — hierarquia 4>3>2>1 consistente em 1-4 dados e com/sem coringa, sem travamentos); integração `flask_socketio.test_client` com 1 humano + 2 bots até o fim (humano virou espectador, bots fecharam e voltaram ao lobby); testes de serialização v3, `definir_master`, prontidão dos bots após reset e substituição por IA. Scripts heap em `C:\Users\wwwfa\AppData\Local\Temp\opencode\` (`teste_integracao_ia.py`, `teste_modelo_ia.py`, `teste_substituicao_ia.py`, `sweep_ia.py`).
 
 Notas/limitações registradas (aceitos para o casual):
 - As ações dos bots chegam juntas no fim do request, mas o **cliente** as apresenta em sequência: uma fila serial (`script.js`) aplica o "tempo de pensamento" de cada nível (de `narrador.py`) antes de revelar a jogada, sem timers no servidor.
@@ -246,7 +246,7 @@ Objetivo: a música de fundo mudar sozinha a cada 12h, de forma compatível com 
 - [x] **Rota `GET /tema.mid` (`app.py`)** — serve o MIDI vigente com `Cache-Control` expirando na virada da janela (e headers `X-Dadinho-Tema-Seed`/`Bpm`); fallback para o `static/sons/dadinho_tema.mid` versionado se a geração falhar. Única exceção REST além de `/`.
 - [x] **Cliente (`static/script.js`)** — `iniciar_musica` passou a buscar `/tema.mid` em vez do arquivo estático.
 
-Verificação (local, `.venv`): `py_compile` de `app.py gerar_musica.py tema.py modelos.py funcoes_gerais.py store.py ia.py api/index.py`; `node --check static/script.js`; `tema_atual` idempotente na mesma janela e distinto na janela seguinte; rota `GET /tema.mid` respondendo 200 `audio/midi` com header `MThd` e bytes idênticos entre requests; CLI `gerar_musica.py -n 1 --seed 42` gerando arquivo válido.
+Verificação (local, `.venv`): `py_compile` de `app.py gerar_musica.py tema.py modelos/ funcoes_gerais.py store.py ia.py api/index.py`; `node --check static/script.js`; `tema_atual` idempotente na mesma janela e distinto na janela seguinte; rota `GET /tema.mid` respondendo 200 `audio/midi` com header `MThd` e bytes idênticos entre requests; CLI `gerar_musica.py -n 1 --seed 42` gerando arquivo válido.
 
 ## Fase 14 — i18n com 5 idiomas e fallback para inglês — concluída
 
@@ -256,7 +256,7 @@ Objetivo: jogar em inglês, português (BR), espanhol, francês e chinês simpli
 - [x] **UI estática (`templates/jogo.html`)** — textos anotados com `data-i18n`/`data-i18n-html`/`data-i18n-title`/`data-i18n-placeholder`/`data-i18n-value`/`data-i18n-aria-label`; `#seletor_idioma` no canto superior e `i18n.js` carregado antes de `script.js`.
 - [x] **Frontend dinâmico (`static/script.js`)** — todas as strings montadas em JS passam por `t()`; `dicas_por_pagina` e `NARRADOR_MODOS` guardam chaves; a narração é traduzida por `traduzirSegmentos`; o texto da conferência é remontado no cliente a partir de campos estruturados.
 - [x] **Narração server-side (`narrador.py`)** — cada lance devolve `texto` (pt-BR, fallback) + `segmentos` de `{chave, params}` (prefixos, ações, arremates, rodada, vitória). O servidor segue agnóstico de idioma e emite uma única vez para a room.
-- [x] **Mensagens do servidor (`modelos.py`/`app.py`)** — `pode_iniciar` devolve `motivo` `{chave, params}`; `jogada_invalida` emite `txtchave`/`txtparams`; a `conferencia` ganhou `dado_qtd`/`quantidade_real`/`verdadeira` para o cliente montar o texto traduzido.
+- [x] **Mensagens do servidor (`modelos/`/`app.py`)** — `pode_iniciar` devolve `motivo` `{chave, params}`; `jogada_invalida` emite `txtchave`/`txtparams`; a `conferencia` ganhou `dado_qtd`/`quantidade_real`/`verdadeira` para o cliente montar o texto traduzido.
 - [x] **Verificação (`verificar.py`)** — checa `node --check` de `script.js` e `i18n.js` e a cobertura dos 4 idiomas em relação ao inglês.
 
 Verificação (local, `.venv`): `python verificar.py` (tudo OK: `py_compile`, `node --check static/*.js`, cobertura i18n, boot `VERCEL=1`, round-trip e integração Flask-SocketIO) e `python simular_ia.py --partidas 20 --dados 3` (hierarquia preservada). Teste manual recomendado: abrir em 2 abas, trocar o idioma pelo seletor e jogar uma partida completa.
@@ -340,7 +340,7 @@ Verificação (local, `.venv`): `python verificar.py` — novo checador `boot se
 Objetivo: estado corrompido não vira 500 e o lock por sala não tem janela de concorrência.
 
 - [x] **H1 — `carregar_sala` blindado contra bloco corrompido** (`store.py:298-305`): `json.loads` levanta `ValueError`/`TypeError` e derruba o handler com 500; agora captura `(ValueError, TypeError, KeyError)` e devolve `None` (a sala é tratada como inexistente e recriada na próxima escrita — fluxo do GC), espelhando o tratamento que `listar_lobbys` já tinha.
-- [x] **H1b — `Partida.__init__` com zero jogadores** (`modelos.py:962-976`): `secrets.choice(self.jogadores)` estourava `IndexError` (e o caminho da seed, `ZeroDivisionError`); com a lista vazia o sorteado agora fica `None` — sem 500 na desserialização de um blob que referencia jogadores ausentes (`de_dict` re-aponta `jogador_sorteado` quando o jogador existe).
+- [x] **H1b — `Partida.__init__` com zero jogadores** (`modelos/:962-976`): `secrets.choice(self.jogadores)` estourava `IndexError` (e o caminho da seed, `ZeroDivisionError`); com a lista vazia o sorteado agora fica `None` — sem 500 na desserialização de um blob que referencia jogadores ausentes (`de_dict` re-aponta `jogador_sorteado` quando o jogador existe).
 - [x] **H4 — `esquecer_sala` chamado dentro da seção crítica** (`store.py:64-70`): remover a trava do registro enquanto um request ainda está dentro do `with trancar_sala()` permitia que o próximo adquirisse um RLock **novo** e mutasse o mesmo Lobby em paralelo. `trancar_sala` agora devolve um wrapper com **ref-count** (`_TravaSala`): todos apontam para a mesma entrada (mesmo RLock) e `esquecer_sala` durante uma seção crítica só marca `esquecida` — o registro é limpo quando o último holder solta a trava (`__exit__`). `handle_disconnect` (que já chamava `esquecer_sala` fora do lock) e o GC (`_gc_sala`, dentro do lock) ficam seguros; comportamento para quem usa o `with trancar_sala(...)` é idêntico.
 
 Verificação (local, `.venv`): `python verificar.py` — novos testes `H1-blob-corrompido` (blob inválido e árvore inválida devolvem `None`), `H1b-partida-vazia` (construtor com lista vazia sem `IndexError`, seed sem `ZeroDivisionError`, `de_dict` com jogador fantasma) e `H4-lock-secao-critica` (thread A dentro do `with` enquanto a sala esvazia → thread B **não** adquire lock distinto antes de A sair, e a trava some após o último holder); regressão zero nas Fases 6/7/15-25. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
@@ -349,7 +349,7 @@ Verificação (local, `.venv`): `python verificar.py` — novos testes `H1-blob-
 
 Objetivo: fechar a aposta irrespondível e o bypass do limite de jogadores pelo placeholder.
 
-- [x] **H2 — Aposta irrespondível** (`modelos.py:1246-1269`): `construir_turno` valida `dado` 1–6 e `quantidade >= 1`, mas não limitava `quantidade` ao total teórico de dados na mesa — apostar acima da soma tornava o desafiado incapaz de subir a aposta. Agora o servidor **clampeia** `dado_qtd` no total de dados vivos (`len(rodada.todos_os_dados)` com fallback na soma dos `dados_qtd`), mantendo a face; a regra do coringa (dobro para sair dos ases) fica à parte e segue na validação normal do turno. A IA não é afetada (`gerar_apostas_validas` já gera `quantidade` em `1..total`).
+- [x] **H2 — Aposta irrespondível** (`modelos/:1246-1269`): `construir_turno` valida `dado` 1–6 e `quantidade >= 1`, mas não limitava `quantidade` ao total teórico de dados na mesa — apostar acima da soma tornava o desafiado incapaz de subir a aposta. Agora o servidor **clampeia** `dado_qtd` no total de dados vivos (`len(rodada.todos_os_dados)` com fallback na soma dos `dados_qtd`), mantendo a face; a regra do coringa (dobro para sair dos ases) fica à parte e segue na validação normal do turno. A IA não é afetada (`gerar_apostas_validas` já gera `quantidade` em `1..total`).
 - [x] **H3 — Cap de jogadores burlado por `tem_chave=1`** (`app.py:478-494`): as checagens `MAX_ESPECTADORES`/`max_jogadores` só rodavam com `not tem_chave`; um connect com `tem_chave=1` (sinal booleano de possível retomada) criava placeholder sem respeitar o limite da sala (e sem GC). O cap agora vale para o placeholder também: sala `jogando` → cap em `MAX_ESPECTADORES`; sala de espera → cap em `max_jogadores`; senão `sala_cheia` (o cliente sai da room e o placeholder não é registrado). A retomada da chave só reaproveita se a sala ainda comportar.
 
 Verificação (local, `.venv`): `python verificar.py` — novos testes `H2-aposta-max` (aposta "100" com 3 dados vira 3 e o turno é criado; o próximo é forçado a desconfiar e a conferência fecha) e `H3-cap-placeholder` (4º connect com `tem_chave=1` numa espera 3/3 leva `sala_cheia`; 21º espectador com `tem_chave=1` estoura `MAX_ESPECTADORES` e leva `sala_cheia`); regressão zero nas demais fases. `python simular_ia.py` hierarquia 4>3>2>1 preservada.
@@ -415,7 +415,7 @@ Códigos de item seguem o padrão do repo (letra da categoria + número): **S** 
 - **Fase 42** — OG dinâmico por sala + analytics leve sem PII. Prioridade média (alto valor de negócio), esforço médio. ✅ concluída
 - **Fase 43** — Observabilidade: error tracking + alerta de custo Vercel/Upstash. Prioridade média, esforço baixo-médio. ✅ concluída (O2/O3; O1 = error tracking adiado sem Sentry)
 - **Fase 44** — CSP real (retomar a decisão adiada na Fase 31). Prioridade baixa-média, esforço alto. ✅ concluída (S5/S6/S7 em Report-Only; falta revisão manual no navegador antes de virar bloqueante)
-- **Fase 45** — Modularização de `modelos.py` / `verificar.py` / `script.js`. Prioridade baixa, esforço alto. ✅ concluída (M4/M5 ✅; M6 avaliado: não adotar bundler)
+- **Fase 45** — Modularização de `modelos/` / `verificar.py` / `script.js`. Prioridade baixa, esforço alto. ✅ concluída (M4/M5 ✅; M6 avaliado: não adotar bundler)
 
 ---
 
@@ -669,12 +669,12 @@ remover o "adiado" do registro da Fase 31.
 
 ## Fase 45 — Modularização de arquivos grandes
 
-Objetivo: `modelos.py` (1672 linhas), `verificar.py` (2737 linhas) e `static/script.js` (~152 KB)
+Objetivo: `modelos/` (1672 linhas), `verificar.py` (2737 linhas) e `static/script.js` (~152 KB)
 concentram lógica demais num único arquivo — mais contexto para carregar a cada mudança (humana ou
 de agente), diffs maiores, revisão mais difícil. Esforço alto, mas mecânico; fazer incrementalmente
 com `verificar.py` como rede de segurança a cada passo.
 
-- [x] **M4 — Splitar `modelos.py`**: virou o pacote `modelos/` por entidade — `comum.py`
+- [x] **M4 — Splitar `modelos/`**: virou o pacote `modelos/` por entidade — `comum.py`
   (`sala_room` + `somente_ias_na_partida`), `migracao.py` (VERSAO_ATUAL/VAGAS_RECENTES_SEGUNDOS/
   MIGRACOES), `jogador.py`, `turno.py`, `rodada.py`, `partida.py`, `lobby.py`, com `__init__.py`
   re-exportando tudo (`from modelos import ...` intacto). Grafo de dependências **acíclico**

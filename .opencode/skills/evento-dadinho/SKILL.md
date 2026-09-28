@@ -10,7 +10,7 @@ Orienta alterações em qualquer evento do jogo, de ponta a ponta (servidor → 
 ## Antes de escrever
 
 1. Leia a spec em `Dadinho idéia.txt` antes de mudar **comportamento** de jogo (telas/regras/fluxo).
-2. Encontre o handler existente em `app.py` (`@socketio.on('...')`), o `emit` de origem (`modelos.py`/`funcoes_gerais.py`/`app.py`) e o `socket.on` correspondente em `static/script.js` — use `docs/fluxo.md` como índice, confira o código real.
+2. Encontre o handler existente em `app.py` (`@socketio.on('...')`), o `emit` de origem (`modelos/`/`funcoes_gerais.py`/`app.py`) e o `socket.on` correspondente em `static/script.js` — use `docs/fluxo.md` como índice, confira o código real.
 
 ## Checklist do handler no servidor (`app.py`)
 

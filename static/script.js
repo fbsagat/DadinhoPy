@@ -1377,7 +1377,7 @@ function enviar_config() {
 }
 
 // --- Facilidade: lembra a configuração da partida entre sessões ---
-// Fallback do padrão de `Lobby.config_padrao` (modelos.py) usado só até o
+// Fallback do padrão de `Lobby.config_padrao` (modelos/) usado só até o
 // servidor mandar `config_padrao` em `update_user_list` — a partir daí o
 // cliente adota o valor autoritativo do servidor (fonte única). Quando o master
 // entra numa sala recém-criada (config ainda é a padrão), a preferência salva é

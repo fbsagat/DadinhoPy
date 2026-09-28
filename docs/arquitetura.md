@@ -32,8 +32,8 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 
 ## Isolamento por sala e modelagem
 
-- Cada sala é uma room Socket.IO `sala_<id>` (`sala_room()` em `modelos.py`, fonte única do prefixo `sala_`) com seu próprio `Lobby`, `master` e estado. Isolamento via `join_room`/`leave_room` no connect/disconnect e **`emit(..., to=sala_room)`** em toda a cadeia — **nada de `broadcast=True` global**.
-- Hierarquia: `Lobby` → `Partida` → `Rodada` → `Turno` (todos em `modelos.py`). Os models **emitem eventos Socket.IO diretamente** (`from flask_socketio import emit`) — a "view layer" é o navegador; `app.py` só registra handlers e faz checagens leves de autenticação.
+- Cada sala é uma room Socket.IO `sala_<id>` (`sala_room()` em `modelos/`, fonte única do prefixo `sala_`) com seu próprio `Lobby`, `master` e estado. Isolamento via `join_room`/`leave_room` no connect/disconnect e **`emit(..., to=sala_room)`** em toda a cadeia — **nada de `broadcast=True` global**.
+- Hierarquia: `Lobby` → `Partida` → `Rodada` → `Turno` (todos em `modelos/`). Os models **emitem eventos Socket.IO diretamente** (`from flask_socketio import emit`) — a "view layer" é o navegador; `app.py` só registra handlers e faz checagens leves de autenticação.
 - A árvore inteira é serializável (`Lobby.para_dict`/`Lobby.de_dict`, refs religadas por `client_id`/índices) para persistir no store. Migração por `versao` via `_migrar` (v1→v2→v3, até `VERSAO_ATUAL`); formato mais novo não é rebaixado.
 
 ## Handleratória de eventos (`app.py`)

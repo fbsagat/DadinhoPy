@@ -13,7 +13,7 @@ O servidor **nunca escolhe o idioma**. Toda string chega ao cliente como chave +
 |---|---|---|
 | Estático (HTML) | `templates/jogo.html` | atributos `data-i18n` / `data-i18n-html` / `data-i18n-title` / `data-i18n-placeholder` / `data-i18n-value` / `data-i18n-aria-label` |
 | Dinâmico (JS) | `static/script.js` | `t('chave', params)`; narração via `traduzirSegmentos(segmentos, ...)` |
-| Servidor (chaves nunca texto) | `modelos.py`/`app.py`/`narrador.py` | `txtchave`+`txtparams` (jogada inválida), `segmentos` (narração), `motivo` `{chave, params}` (`pode_iniciar`/`iniciar_negado`), `dado_qtd`/`quantidade_real`/`verdadeira` da conferência |
+| Servidor (chaves nunca texto) | `modelos/`/`app.py`/`narrador.py` | `txtchave`+`txtparams` (jogada inválida), `segmentos` (narração), `motivo` `{chave, params}` (`pode_iniciar`/`iniciar_negado`), `dado_qtd`/`quantidade_real`/`verdadeira` da conferência |
 | Chave de interface | `static/i18n.js` | dicionário único com 5 idiomas: EN (base/fallback), pt-BR, es, fr, zh-CN |
 
 ## Procedimento

@@ -108,11 +108,11 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `atualizar_coringa` | funcoes_gerais:282 | cliente/sala | 936 |
 | `construtor_dados` | funcoes_gerais:252 | cliente | 1009 |
 | `construtor_html` | funcoes_gerais:269 | cliente | 1117 |
-| `atualizar_turno` | modelos:1554 | sala | 1183 |
-| `meu_turno` | modelos:1502 / funcoes_gerais:236 (dispatcher D2) | cliente | 1270 |
-| `espera_turno` | modelos:1505 / funcoes_gerais:242 (dispatcher D2) | cliente | 1306 |
+| `atualizar_turno` | modelos/turno.py:53 | sala | 1183 |
+| `meu_turno` | modelos/rodada.py:375 / funcoes_gerais:236 (dispatcher D2) | cliente | 1270 |
+| `espera_turno` | modelos/rodada.py:382 / funcoes_gerais:242 (dispatcher D2) | cliente | 1306 |
 | `reset_rodada` | funcoes_gerais:276 | cliente | 1316 |
-| `reset_partida` | modelos:508 | sala | 1340 |
+| `reset_partida` | modelos/lobby.py:406 | sala | 1340 |
 | `formatador_coletivo` | funcoes_gerais:292 | cliente | 1371 |
 | `botao_vencedor_ativ` | funcoes_gerais:331 | cliente | 1405 |
 | `vencedor_da_partida` | funcoes_gerais:321 | cliente | 1410 |
@@ -121,9 +121,9 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `rolagem_status`/`conferencia_status`/`vitoria_status` | funcoes_gerais:208/213/218 | sala | 1595/1599/1603 |
 | `espectador` | funcoes_gerais:248 | cliente | 1608 |
 | `espectador_ritmo` | app.py:espectador_leitura (Fase 69) | cliente | handler do poll |
-| `narracao` (Fase 11/30: substituição em app.py:414 e retorno em app.py:1003) | modelos:1062 | sala | 214 |
+| `narracao` (Fase 11/30: substituição em app.py:414 e retorno em app.py:1003) | modelos/partida.py:127 | sala | 214 |
 | `jogar_dados_resultado` | app.py:916 | cliente | 1744 |
-| `jogada_invalida` | modelos:1256 (`txtchave`/`txtparams`) | cliente | 1795 |
+| `jogada_invalida` | modelos/rodada.py:98 (`txtchave`/`txtparams`) | cliente | 1795 |
 | `iniciar_negado` | app.py:612 (`motivo`) | cliente | 438 |
 | `pronto_sem_nome` | app.py:1237 (guard do `ficar_pronto`) | cliente | — |
 | `sala_criada` | app.py:804 | cliente | 259 |

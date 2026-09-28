@@ -26,11 +26,24 @@ Para estado persistente entre instâncias (produção), configure as env vars `U
 ## Verificação
 
 ```bash
-python verificar.py                 # testes automatizados + boot
+python verificar.py                 # testes automatizados + boot (entrada única do CI)
 python simular_ia.py --partidas 20  # bots headless
 ```
 
 Sempre complementar com o teste manual em dois browser tabs (criar sala, rodar partida até vitória).
+
+### Testes
+
+`verificar.py` é o runner único: ele orquestra todos os módulos de teste em `tests/` e é o que o CI executa. Os testes não seguem a convenção pytest padrão — são chamados explicitamente pelo runner e usam nomes em pt-BR:
+
+| Módulo | Execução | Escopo |
+|---|---|---|
+| `tests/test_integracao.py` | via `verificar.py` | Integração full-stack (lobby → partida → conferência → vitória → reconexão) |
+| `tests/test_cross_instance.py` | `python tests/test_cross_instance.py` **ou** via `verificar.py` | Concorrência cross-instance (lock distribuído + CAS) |
+| `tests/test_anti_fraude.py` | via `verificar.py` | Rate limit por IP, limite de conexões, redaction de logs |
+| `tests/test_performance.py` | via `verificar.py` | Cache de resumo, LRU da IA, fast-path de heartbeat, compressão |
+
+`tests/base.py` é a infraestrutura compartilhada (setup de store em memória, helpers de conexão, helpers de assertiva).
 
 ## Documentação
 

@@ -3288,7 +3288,7 @@ def teste_sair_da_sala_eliminado():
     _limpar()
     clis, lobby = _conectar_trio(1)
 
-    # Simula a eliminação (modelos.py:1164-1173): saiu da partida, zerou os
+    # Simula a eliminação (modelos/:1164-1173): saiu da partida, zerou os
     # dados e o rodada_atual, mas `partida_atual` fica apontando para a partida.
     partida = lobby.partidas[-1]
     alvo = next(j for j in partida.jogadores if j.username != "Ana")

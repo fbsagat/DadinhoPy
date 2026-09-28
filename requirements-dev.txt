@@ -1,0 +1,15 @@
+###############################################################################
+# Dev dependencies — Dadinho
+###############################################################################
+# O projeto não tem dependências de desenvolvimento além das de produção.
+# Todos os testes são orquestrados por `verificar.py` (entrada única do CI)
+# e usam apenas deps de produção + stdlib. Nenhum pytest/unittest framework
+# separado é necessário — veja "Testes" no README.md.
+#
+# Para instalar o ambiente full:
+#   pip install -r requirements.txt -r requirements-dev.txt
+###############################################################################
+-r requirements.txt
+
+# --- Opcional (não usado pelo CI) ---
+# pytest==8.3.4  # para execução ad-hoc via `pytest tests/`
