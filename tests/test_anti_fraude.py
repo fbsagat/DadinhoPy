@@ -286,17 +286,23 @@ def _testar_ia_nao_espiona():
     ]
     original = ia.secrets
     try:
-        for nivel in (1, 2, 3, 4):
-            for rng_valor in (0, 99):
-                for idx, (dados_bot, aposta, escondidos_a, escondidos_b) in enumerate(cenarios):
-                    _, bot_a, rodada_a = _montar_rodada_ia_limpa(escondidos_a, dados_bot, aposta)
-                    _, bot_b, rodada_b = _montar_rodada_ia_limpa(escondidos_b, dados_bot, aposta)
-                    ia.secrets = _RNGDeterministico(rng_valor)
-                    decisao_a = ia.decidir(bot_a, rodada_a, nivel)
-                    decisao_b = ia.decidir(bot_b, rodada_b, nivel)
-                    _checar(f'ia_nao_espiona_n{nivel}_rng{rng_valor}_c{idx}',
-                            decisao_a == decisao_b,
-                            f'A: {decisao_a} | B: {decisao_b}')
+        # Fase 76: `estilo` entra no laço (None = o bot por nível de sempre,
+        # 'prudente' = o arquétipo dedicado da substituição) — o caminho novo
+        # tem a mesma regra de ouro dos outros.
+        for estilo in (None, ia.ESTILO_PRUDENTE):
+            for nivel in (1, 2, 3, 4):
+                for rng_valor in (0, 99):
+                    for idx, (dados_bot, aposta, escondidos_a, escondidos_b) in enumerate(cenarios):
+                        _, bot_a, rodada_a = _montar_rodada_ia_limpa(escondidos_a, dados_bot, aposta)
+                        _, bot_b, rodada_b = _montar_rodada_ia_limpa(escondidos_b, dados_bot, aposta)
+                        for bot in (bot_a, bot_b):
+                            bot.ia_estilo = estilo
+                        ia.secrets = _RNGDeterministico(rng_valor)
+                        decisao_a = ia.decidir(bot_a, rodada_a, nivel)
+                        decisao_b = ia.decidir(bot_b, rodada_b, nivel)
+                        _checar(f'ia_nao_espiona_{estilo or "niv"}_n{nivel}_rng{rng_valor}_c{idx}',
+                                decisao_a == decisao_b,
+                                f'A: {decisao_a} | B: {decisao_b}')
     finally:
         ia.secrets = original
 

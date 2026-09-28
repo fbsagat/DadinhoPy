@@ -21,7 +21,7 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
                             gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO,
                             emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem,
-                            emitir_dispatcher_turno)
+                            emitir_dispatcher_turno, reconstruir_tela_sala)
 from modelos import Jogador
 from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
@@ -72,6 +72,8 @@ COOLDOWN_BUSCA = 2.0
 
 # Nível de IA usado na jogada automática de um humano atrasado (Fase 21): um
 # nível médio produz apostas razoáveis sem virar "assistente de jogo".
+# Fase 76: um humano que caiu e foi substituído pelo bot prudente entra por este
+# mesmo caminho (é o BOT dele jogando) — e aí o estilo manda, não este nível.
 AUTO_IA_NIVEL = 2
 
 # Limite de sockets simultâneos por IP (Fase 59): opt-in por env — quem não
@@ -400,6 +402,14 @@ def _substituir_por_ia(lobby, jogador, motivo='timeout'):
     resolve os caídos antes de montar a mesa) — o expurgo da espera remove, não
     substitui (ver `_purgar_desconectados`).
 
+    Fase 76: quem assume o lugar do humano que caiu é o bot PRUDENTE
+    (`ia.ESTILO_PRUDENTE`) — o arquétipo dedicado de precaução: só aposta o que o
+    próprio dado sustenta ou a jogada mínima legal, e desconfia só com a
+    matemática clara. O nível continua sendo o `ia_nivel_padrao` da sala (vale
+    no tempo de pensamento e na leitura), mas não na escolha da jogada — e a
+    personalidade sorteada logo abaixo é inerte para ele (é o que o estilo
+    garante, ver `ia.eh_prudente`).
+
     O `motivo` ('timeout' ou 'ausente') vai na narração para os demais jogadores
     entenderem por que o humano virou IA.
     """
@@ -411,7 +421,14 @@ def _substituir_por_ia(lobby, jogador, motivo='timeout'):
         return False
     jogador.is_ia = True
     jogador.ia_nivel = int(lobby.config.get('ia_nivel_padrao', 2) or 2)
+    jogador.ia_estilo = ia.ESTILO_PRUDENTE
     ia.sorteiar_personalidade(jogador)
+    # Fase 76: o `🤖` no apelido guardado, como num bot natural — é o que o
+    # cliente já desenha no card de partida (e o narrador/fichas usam para saber
+    # que a máquina está no lugar de alguém). `retomar_identidade` tira o
+    # marcador quando o humano volta. Colisão de nome na sala é resolvida em
+    # `ia.marcar_substituto` (prefere ficar sem marcador a duplicar card).
+    ia.marcar_substituto(lobby, jogador)
     jogador.desconectado_em = None
     jogador.pronto = True
     emit('narracao', narrador.narracao_substituicao(jogador, motivo), to=lobby.sala_room())
@@ -426,6 +443,7 @@ def _purgar_desconectados(lobby):
     """
     agora = datetime.now()
     mudou = False
+    substituiu = False
     for jogador in list(lobby.jogadores):
         if jogador.desconectado_em is None:
             continue
@@ -435,6 +453,7 @@ def _purgar_desconectados(lobby):
             # `iniciar_partida`, que resolve os caídos antes de montar a mesa).
             if jogador.partida_atual is not None and _substituir_por_ia(lobby, jogador):
                 mudou = True
+                substituiu = True
                 continue
             _remover_jogador_da_sala(lobby, jogador)
             mudou = True
@@ -442,6 +461,12 @@ def _purgar_desconectados(lobby):
     # bot): repõe um master humano. É no-op se já houver um.
     if mudou:
         lobby.definir_master()
+        # Fase 76: a substituição marca o apelido com o `🤖`, e o apelido é a chave
+        # dos ids dos cards no cliente. Reconstroi a tela da sala ANTES do
+        # `ia.processar` (que pode já emitir o turno do substituto com o nome
+        # novo), senão o `atualizar_turno` não acharia o card dele.
+        if substituiu:
+            reconstruir_tela_sala(lobby)
         ia.processar(lobby)
     return mudou
 
@@ -1012,6 +1037,8 @@ def retomar_identidade(dados=None):
     if voltou_de_ia:
         alvo.is_ia = False
         alvo.ia_nivel = None
+        alvo.ia_estilo = None  # Fase 76: o humano que volta joga como humano
+        alvo.username = ia.remover_marcador_ia(alvo.username)  # e sem o `🤖` do substituto
     lobby.definir_master()
     emit("connect_start",
          {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
@@ -1021,6 +1048,12 @@ def retomar_identidade(dados=None):
         emit('narracao', narrador.narracao_retorno(alvo), to=lobby.sala_room())
     atualizar_lista_usuarios(lobby)
     enviar_snapshot_sala(lobby, alvo)
+    if voltou_de_ia:
+        # O nome guardado mudou (o `🤖` do substituto saiu), e o apelido é a chave
+        # dos `id`s dos cards no cliente: sem reconstruir, os cards da sala
+        # ficariam com o nome marcado até a próxima rodada. O que voltou já
+        # recebeu o snapshot acima, então a reconstrução é para os demais.
+        reconstruir_tela_sala(lobby, exceto=alvo.client_id)
     if ia.processar(lobby):
         salvar_sala(lobby)
 

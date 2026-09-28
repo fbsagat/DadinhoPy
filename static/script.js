@@ -1977,22 +1977,29 @@ socket.on('atualizar_turno', function (dados) {
             el.removeAttribute('data-rotulo');
         });
     }
-    card_row.innerHTML = ""
-    lista_turnos.forEach((sublista, index) => {
-        const dado = sublista[0];
-        const dado_qtd = sublista[1];
-        let opacidade;
+    // A linha de dados vive no card do apelido; se o nome mudou depois do
+    // construtor_html (o `🤖` da substituição, Fase 76), o card ainda é o do
+    // nome antigo e este turno não tem onde desenhar. Mesmo mecanismo de
+    // `reset_rodada`/`formatador_coletivo`: sem elemento, o próximo
+    // `construtor_html` (nova rodada) reconstrói o card.
+    if (card_row) {
+        card_row.innerHTML = ""
+        lista_turnos.forEach((sublista, index) => {
+            const dado = sublista[0];
+            const dado_qtd = sublista[1];
+            let opacidade;
 
-        // Definindo a opacidade com base no índice
-        if (index === 0) {
-            opacidade = 'opacity-100'; // Para o índice 0, opacidade 25%
-        } else if (index === 1) {
-            opacidade = 'opacity-50'; // Para o índice 1, opacidade 50%
-        } else if (index === 2) {
-            opacidade = 'opacity-25'; // Para o índice 2, opacidade 100%
-        }
-        card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado, destacar_ultimo && index === 0));
-    })
+            // Definindo a opacidade com base no índice
+            if (index === 0) {
+                opacidade = 'opacity-100'; // Para o índice 0, opacidade 25%
+            } else if (index === 1) {
+                opacidade = 'opacity-50'; // Para o índice 1, opacidade 50%
+            } else if (index === 2) {
+                opacidade = 'opacity-25'; // Para o índice 2, opacidade 100%
+            }
+            card_row.appendChild(createDiceSection(`X${dado_qtd}`, opacidade, dado, destacar_ultimo && index === 0));
+        })
+    }
     // O selo "ÚLTIMA" ancora no cabeçalho (fora do container de rolagem do
     // corpo do card) para nunca ser cortado nem ficar atrás do card.
     if (destacar_ultimo) {

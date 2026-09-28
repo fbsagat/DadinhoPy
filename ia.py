@@ -44,6 +44,29 @@ NOMES_NIVEIS = {
     4: 'Mestre',
 }
 
+# Fase 76 — bot prudente. Estilo de JOGADA, não nível de inteligência: o mesmo
+# bot pode ser prudentinho em qualquer nível (o nível segue mandando no tempo de
+# pensamento e no bônus de leitura, nunca no risco). Hoje existe um estilo só;
+# o campo `Jogador.ia_estilo` é None (padrão) ou este.
+ESTILO_PRUDENTE = 'prudente'
+
+# Limiar de desconfiança do prudente: chama só quando a aposta anterior é quase
+# certamente falsa — uma chamada de graça que encerra a rodada nos dados de outro.
+# Sem ruído e sem multiplicador de personalidade (a personality é inerte nele: é
+# OUTRO eixo, não tempero). Sobe devagar com o nº de turnos (mesma forma do nível
+# 4) porque uma rodada que só cresce não termina sozinha — este é o teto de
+# segurança contra a mesa arrastar o prudente junto.
+LIMIAR_PRUDENTE_BASE = 0.32
+LIMIAR_PRUDENTE_POR_TURNO = 0.02
+LIMIAR_PRUDENTE_ALONGE = 0.13
+LIMIAR_PRUDENTE_MAX = 0.45
+
+# Quantas apostas cobertas entram na rodada de variety do prudente (Fase 76): as
+# duas de menor exposição. Um bot que repetisse sempre a mesma jogada seria um
+# manual de instruções para quem está na mesa; o resto do repertório é
+# determinado de propósito (a precaução é método, não tempero).
+PRUDENTE_VARIACAO_COBERTAS = 2
+
 # Teto de segurança por chamada de `processar`: um jogo inteiro só entre bots
 # pode exigir centenas de ações (rolagens, apostas, conferências e vitórias), e
 # como `avancou` só é True quando há progresso real, o laço termina sozinho
@@ -179,6 +202,57 @@ def _nomes_em_uso(lobby):
     return ({jogador.username for jogador in lobby.jogadores if jogador.username}
             | {espectador.username for espectador in lobby.espectadores
                if espectador.username})
+
+
+def tem_marcador_ia(nome):
+    """True se o apelido já carrega o `🤖` (é o que o narrador usa pra saber quem é máquina)."""
+    return isinstance(nome, str) and nome.startswith(MARCADOR_IA)
+
+
+def aplicar_marcador_ia(nome):
+    """
+    Devolve `nome` com o `🤖` na frente — idempotente e tolerante a `None`.
+
+    Usado na substituição do desconectado (Fase 76): o substituto passa a exibir
+    o mesmo nome marcado que um bot natural, em todas as telas que mostram o
+    apelido (card de partida, fichas de confirmação, narração, lista da espera),
+    porque o marcador é do apelido guardado e não de um render do cliente.
+    """
+    if not nome or tem_marcador_ia(nome):
+        return nome
+    return f"{MARCADOR_IA}{nome}"
+
+
+def remover_marcador_ia(nome):
+    """
+    Devolve `nome` sem o `🤖` — o inverso de `aplicar_marcador_ia`, para quando o
+    humano volta (`retomar_identidade`) e volta a ser ele mesmo na tela.
+    """
+    if not tem_marcador_ia(nome):
+        return nome
+    return nome[len(MARCADOR_IA):]
+
+
+def marcar_substituto(lobby, jogador):
+    """
+    Fase 76: põe o `🤖` no apelido do jogador que acabou de virar bot por
+    substituição (o humano que caiu), devolvendo o apelido final.
+
+    O marcador fica no apelido **guardado** — como no bot nativo — para que o
+    cliente não precise saber nada: o `🤖` aparece no card de partida, nas fichas
+    de confirmação e na narração, que já o treatment dos bots naturais. Aparece
+    em todas elas de uma vez porque todas elas consomem o mesmo campo.
+
+    Colisão (o apelido marcado já está em uso na sala) devolve o nome sem
+    marcador: dois cards com o mesmo apelido dariam o mesmo `id` no DOM e um card
+    passaria a receber os dados do outro. A troca continua anunciada na narração —
+    o marcador é conveniência visual, não correção do jogo.
+    """
+    nome = aplicar_marcador_ia(jogador.username)
+    if nome != jogador.username and nome in _nomes_em_uso(lobby) - {jogador.username}:
+        return jogador.username
+    jogador.username = nome
+    return nome
 
 
 def nome_livre(lobby, apelido=None):
@@ -519,6 +593,12 @@ def decidir(jogador, rodada, nivel):
     nível sente medo/coragem conforme os dados que restam: com poucos dados
     joga mais brando, com dados de sobra (ou ainda no máximo da partida)
     arrisca mais — instinto, não cálculo, então vale até pro Novato.
+
+    Fase 76: o bot PRUDENTE (`Jogador.ia_estilo`) sai antes de tudo isso. Para
+    ele, personalidade e medo/coragem são inertes — a precaução é prioridade,
+    não tempero, e um sorteio de ousadia não pode reintroduzir o risco que o
+    arquétipo existe para evitar. O nível continua valendo no tempo de
+    pensamento e no bônus de leitura, nunca na escolha da jogada.
     """
     try:
         nivel = int(nivel)
@@ -526,6 +606,9 @@ def decidir(jogador, rodada, nivel):
         nivel = 1
     if nivel not in NOMES_NIVEIS:
         nivel = 1
+
+    if eh_prudente(jogador):
+        return _decidir_prudente(rodada, jogador, nivel)
 
     risco = float(getattr(jogador, 'ia_risco', 0.5) or 0.5)
     agressividade = float(getattr(jogador, 'ia_agressividade', 0.5) or 0.5)
@@ -554,20 +637,7 @@ def decidir(jogador, rodada, nivel):
             face, quantidade = _aposta_por_intuicao(apostas, ultimo, risco_efetivo)
         return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
 
-    coringa = rodada.com_coringa
-    meus = list(jogador.dados)
-    desconhecidos = max(0, total_dados_ativos(rodada) - len(meus))
-    probabilidade = None
-    if ultimo is not None:
-        suporte = contar_suporte(meus, ultimo.dado_face, coringa)
-        probabilidade = probabilidade_verdade(
-            ultimo.dado_face, ultimo.dado_qtd, suporte, desconhecidos, coringa
-        )
-        # Fase 36: Perito/Mestre temperam a conta pura com o histórico deste
-        # adversário específico nesta partida (rodadas já fechadas). Níveis 1
-        # e 2 não fazem essa leitura — continuam só no cálculo/heurística de
-        # sempre.
-        probabilidade = _ler_probabilidade(rodada, ultimo, probabilidade, nivel)
+    probabilidade = _probabilidade_ultima(rodada, jogador, ultimo, nivel)
 
     limiar = _limiar_desconfianca(rodada, nivel, ultimo, risco_efetivo, agressividade_efetiva)
     desconfia = probabilidade is not None and probabilidade < limiar
@@ -595,6 +665,29 @@ def _sem_aposta(ultimo):
     if ultimo is not None:
         return {'acao': 'desconfiar'}
     return {'acao': 'apostar', 'dado': 1, 'quantidade': 1}
+
+
+def _probabilidade_ultima(rodada, jogador, ultimo, nivel):
+    """
+    Probabilidade de a ÚLTIMA aposta da rodada ser verdadeira, do ponto de vista
+    do bot: só os PRÓPRIOS dados entram como suporte e todo o resto da mesa é
+    tratado como desconhecido (regra de ouro do módulo — nunca a rodada em
+    andamento). None quando não há aposta anterior (abertura da rodada).
+
+    Com o bônus de leitura dos níveis 3/4 por cima (`_ler_probabilidade`): a
+    leitura é sobre rodadas já fechadas, e afina a PRECISÃO da conta, nunca o
+    risco da aposta escolhida. Os dois caminhos (nível e prudente) usam esta
+    mesma conta — é a matemática, não o estilo.
+    """
+    if ultimo is None:
+        return None
+    meus = list(jogador.dados)
+    desconhecidos = max(0, total_dados_ativos(rodada) - len(meus))
+    suporte = contar_suporte(meus, ultimo.dado_face, rodada.com_coringa)
+    probabilidade = probabilidade_verdade(
+        ultimo.dado_face, ultimo.dado_qtd, suporte, desconhecidos, rodada.com_coringa
+    )
+    return _ler_probabilidade(rodada, ultimo, probabilidade, nivel)
 
 
 def _ler_probabilidade(rodada, ultimo, probabilidade, nivel):
@@ -761,6 +854,120 @@ def _ajustar_piso_pelo_proximo(piso, rodada, jogador):
         return piso
     ajuste = (taxa - 0.5) * 2 * AJUSTE_PISO_MAXIMO
     return max(0.03, min(0.85, piso + ajuste))
+
+
+# ---------------------------------------------------------------------------
+# Bot prudente (Fase 76)
+# ---------------------------------------------------------------------------
+#
+# Um estilo de JOGADA, não um nível: entra por `eh_prudente` antes de qualquer
+# personalidade/nível, porque aqui a precaução é PRIORIDADE e não tempero. O
+# repertório é curto e sem economia de blefe:
+#
+# 1. Desconfia só com a matemática clara (limiar alto, sem ruído e sem o
+#    impulso aleatório dos outros níveis) — chamar uma aposta quase certamente
+#    falsa é de graça e encerra a rodada nos dados de outra pessoa;
+# 2. Aposta o que o PRÓPRIO dado sustenta (risco zero: a aposta é verdadeira
+#    qualquer que seja o resultado dos outros, então ninguém ganha chamando);
+# 3. Sem aposta coberta, faz a MÍNIMA jogada legal — a menor exposição que as
+#    regras permitem, o mais perto de "só passar a vez" que o jogo tem (não
+#    existe passar: ou sobe a quantidade ou sobe a face).
+#
+# O custo conhecido: a aposta coberta entrega o quanto o bot tem daquela face
+# (quem contar as faces descobre o limite dele). É o preço do risco zero, e o
+# que amortece é nunca escolher a cobertura no seu valor exato quando uma
+# cobertura mais barata existe.
+
+def eh_prudente(jogador):
+    """
+    True quando o jogador é o bot prudente (Fase 76). Exige `is_ia`: o estilo
+    pertence ao BOT — um humano que retomou o controle (ou que só entrou em
+    auto-jogar por atraso) não joga prudente.
+    """
+    return bool(getattr(jogador, 'is_ia', False)) and \
+        getattr(jogador, 'ia_estilo', None) == ESTILO_PRUDENTE
+
+
+def _decidir_prudente(rodada, jogador, nivel):
+    """
+    Turno do prudente. A desconfiança vem PRIMEIRO: quando a conta é clara,
+    encerrar a rodada agora é o lance de menor exposição disponível (e o único
+    em que ele não fica exposto). Sem aposta coberta, não empurra a mesa: fica
+    na mínima legal.
+    """
+    ultimo = rodada.turnos[-1] if rodada.turnos else None
+    if ultimo is not None:
+        probabilidade = _probabilidade_ultima(rodada, jogador, ultimo, nivel)
+        if probabilidade is not None and probabilidade < _limiar_prudente(rodada):
+            return {'acao': 'desconfiar'}
+    aposta = _aposta_prudente(rodada, jogador, ultimo)
+    if aposta is None:
+        return _sem_aposta(ultimo)
+    face, quantidade = aposta
+    return {'acao': 'apostar', 'dado': face, 'quantidade': quantidade}
+
+
+def _limiar_prudente(rodada):
+    """
+    Limiar de desconfiança do prudente: chama só o que é quase certamente
+    mentira. Sobe com o tamanho da rodada (mesma forma do nível 4) — é o que
+    impede a mesa de passar a rodada inteira aumentando a aposta enquanto o
+    prudente só espera, já que ele não tem nada que force o fim do ciclo.
+    """
+    if not rodada.turnos:
+        return 0.0
+    return min(LIMIAR_PRUDENTE_MAX,
+               LIMIAR_PRUDENTE_BASE
+               + min(LIMIAR_PRUDENTE_ALONGE, len(rodada.turnos) * LIMIAR_PRUDENTE_POR_TURNO))
+
+
+def _chave_de_exposicao(aposta):
+    """
+    Ordem de exposição de uma aposta: primeiro a MENOR quantidade (é a que
+    menos arrisca), e no empate a coringa (face 1) — o coringa conta na
+    contagem de qualquer face, então é a aposta que o próximo jogador mais
+    facilmente julga verdadeira, ou seja, a que ele menos vai querer chamar.
+    """
+    return (aposta[1], 0 if aposta[0] == 1 else 1, aposta[0])
+
+
+def _aposta_prudente(rodada, jogador, ultimo):
+    """
+    A aposta de menor exposição entre as legais. Sem camada de sorteio: a jogada
+    é uma consequência do que o bot vê.
+
+    - Abertura (1º turno): 1 dado na face de maior suporte. É a menor exposição
+      possível e ainda é verdadeira (o bot tem o dado), então abre a rodada sem
+      arriscar nada e deixa a chamada para quem quiser encará-la.
+    - Cobertas (`quantidade <=` suporte do PRÓPRIO dado, coringa contado): risco
+      zero. Entre elas, a de menor exposição, com uma variadinha de no máximo
+      `PRUDENTE_VARIACAO_COBERTAS` para não virar autômato.
+    - Nenhuma coberta: a mínima jogada legal (menor quantidade; coringa/face
+      mais baixa no empate).
+    """
+    apostas = gerar_apostas_validas(rodada)
+    if not apostas:
+        return None
+    meus = list(jogador.dados)
+    if ultimo is None:
+        return _face_de_maior_suporte(meus, rodada.com_coringa), 1
+    cobertas = [aposta for aposta in apostas
+                if aposta[1] <= contar_suporte(meus, aposta[0], rodada.com_coringa)]
+    if cobertas:
+        candidatas = sorted(cobertas, key=_chave_de_exposicao)[:PRUDENTE_VARIACAO_COBERTAS]
+        return secrets.choice(candidatas)
+    return min(apostas, key=_chave_de_exposicao)
+
+
+def _face_de_maior_suporte(dados, coringa):
+    """
+    Face mais apoiada pelos PRÓPRIOS dados (a coringa vale para qualquer face
+    ≠ 1). Empate vai para a face maior: a de contagem mais alta é a aposta de
+    abertura mais crível para quem vai decidir se chama. Sempre devolve uma face
+    COM apoio — todo jogador tem pelo menos um dado e, sem coringa, qualquer
+    face que ele tenha vale 1; com o coringa ligado, um 1 dele sustenta todas.
+    """
+    return max(range(1, 7), key=lambda face: (contar_suporte(dados, face, coringa), face))
 
 
 def executar_acao(jogador, rodada, acao):

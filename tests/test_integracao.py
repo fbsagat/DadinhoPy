@@ -885,7 +885,9 @@ def teste_master_apos_substituicao_ia():
     c1.disconnect()
     c2.emit("verificar_desconectados")  # expurga a janela (grace = 0 no teste)
     lobby = modulo_store.carregar_sala(SALA)
-    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    import ia
+    # Fase 76: o substituto ganha o `🤖` no apelido guardado, como um bot natural
+    ana = next(j for j in lobby.jogadores if j.username == f"{ia.MARCADOR_IA}Ana")
     bia = next(j for j in lobby.jogadores if j.username == "Bia")
     assert ana.is_ia, "master caído deve ser substituído por IA"
     assert not ana.master, "bot não pode continuar master"
@@ -2558,14 +2560,41 @@ def teste_volta_apos_substituicao_ia():
     ana = next(j for j in lobby.jogadores if j.username == "Ana")
     ana_chave = ana.chave_secreta
     ana_sid = ana.client_id
+    # Fase 76: a substituição acontece com a mesa ABERTA (página 2), que é onde
+    # o card de partida existe — o `🤖` só aparece no card se a tela for
+    # reconstruída ali, não só na rodada seguinte.
+    time.sleep(0.6)
+    c1.emit("jogar_dados", {"chave": cs1["chave_secreta"]})
+    time.sleep(0.6)
+    c2.emit("jogar_dados", {"chave": cs2["chave_secreta"]})
+    time.sleep(0.6)
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    time.sleep(0.6)
+    c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
+    assert modulo_store.carregar_sala(SALA).pagina == 2, "a mesa precisa estar aberta"
 
     # Ana cai e a graça expira: vira IA (Bia está ativa). A partida segue.
+    c2.get_received()  # esvazia a fila: os eventos abaixo são os da troca
     c1.disconnect()
     c2.emit("verificar_desconectados")  # grace = 0 no teste
     lobby = modulo_store.carregar_sala(SALA)
-    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    import ia as modulo_ia
+    # Fase 76: o `🤖` vai no apelido guardado (como no bot natural), então é por
+    # ele que o card de partida, as fichas e a narração passam a dizer que ali
+    # agora tem máquina.
+    ana = next(j for j in lobby.jogadores if j.username == f"{modulo_ia.MARCADOR_IA}Ana")
     assert ana.is_ia, "caído com a opção ligada deve virar IA"
     assert ana.client_id == ana_sid, "substituído mantém sid e chave"
+    # Fase 76: quem assume o lugar do caído é o bot PRUDENTE, no nível padrão da
+    # sala (o nível continua no tempo de pensamento e na leitura). Assertado
+    # DEPOIS de vir do store: é o estado distribuído que precisa lembrar do
+    # estilo, senão outra instância reconstrói a sala e o bot volta a ser o
+    # genérico do nível.
+    assert ana.ia_estilo == modulo_ia.ESTILO_PRUDENTE, \
+        f"o substituto deve ser o bot prudente, veio {ana.ia_estilo!r}"
+    assert modulo_ia.eh_prudente(ana), "o estilo tem que valer no caminho de decisão"
+    assert ana.ia_nivel == lobby.config.get('ia_nivel_padrao'), \
+        f"o prudente joga no nível da sala, veio {ana.ia_nivel}"
     eventos_c2 = c2.get_received()
     assert any(e["name"] == "narracao" and e["args"][0].get("tipo") == "substituicao"
                for e in eventos_c2), "a sala deve ser avisada da substituição por IA"
@@ -2573,6 +2602,21 @@ def teste_volta_apos_substituicao_ia():
                for e in eventos_c2 if e["name"] == "narracao"
                for s in (e["args"][0].get("segmentos") or [])), \
         "a narração deve informar o motivo (caiu e não voltou a tempo)"
+    # Fase 76: como o apelido é a chave dos ids dos cards, a sala inteira
+    # reconstrói a tela na troca — senão o card do substituto seguiria com o nome
+    # antigo e o `atualizar_turno` do turno dele não acharia a linha de dados.
+    # A reconstrução tem que vir ANTES do turno: é a ordem que o `ia.processar`
+    # garante (reconstruir dentro de `_purgar_desconectados`).
+    reconst = [i for i, e in enumerate(eventos_c2) if e["name"] == "construtor_html"]
+    turnos = [i for i, e in enumerate(eventos_c2) if e["name"] == "atualizar_turno"
+              and e["args"][0].get("jogador") == f"{modulo_ia.MARCADOR_IA}Ana"]
+    assert reconst, "a sala deve receber o construtor_html com o nome marcado"
+    turnos_lista = eventos_c2[reconst[-1]]["args"][0]["turnos_lista"]
+    assert f"{modulo_ia.MARCADOR_IA}Ana" in turnos_lista, \
+        f"os cards devem vir com o apelido marcado, veio {list(turnos_lista)}"
+    if turnos:  # o bot pode não ter jogado ainda neste instante
+        assert reconst[-1] < turnos[0], \
+            "os cards têm que ser reconstruídos antes do turno do substituto"
 
     # Ana volta (sid novo): a retomada devolve o controle na mesma partida.
     c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
@@ -2582,11 +2626,26 @@ def teste_volta_apos_substituicao_ia():
     assert len(anas) == 1, "retomada não pode duplicar o jogador"
     assert anas[0].is_ia is False, "retomada deve devolver o controle ao humano"
     assert anas[0].ia_nivel is None, "nível de IA deve ser limpo na retomada"
+    assert anas[0].ia_estilo is None, "estilo do bot deve ser limpo na retomada"
+    # Fase 76: o `🤖` do substituto sai com a volta (é o mesmo campo de nome) e
+    # os cards dos demais são reconstruídos com ele — sem isso, o card da Ana
+    # ficaria marcado até a próxima rodada.
+    eventos_c2 = c2.get_received()
+    reconstrucoes = [e for e in eventos_c2 if e["name"] == "construtor_html"]
+    assert reconstrucoes, "a sala deve reconstruir os cards quando o humano volta"
+    turnos_lista = reconstrucoes[-1]["args"][0]["turnos_lista"]
+    assert "Ana" in turnos_lista and f"{modulo_ia.MARCADOR_IA}Ana" not in turnos_lista, \
+        f"os cards devem voltar ao apelido sem marcador, veio {list(turnos_lista)}"
     assert anas[0].desconectado_em is None, "retomada deve encerrar a janela"
     assert anas[0].partida_atual is lobby.partidas[-1], "a partida segue com Ana"
     eventos = c1b.get_received()
-    assert _achar_evento(eventos, "construtor_dados") is not None, \
-        "snapshot da identidade retomada deve ser enviado"
+    # A mesa está na página 2 (a rolagem já aconteceu), então o snapshot da
+    # identidade retomada é o `construtor_html` dos cards — e ele tem que vir
+    # com o apelido SEM o marcador, que é o que o card da Ana vai desenhar.
+    reconst_ana = [e for e in eventos if e["name"] == "construtor_html"]
+    assert reconst_ana, "snapshot da identidade retomada deve ser enviado"
+    turnos_ana = reconst_ana[-1]["args"][0]["turnos_lista"]
+    assert "Ana" in turnos_ana, f"o card de Ana deve voltar sem marcador, veio {list(turnos_ana)}"
     assert any(e["name"] == "narracao" and e["args"][0].get("tipo") == "retorno"
                for e in eventos), "a sala deve ser avisada de que Ana reassumiu o controle"
     c1b.disconnect()
@@ -2696,7 +2755,9 @@ def teste_iniciar_sem_fantasma():
 
         c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
         lobby = modulo_store.carregar_sala(SALA)
-        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        import ia
+        # Fase 76: marcado como qualquer bot, já na partida que ele entra.
+        bia = next(j for j in lobby.jogadores if j.username == f"{ia.MARCADOR_IA}Bia")
         assert bia.is_ia, "caído da espera com opção ligada vira IA na partida"
         assert bia.partida_atual is lobby.partidas[-1], "IA deve entrar na mesa"
         assert lobby.pagina == 1

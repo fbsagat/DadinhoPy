@@ -3,7 +3,7 @@
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 9
+VERSAO_ATUAL = 10
 
 # Janela (segundos) em que a vaga de um humano removido fica registrada no
 # lobby (Fase 30): permite o `retomar_identidade` dizer por que a retomada foi
@@ -80,6 +80,18 @@ def _migrar_v8_para_v9(dados):
     return dados
 
 
+def _migrar_v9_para_v10(dados):
+    """
+    v9 -> v10 (Fase 76): estilo de jogo do bot (`ia_estilo`). Só o bot que
+    substitui um humano desconectado usa; None = o repertório por nível de
+    sempre. A leitura usa `get` com default, então o campo ausente já é
+    tratado — a migração existe pra registrar o formato.
+    """
+    for jogador in list(dados.get('jogadores', []) or []) + list(dados.get('espectadores', []) or []):
+        jogador.setdefault('ia_estilo', None)
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
@@ -89,4 +101,5 @@ MIGRACOES = {
     6: _migrar_v6_para_v7,
     7: _migrar_v7_para_v8,
     8: _migrar_v8_para_v9,
+    9: _migrar_v9_para_v10,
 }

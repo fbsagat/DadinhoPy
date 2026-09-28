@@ -5,8 +5,13 @@ Não abre sockets: monta o Lobby direto no modelo e usa ia.processar para tocar 
 partida inteira. Serve para verificar que o motor não trava/estoura e para
 comparar o desempenho dos 4 níveis.
 
+Fase 76: `--estilo prudente` joga a mesa inteira com o arquétipo cauteloso (o
+mesmo que o humano desconectado vira). É a prova de que a mesa fecha: um bot
+que só aposta o que sustenta e quase nunca chama poderia arrastar a rodada.
+
 Uso (com a .venv, da raiz do repo):
     python simular_ia.py --partidas 40 --dados 3 --niveis 1,2,3,4
+    python simular_ia.py --partidas 20 --dados 3 --niveis 2,2,3,3 --estilo prudente
 """
 
 import argparse
@@ -34,13 +39,14 @@ def _silenciar_socket():
             modulo.emit = lambda *a, **k: None
 
 
-def montar_partida(niveis, dados_qtd, com_coringa):
+def montar_partida(niveis, dados_qtd, com_coringa, estilo=None):
     lobby = Lobby(sala_id='sim', lobby_numero=1)
     lobby.config['dados_qtd'] = dados_qtd
     lobby.config['com_coringa'] = com_coringa
     lobby.config['max_jogadores'] = max(2, len(niveis))
     for indice, nivel in enumerate(niveis):
         jogador = Jogador.criar_ia(nivel, f"Bot{nivel}_{indice}")
+        jogador.ia_estilo = estilo  # Fase 76: None = o repertório por nível
         lobby.adicionar_jogador(jogador)
     lobby.jogadores[0].master = True
     partida = lobby.construir_partida(dados_qtd=dados_qtd)
@@ -48,7 +54,7 @@ def montar_partida(niveis, dados_qtd, com_coringa):
     return lobby
 
 
-def jogar(niveis, dados_qtd, com_coringa, rodadas_max=400):
+def jogar(niveis, dados_qtd, com_coringa, rodadas_max=400, estilo=None):
     """Roda uma partida inteira e devolve o nível do vencedor (ou None)."""
     # Fase 52: o simulador cria um Lobby NOVO por partida com o mesmo sala_id
     # 'sim' — o rastreador de revisão (CAS) da instância precisaria continuar a
@@ -56,7 +62,7 @@ def jogar(niveis, dados_qtd, com_coringa, rodadas_max=400):
     # recomeça do 1). `remover_sala` zera o rastreador para a revisão recomeçar,
     # como aconteceria numa sala real criada do zero.
     store.remover_sala('sim')
-    lobby = montar_partida(niveis, dados_qtd, com_coringa)
+    lobby = montar_partida(niveis, dados_qtd, com_coringa, estilo)
     for _ in range(rodadas_max):
         ia.processar(lobby)
         partida = lobby.partidas[-1]
@@ -71,21 +77,26 @@ def main():
     parser.add_argument('--dados', type=int, default=3)
     parser.add_argument('--niveis', type=str, default='1,2,3,4')
     parser.add_argument('--sem-coringa', action='store_true')
+    # Fase 76: 'prudente' = o arquétipo cauteloso da substituição (todos os bots).
+    parser.add_argument('--estilo', type=str, default='padrao',
+                        choices=['padrao', 'prudente'])
     args = parser.parse_args()
 
     _silenciar_socket()
     niveis = [int(n) for n in args.niveis.split(',') if n.strip()]
     if len(niveis) < 2:
         raise SystemExit('informe ao menos 2 níveis em --niveis (ex.: 1,2,3,4)')
+    estilo = None if args.estilo == 'padrao' else ia.ESTILO_PRUDENTE
 
     vitorias = {nivel: 0 for nivel in set(niveis)}
     for _ in range(args.partidas):
-        vencedor = jogar(niveis, args.dados, not args.sem_coringa)
+        vencedor = jogar(niveis, args.dados, not args.sem_coringa, estilo=estilo)
         if vencedor is not None:
             vitorias[vencedor] = vitorias.get(vencedor, 0) + 1
 
     print(f"Partidas: {args.partidas} · dados por jogador: {args.dados} · "
-          f"coringa: {'nao' if args.sem_coringa else 'sim'} · niveis: {niveis}")
+          f"coringa: {'nao' if args.sem_coringa else 'sim'} · niveis: {niveis} · "
+          f"estilo: {args.estilo}")
     for nivel in sorted(vitorias):
         pct = 100.0 * vitorias[nivel] / max(1, args.partidas)
         print(f"  Nível {nivel} ({ia.NOMES_NIVEIS.get(nivel, '?')}): "

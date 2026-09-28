@@ -252,6 +252,7 @@ class Lobby:
         jogador.desconectado_em = datetime.fromisoformat(desconectado_em) if desconectado_em else None
         jogador.is_ia = bool(dados_jogador.get('is_ia', False))
         jogador.ia_nivel = dados_jogador.get('ia_nivel')
+        jogador.ia_estilo = dados_jogador.get('ia_estilo')
         jogador.ia_risco = float(dados_jogador.get('ia_risco', 0.5) or 0.5)
         jogador.ia_agressividade = float(dados_jogador.get('ia_agressividade', 0.5) or 0.5)
         jogador.suspeito = dados_jogador.get('suspeito')

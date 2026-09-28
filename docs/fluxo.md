@@ -45,6 +45,10 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 
 Master renomeia os bots da espera via `renomear_ia` (master + `chave_secreta`, `client_id` + `apelido`). O editor nasce na própria célula do nome (input + "ok", Enter salva, Escape/blur cancela) e vem das linhas marcadas em `update_user_list.bots`; `marcador_ia`/`limite_nome_ia` do mesmo payload montam o input sem duplicar a constante no JS. O servidor recoloca o `🤖`, resolve colisão com sufixo `_1` dentro do orçamento e devolve o nome final no `update_user_list` do broadcast; recusa vai como `renomear_ia_negado` com `{motivo: {chave, params}}`. Fora da espera o evento é no-op (o apelido já está nas fichas de confirmação, no narrador e no histórico da rodada).
 
+## Substituto do desconectado (Fase 76)
+
+Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a janela de reconexão (`_gc_sala`) e `_substituir_por_ia` (app.py) converte o jogador que caiu em bot **prudente** (`ia.ESTILO_PRUDENTE`) e marca o apelido guardado com o `🤖` (`ia.marcar_substituto`) — o mesmo marcador do bot natural, então o card de partida, as fichas, a narração e a lista da espera passam a mostrar que ali tem máquina sem evento novo. Dados, vez e `chave_secreta`/`client_id` são preservados; a sala é avisada pela narração `narr.substituicao.*`. Como o apelido é a chave dos `id`s dos cards no cliente, a troca **reconstrói a tela da sala inteira** (`funcoes_gerais.reconstruir_tela_sala`, mesmo caminho do snapshot de reconexão) antes de `ia.processar` jogar o turno do substituto. O caminho de decisão é o de `ia.decidir` → `_decidir_prudente` (aposta só o que o próprio dado sustenta, mínima jogada legal quando não há coberta, desconfia só com a conta abaixo de `_limiar_prudente`), no nível `ia_nivel_padrao` da sala. `retomar_identidade` do mesmo humano (sid novo) limpa `ia_estilo`/`ia_nivel`, tira o `🤖` e reconstrói os cards dos demais. Ver ADR-010.
+
 ## Mapa de eventos
 
 ### Cliente → servidor (emits de `static/script.js` → handlers em `app.py`)

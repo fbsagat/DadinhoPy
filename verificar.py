@@ -320,6 +320,7 @@ def verificar_gevent():
 # ---------------------------------------------------------------------------
 def verificar_roundtrip():
     print("4) serialização/migração do Lobby")
+    import ia
     import modelos
 
     lobby = modelos.Lobby(sala_id="rt", lobby_numero=7)
@@ -345,6 +346,7 @@ def verificar_roundtrip():
     bot = modelos.Jogador.criar_ia(3, "🤖 Teste")
     bot.ia_risco = 0.3
     bot.ia_agressividade = 0.9
+    bot.ia_estilo = ia.ESTILO_PRUDENTE
     lobby.adicionar_jogador(bot)
     espectador = modelos.Jogador(client_id="spec1")
     espectador.username = "Eva"
@@ -360,6 +362,11 @@ def verificar_roundtrip():
     _checar("round-trip numero de partida", copia.proxima_partida_num == lobby.proxima_partida_num)
     _checar("round-trip personalidade IA",
             [(j.ia_risco, j.ia_agressividade) for j in copia.jogadores if j.is_ia] == [(0.3, 0.9)])
+    # Fase 76: o estilo do bot viaja no store — sem ele, um prudente reconstrído
+    # de outra instância voltaria a ser o bot genérico do nível (e a partida segue
+    # no meio, em estado distribuído).
+    _checar("round-trip estilo do bot",
+            [j.ia_estilo for j in copia.jogadores if j.is_ia] == [ia.ESTILO_PRUDENTE])
 
     # Fase 30: vagas recentes (motivo do retomar_negado) sobrevivem ao round-trip.
     lobby.registrar_vaga_perdida(espectador)
@@ -425,6 +432,16 @@ def verificar_roundtrip():
     _checar("migração v5 -> v6",
             m5.jogadores[0].ia_risco == 0.5 and m5.jogadores[0].ia_agressividade == 0.5,
             f"{m5.jogadores[0].ia_risco}/{m5.jogadores[0].ia_agressividade}")
+
+    # v9 -> v10: o estilo de jogo do bot (Fase 76) — ausente vira None (o
+    # repertório por nível), nunca um estilo que não existe.
+    v9 = {"sala_id": "v9", "lobby_num": 1, "versao": 9, "jogadores": [
+        {"client_id": "w", "is_ia": True, "ia_nivel": 3},
+        {"client_id": "h", "is_ia": False}], "espectadores": [], "partidas": []}
+    m9 = modelos.Lobby.de_dict(dict(v9))
+    _checar("migração v9 -> v10",
+            m9.jogadores[0].ia_estilo is None and m9.jogadores[1].ia_estilo is None,
+            str([j.ia_estilo for j in m9.jogadores]))
 
 
 # ---------------------------------------------------------------------------
@@ -504,8 +521,218 @@ def verificar_nomes_ia():
     _checar("apelido ocupado -> devolve outro do pool",
             ia.nome_livre(lobby, ocupado) != ocupado, "")
     # `nome_livre` sem candidato também nunca devolve `None`.
-    _checar("nunca devolve None (bot sem apelido trava a partida)",
+    _checar("nome_livre sem candidato nunca devolve None (bot sem apelido trava a partida)",
             all(ia.nome_livre(lobby) is not None for _ in range(50)), "")
+
+    # Fase 76: o marcador do substituto. É o mesmo `🤖` do bot natural, no mesmo
+    # campo (o apelido guardado) — precisa ser idempotente nos dois sentidos,
+    # senão o `🤖` se duplica na troca ou sobra no nome de quem voltou.
+    _checar("marcador: aplicar/verificar/remover é ida e volta",
+            ia.tem_marcador_ia(ia.aplicar_marcador_ia("Ana"))
+            and ia.remover_marcador_ia(ia.aplicar_marcador_ia("Ana")) == "Ana"
+            and ia.aplicar_marcador_ia("Ana") == f"{ia.MARCADOR_IA}Ana", "")
+    _checar("marcador: idempotente (não duplica o 🤖)",
+            ia.aplicar_marcador_ia(ia.aplicar_marcador_ia("Ana")) == f"{ia.MARCADOR_IA}Ana"
+            and ia.remover_marcador_ia(ia.remover_marcador_ia(f"{ia.MARCADOR_IA}Ana")) == "Ana", "")
+    _checar("marcador: tolera apelido vazio (jogador sem nome não quebra a troca)",
+            ia.aplicar_marcador_ia(None) is None and ia.remover_marcador_ia(None) is None, "")
+    # Substituto marcado colide com um bot natural de mesmo nome: dois cards com
+    # o mesmo apelido dariam o mesmo id no DOM, então o nome fica sem marcador.
+    colisao = Lobby(sala_id="colide", lobby_numero=1)
+    humana = Jogador(client_id="s1")
+    humana.username = "Ana"
+    colisao.adicionar_jogador(humana)
+    bot = Jogador.criar_ia(3, f"{ia.MARCADOR_IA}Ana")
+    colisao.adicionar_jogador(bot)
+    humana.is_ia = True
+    _checar("marcador: colisão de apelido mantém o nome (não duplica id de card)",
+            ia.marcar_substituto(colisao, humana) == "Ana", "")
+    # Sem colisão, marca: é o caminho normal da substituição.
+    livre = Lobby(sala_id="marca", lobby_numero=1)
+    outra = Jogador(client_id="s2")
+    outra.username = "Bia"
+    livre.adicionar_jogador(outra)
+    alvo = Jogador(client_id="s3")
+    alvo.username = "Ana"
+    livre.adicionar_jogador(alvo)
+    _checar("marcador: substituto sem colisão ganha o 🤖 guardado",
+            ia.marcar_substituto(livre, alvo) == f"{ia.MARCADOR_IA}Ana", "")
+
+
+# ---------------------------------------------------------------------------
+# 4d) bot prudente (Fase 76): o arquétipo que joga pelo humano desconectado
+# ---------------------------------------------------------------------------
+def _mesa_do_prudente(dados_bot, dados_rival, aposta, com_coringa=True, nivel=3):
+    """
+    Mesa de 2 (humano + bot prudente) com a aposta `aposta` já na mesa, para os
+    testes do turno do prudente. O turno é montado direto (como no honeypot do
+    `anti_fraude`) porque `construir_turno` emite — aqui só o estado interessa;
+    o que ele manteria (`coringa_atual_qtd` quando a face é 1) é ajustado à mão
+    para a mesa ficar fiel.
+    """
+    import ia
+    from modelos import Jogador, Lobby, Partida, Rodada, Turno
+
+    lobby = Lobby(sala_id="prud", lobby_numero=1)
+    humano = Jogador(client_id="humano")
+    humano.username = "Ana"
+    humano.dados = list(dados_rival)
+    humano.dados_qtd = len(dados_rival)
+    bot = Jogador.criar_ia(nivel, "🤖 Prudente")
+    bot.ia_estilo = ia.ESTILO_PRUDENTE
+    bot.dados = list(dados_bot)
+    bot.dados_qtd = len(dados_bot)
+    lobby.adicionar_jogador(humano)
+    lobby.adicionar_jogador(bot)
+    partida = Partida(do_lobby=lobby, jogadores=[humano, bot], partida_numero=1,
+                      dados_qtd=max(len(dados_bot), len(dados_rival), 1))
+    lobby.partidas.append(partida)
+    rodada = Rodada(partida=partida, jogadores=[humano, bot], rodada_numero=1,
+                    vez_atual=bot, com_coringa=com_coringa)
+    partida.rodadas.append(rodada)
+    for jogador in (humano, bot):
+        jogador.partida_atual = partida
+        jogador.rodada_atual = rodada
+    if aposta is not None:
+        turno = Turno(da_rodada=rodada, dado=aposta[0], jogador=humano,
+                      dado_qtd=aposta[1], turno_numero=1)
+        rodada.turnos.append(turno)
+        rodada.vez_atual = bot
+        if aposta[0] == 1:
+            rodada.coringa_atual_qtd = aposta[1]
+            rodada.coringa_atual_jogador = humano
+    return lobby, bot, rodada
+
+
+def _conjunto_coberto(rodada, jogador):
+    """Apostas garantidas pelo PRÓPRIO dado do bot (com o coringa contado)."""
+    import ia
+
+    return {aposta for aposta in ia.gerar_apostas_validas(rodada)
+            if aposta[1] <= ia.contar_suporte(list(jogador.dados), aposta[0],
+                                              rodada.com_coringa)}
+
+
+def verificar_bot_prudente():
+    print("4d) bot prudente (Fase 76): só aposta o que sustenta, chama só o claro")
+    import ia
+    import simular_ia
+    import modelos
+
+    # O estilo é do BOT: um humano que retomou o controle (ou que só entrou em
+    # auto-jogar por atraso) não entra no caminho cauteloso.
+    bot = modelos.Jogador.criar_ia(3, "🤖 B")
+    _checar("bot sem estilo -> repertório de nível", ia.eh_prudente(bot) is False, "")
+    bot.ia_estilo = ia.ESTILO_PRUDENTE
+    _checar("bot com estilo -> prudente", ia.eh_prudente(bot) is True, "")
+    humano = modelos.Jogador(client_id="h")
+    humano.ia_estilo = ia.ESTILO_PRUDENTE
+    _checar("humano nunca é prudente (mesmo com a flag)",
+            ia.eh_prudente(humano) is False, "")
+
+    # Abertura: 1 dado na face de maior suporte — nunca arrisca abrir a rodada.
+    _, bot, rodada = _mesa_do_prudente([4, 4, 2], [6, 6, 6], None)
+    acao = ia.decidir(bot, rodada, bot.ia_nivel)
+    face, qtd = acao.get('dado'), acao.get('quantidade')
+    _checar("abertura com 1 dado", acao.get('acao') == 'apostar' and qtd == 1, str(acao))
+    _checar("abertura em face que o bot tem",
+            ia.contar_suporte(list(bot.dados), face, rodada.com_coringa) >= 1, str(acao))
+
+    # Invariantes de TURNO, numa grade de estados (dados do bot, dados do rival,
+    # aposta na mesa). Vale para qualquer arrangement: é a mesma regra.
+    # - nunca joga fora das regras;
+    # - se existe aposta coberta, escolhe uma delas (risco zero);
+    # - sem coberta, cai na MÍNIMA legal — determinística;
+    # - desconfia SE E SÓ SE a conta está abaixo do limiar (nenhum impulso).
+    casos = 0
+    fora_das_regras = []
+    fora_das_cobertas = []
+    nao_minima = []
+    for dados_bot in ([1], [6], [2, 5], [3, 3], [4, 4, 4], [1, 6], [5, 5, 2]):
+        for dados_rival in ([1], [6], [2, 5], [3, 3, 1]):
+            for aposta in (None, (6, 1), (5, 2), (1, 2), (3, 3), (2, 5)):
+                for nivel in (1, 3, 4):
+                    casos += 1
+                    _, bot, rodada = _mesa_do_prudente(dados_bot, dados_rival, aposta, nivel=nivel)
+                    turno_anterior = rodada.turnos[-1] if rodada.turnos else None
+                    acao = ia.decidir(bot, rodada, nivel)
+                    if acao.get('acao') != 'apostar':
+                        # Desconfiança tem que ser a conta e só a conta.
+                        p = ia._probabilidade_ultima(rodada, bot, turno_anterior, nivel)
+                        limiar = ia._limiar_prudente(rodada)
+                        if p is None or not p < limiar:
+                            fora_das_regras.append(f"desconfiou com P={p} limiar={limiar}")
+                        continue
+                    face, qtd = acao['dado'], acao['quantidade']
+                    if not rodada.jogada_valida(face, qtd, turno_anterior,
+                                                 len(rodada.turnos) + 1):
+                        fora_das_regras.append(f"jogada ilegal {face}/{qtd}")
+                        continue
+                    cobertas = _conjunto_coberto(rodada, bot)
+                    if cobertas:
+                        if (face, qtd) not in cobertas:
+                            fora_das_cobertas.append(f"{face}/{qtd} vs {sorted(cobertas)}")
+                    else:
+                        minimas = min(ia.gerar_apostas_validas(rodada),
+                                      key=ia._chave_de_exposicao)
+                        if (face, qtd) != minimas:
+                            nao_minima.append(f"{face}/{qtd} vs min {minimas}")
+    _checar(f"{casos} turnos do prudente: jogada legal e desconfiança só com a conta clara",
+            not fora_das_regras, "; ".join(fora_das_regras[:3]))
+    _checar(f"{casos} turnos: nunca aposta acima do próprio dado (havia coberta)",
+            not fora_das_cobertas, "; ".join(fora_das_cobertas[:3]))
+    _checar(f"{casos} turnos: sem coberta, cai na jogada mínima",
+            not nao_minima, "; ".join(nao_minima[:3]))
+
+    # O nível não escolhe a jogada, ele afina só a CONTA da desconfiança: duas
+    # mesas idênticas, níveis 1 e 4, jogam do mesmo conjunto permitido (a coberta
+    # ou a mínima) e, quando não há coberta — caminho determinístico — caem na
+    # jogada EXATA igual. (A variadinha entre as duas cobertas de menor
+    # exposição é a única fonte de diferença, por desenho.)
+    pares = 0
+    fora_do_permitido = []
+    minima_iguais = 0
+    minima_pares = 0
+    for dados_bot, dados_rival, aposta in (([2, 5], [6, 6, 6], (6, 1)),
+                                           ([1, 1], [3, 3, 3], (5, 2)),
+                                           ([3, 3, 3], [2, 2, 2], (1, 2)),
+                                           ([5, 1, 1], [4, 4, 4], (6, 3)),
+                                           ([6, 6], [2, 2], (4, 1))):
+        _, bot1, rodada1 = _mesa_do_prudente(dados_bot, dados_rival, aposta, nivel=1)
+        _, bot4, rodada4 = _mesa_do_prudente(dados_bot, dados_rival, aposta, nivel=4)
+        a1, a4 = ia.decidir(bot1, rodada1, 1), ia.decidir(bot4, rodada4, 4)
+        if a1.get('acao') != 'apostar' or a4.get('acao') != 'apostar':
+            continue  # um nível achou a aposta clara: a conta decide, não a jogada
+        cobertas = _conjunto_coberto(rodada1, bot1)
+        permitidas = cobertas or {min(ia.gerar_apostas_validas(rodada1),
+                                      key=ia._chave_de_exposicao)}
+        pares += 1
+        for acao in (a1, a4):
+            if (acao['dado'], acao['quantidade']) not in permitidas:
+                fora_do_permitido.append(f"{acao['dado']}/{acao['quantidade']} vs {sorted(permitidas)}")
+        if not cobertas:
+            minima_pares += 1
+            minima_iguais += 1 if a1 == a4 else 0
+    _checar("nível não amplia a exposição do prudente (só a leitura da desconfiança)",
+            pares > 0 and not fora_do_permitido, "; ".join(fora_do_permitido[:3]))
+    _checar("sem coberta, a jogada do prudente é a mesma em qualquer nível",
+            minima_pares > 0 and minima_iguais == minima_pares,
+            f"{minima_iguais}/{minima_pares} iguais")
+
+    # Anti-arrastão: uma mesa SÓ de prudentes tem que FECHAR. O prudente quase
+    # nunca chama e nunca infla a aposta — se a rodada não terminar sozinha, a
+    # sala fica presa; o limiar crescente é o que impede, e este teste é o que
+    # prova (rodadas_max é o teto do `jogar`).
+    salvo = _salvar_emit()
+    try:
+        _silenciar_emit()  # o `jogar` roda fora de request: emit não tem room
+        vencedor = simular_ia.jogar([2, 2, 3, 3], 3, True, estilo=ia.ESTILO_PRUDENTE)
+        _checar("mesa só de prudentes termina (a rodada não arrasta)",
+                vencedor in (2, 3), f"vencedor nível {vencedor}")
+    except RuntimeError as erro:
+        _checar("mesa só de prudentes termina (a rodada não arrasta)", False, str(erro))
+    finally:
+        _restaurar_emit(salvo)
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +757,7 @@ def main():
     verificar_roundtrip()
     verificar_tema()
     verificar_nomes_ia()
+    verificar_bot_prudente()
     verificar_integracao()
     verificar_cross_instance()
     verificar_anti_fraude()

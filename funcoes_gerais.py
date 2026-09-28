@@ -261,6 +261,32 @@ def emitir_dispatcher_turno(lobby, jogador):
              to=jogador.client_id, ignore_queue=True)
 
 
+def reconstruir_tela_sala(lobby, exceto=None):
+    """
+    Fase 76: reemite o snapshot da sala para **todos** os clientes humanos.
+
+    Existe para o caso em que o apelido guardado muda no meio da partida — hoje
+    só a troca do desconectado por IA, que marca o nome com o `🤖` (e o desmarca
+    quando o humano volta). Como o apelido é a chave dos `id`s dos cards no
+    cliente (`card_hea_<apelido>`), cada tela precisa ser reconstruída para os
+    `card`s casarem com os nomes que vêm nos eventos seguintes (`atualizar_turno`,
+    `reset_rodada`, `formatador_coletivo`); sem isso o card do substituto ficaria
+    com o nome antigo e o turno dele não acharia a linha de dados.
+
+    É o mesmo caminho (e a mesma garantia) do snapshot de reconexão, só que para a
+    sala inteira em vez de um cliente. `exceto` (client_id) pula quem acabou de
+    receber o snapshot individual. Não filtra `desconectado_em`: emit para um sid
+    morto é de graça, e o jogador dentro da janela de graça volta a receber tudo
+    no `retomar_identidade` dele. Bots são pulados (não têm socket).
+    """
+    for alvo in list(lobby.jogadores) + list(lobby.espectadores):
+        if alvo.is_ia or alvo.client_id is None:
+            continue
+        if exceto is not None and alvo.client_id == exceto:
+            continue
+        enviar_snapshot_sala(lobby, alvo)
+
+
 def enviar_snapshot_sala(lobby, jogador):
     """
     Reconstrói o front-end de um jogador que acabou de conectar (tab novo, refresh

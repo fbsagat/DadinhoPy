@@ -35,6 +35,11 @@ class Jogador:
         # Bots não têm socket e nunca viram master.
         self.is_ia = False
         self.ia_nivel = None
+        # Estilo de JOGADA do bot (Fase 76): None = o repertório por nível, ou
+        # `ia.ESTILO_PRUDENTE` (o bot que o humano desconectado vira). Vive
+        # separado do nível de propósito: nível é o quanto o bot calcula,
+        # estilo é COMO ele joga — um prudente pode ser de qualquer nível.
+        self.ia_estilo = None
         # Sinalização de automação suspeita (Fase 59): preenchido pelo
         # `anti_fraude` com um motivo em PT-BR quando a heurística detecta
         # padrão de bot; aciona um delay extra nas ações do jogador.
@@ -107,6 +112,7 @@ class Jogador:
             'desconectado_em': self.desconectado_em.isoformat() if self.desconectado_em else None,
             'is_ia': self.is_ia,
             'ia_nivel': self.ia_nivel,
+            'ia_estilo': self.ia_estilo,
             'ia_risco': self.ia_risco,
             'ia_agressividade': self.ia_agressividade,
             'suspeito': self.suspeito,
