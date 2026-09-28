@@ -1983,15 +1983,43 @@ function armar_retry_rolagem() {
 // (`rolagem_pedida`, `chave_confirmada`) impedem duplicação. O timeout do
 // autojogar continua ativo — se estourar antes do shake, o cliente já rola
 // pelos dados do atrasado e o shake torna-se irrelevante.
+//
+// O listener de `devicemotion` é anexado UMA vez, no primeiro gesto do usuário
+// (é onde o iOS 13+ exige pedir a permissão). Anexar só na tela de rolagem
+// fazia quem recebia a tela e apenas sacudia nunca ver o prompt — o gesto já
+// tinha passado e o sensor nunca ligava. `shake_listener_ativo` é o que
+// liga/desliga a RESPOSTA por tela; `processar_acelerometro` o consulta.
 // ---------------------------------------------------------------------------
 let shake_listener_ativo = false;
 let shake_permissao_pendente = false;
+let shake_permissao_concedida = false;
+let shake_permissao_negada = false;
+let shake_setup_global_feito = false;
 let shake_debounce_timer = null;
 let shake_amostras = [];
 const SHAKE_THRESHOLD = 2.0;    // ~2m/s² para `acceleration` (sem gravidade)
-const SHAKE_GRAVITY_THRESHOLD = 16.0;  // ~9.8 (gravidade) + shake forte, para `accelerationIncludingGravity`
+const SHAKE_GRAVITY_THRESHOLD = 15.0;  // ~9.8 (gravidade) + shake, para `accelerationIncludingGravity`
 const SHAKE_JANELA_MS = 300;    // janela para acumular amostras fortes
 const SHAKE_DEBOUNCE_MS = 800;  // proteção contra shakes duplicados
+
+// Magnitude de um `Acceleration`; `null` quando ausente OU quando o aparelho
+// expõe o objeto com os eixos nulos (vários Android devolvem `{x:null,...}` e
+// o teste `!acc` não pega — a magnitude virava 0 e o shake nunca disparava).
+function magnitude_aceleracao(acc) {
+    if (!acc) {
+        return null;
+    }
+    const tem_x = typeof acc.x === 'number';
+    const tem_y = typeof acc.y === 'number';
+    const tem_z = typeof acc.z === 'number';
+    if (!tem_x && !tem_y && !tem_z) {
+        return null;
+    }
+    const ax = tem_x ? acc.x : 0;
+    const ay = tem_y ? acc.y : 0;
+    const az = tem_z ? acc.z : 0;
+    return Math.sqrt(ax * ax + ay * ay + az * az);
+}
 
 function processar_acelerometro(event) {
     if (!shake_listener_ativo || shake_debounce_timer) {
@@ -1999,16 +2027,15 @@ function processar_acelerometro(event) {
     }
     // Preferência por `acceleration` (sem gravidade — 0 no repouso);
     // fallback para `accelerationIncludingGravity` (inclui ~9.8m/s²).
-    let acc = event.acceleration;
+    let magnitude = magnitude_aceleracao(event.acceleration);
     let threshold = SHAKE_THRESHOLD;
-    if (!acc) {
-        acc = event.accelerationIncludingGravity;
+    if (magnitude === null) {
+        magnitude = magnitude_aceleracao(event.accelerationIncludingGravity);
         threshold = SHAKE_GRAVITY_THRESHOLD;
     }
-    if (!acc) {
+    if (magnitude === null) {
         return;
     }
-    const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
     const agora = Date.now();
     shake_amostras = shake_amostras.filter(a => agora - a.t < SHAKE_JANELA_MS);
     shake_amostras.push({ mag: magnitude, t: agora });
@@ -2033,15 +2060,52 @@ function shake_disponivel() {
         && window.isSecureContext === true;
 }
 
-function desativar_shake_dados() {
-    if (shake_listener_ativo) {
-        // `devicemotion` dispara em `window` — nunca em `DeviceMotionEvent`
-        // (que só tem o estático `requestPermission`). Ouvir/remover do
-        // `DeviceMotionEvent` lançava TypeError silenciosa no `.catch` e o
-        // listener jamais era anexado no iOS.
-        window.removeEventListener('devicemotion', processar_acelerometro);
-        shake_listener_ativo = false;
+// Anexa o listener bruto de `devicemotion` (idempotente). `devicemotion`
+// dispara em `window` — nunca em `DeviceMotionEvent` (que só tem o estático
+// `requestPermission`). Ouvir/remover do `DeviceMotionEvent` lançava TypeError
+// silenciosa e o listener jamais era anexado no iOS.
+function anexar_listener_acelerometro() {
+    window.removeEventListener('devicemotion', processar_acelerometro);
+    window.addEventListener('devicemotion', processar_acelerometro);
+}
+
+// Pedido de permissão no PRIMEIRO gesto do usuário (iOS 13+ exige o gesto).
+// Feito globalmente: se esperássemos a tela de rolagem, quem só sacode o
+// aparelho (sem tocar de novo) nunca recebia o prompt e o sensor não ligava.
+// Android (sem `requestPermission`) anexa o listener direto.
+function preparar_shake_dados() {
+    if (shake_setup_global_feito || !shake_disponivel()) {
+        return;
     }
+    shake_setup_global_feito = true;
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        shake_permissao_pendente = true;
+        DeviceMotionEvent.requestPermission()
+            .then(function (state) {
+                shake_permissao_pendente = false;
+                if (state === 'granted') {
+                    shake_permissao_concedida = true;
+                    anexar_listener_acelerometro();
+                } else {
+                    shake_permissao_negada = true;
+                    esconder_shake_hint();
+                }
+            })
+            .catch(function () {
+                shake_permissao_pendente = false;
+                shake_permissao_negada = true;
+                esconder_shake_hint();
+            });
+    } else {
+        shake_permissao_concedida = true;
+        anexar_listener_acelerometro();
+    }
+}
+
+function desativar_shake_dados() {
+    // Só desliga a RESPOSTA ao sensor. O listener bruto segue anexado: o custo
+    // é nulo e reanexá-lo no iOS exigiria outro gesto/permissão.
+    shake_listener_ativo = false;
     shake_amostras = [];
     if (shake_debounce_timer) {
         clearTimeout(shake_debounce_timer);
@@ -2050,32 +2114,19 @@ function desativar_shake_dados() {
 }
 
 function ativar_shake_dados() {
-    if (!shake_disponivel()) {
+    if (!shake_disponivel() || shake_permissao_negada) {
         return;
     }
-    desativar_shake_dados();
-    // iOS 13+: requestPermission é assíncrono e exige gesto do usuário.
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        shake_permissao_pendente = true;
-        function solicitar_permissao() {
-            shake_permissao_pendente = false;
-            DeviceMotionEvent.requestPermission()
-                .then(function (state) {
-                    if (state === 'granted') {
-                        window.addEventListener('devicemotion', processar_acelerometro);
-                        shake_listener_ativo = true;
-                    }
-                })
-                .catch(function () {});
-            document.body.removeEventListener('pointerdown', solicitar_permissao);
-            document.body.removeEventListener('touchstart', solicitar_permissao);
-        }
-        document.body.addEventListener('pointerdown', solicitar_permissao);
-        document.body.addEventListener('touchstart', solicitar_permissao);
-    } else {
-        window.addEventListener('devicemotion', processar_acelerometro);
-        shake_listener_ativo = true;
+    // Garante o listener: Android anexa já aqui; no iOS, se a permissão ainda
+    // não foi pedida num gesto anterior, `preparar_shake_dados` não tem gesto
+    // para pedir — fica pendente para o próximo toque.
+    if (!shake_permissao_pendente) {
+        preparar_shake_dados();
     }
+    if (shake_permissao_concedida) {
+        anexar_listener_acelerometro();
+    }
+    shake_listener_ativo = true;
 }
 
 function esconder_shake_hint() {
@@ -2216,7 +2267,7 @@ socket.on('construtor_dados', function (data) {
 
     // Shake to roll (mobile): hint visual — só para quem pode rolar E num
     // aparelho/contexto em que o sensor realmente entrega o evento.
-    if (!eh_espectador && shake_disponivel()) {
+    if (!eh_espectador && shake_disponivel() && !shake_permissao_negada) {
         const hint = document.createElement('div');
         hint.id = 'shake_hint_mobile';
         hint.className = 'shake-hint-mobile';
@@ -5148,6 +5199,9 @@ function desbloquear_audio() {
     if (musica_ativada) {
         iniciar_musica();
     }
+    // O primeiro gesto é também onde o iOS exige pedir a permissão do sensor
+    // de movimento (o pedido precisa de um gesto do usuário).
+    preparar_shake_dados();
 }
 window.addEventListener('pointerdown', desbloquear_audio);
 window.addEventListener('keydown', desbloquear_audio);
