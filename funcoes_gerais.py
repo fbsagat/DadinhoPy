@@ -43,6 +43,32 @@ LIMITE_APELIDO = 12
 MARCADOR_IA = '\U0001f916 '
 LIMITE_NOME_IA = LIMITE_APELIDO - len(MARCADOR_IA)
 
+# Fase 77: rate limit leve do chat de emojis — reações em tempo real mas sem spam.
+# 0.3s permite ~3 reações/s por sid (o cliente não trava o botão; o rate limit é
+# todo do servidor). O preview (`chat_reagindo`) tem balde próprio
+# (`cooldown_chave`) para não consumir a janela do emoji real.
+COOLDOWN_CHAT = 0.3
+
+# Fase 77: lista canônica de emojis por categoria (source of truth do servidor).
+# O cliente espelha estes conjuntos para renderizar o picker; a validação do emoji
+# contra o conjunto global garante que nada além disso chegue ao broadcast
+# (a categoria é recalculada no servidor, nunca confiada ao cliente).
+EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎']
+EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌']
+EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓']
+# Mapa de categoria → emojis permitidos (validação estrita).
+EMOJIS_POR_CATEGORIA = {
+    'provocativo': EMOJIS_PROVOCATIVOS,
+    'amigavel': EMOJIS_AMIGAVEIS,
+    'geral': EMOJIS_GERAIS,
+}
+# Conjunto plano de todos os emojis permitidos (proibição de qualquer outro).
+EMOJIS_PERMITIDOS = set(EMOJIS_PROVOCATIVOS + EMOJIS_AMIGAVEIS + EMOJIS_GERAIS)
+
+# Rate limit para reações de bots (Fase 77): um bot não reage mais de uma vez por
+# este intervalo, evitando spam durante laços de IAs assistidas.
+COOLDOWN_EMOJI_BOT = 1.0
+
 # Índice em processo client_id -> sala_id (Fase 7, A4). Permite achar a sala sem
 # varrer o store e adquirir o lock da sala antes do read-modify-write dos handlers.
 # É só um cache local: não substitui o estado distribuído.
@@ -285,6 +311,39 @@ def reconstruir_tela_sala(lobby, exceto=None):
         if exceto is not None and alvo.client_id == exceto:
             continue
         enviar_snapshot_sala(lobby, alvo)
+
+
+def _categoria_canonica_emoji(emoji):
+    """
+    Categoria canônica de um emoji (Fase 77). O servidor é a autoridade: a
+    `categoria` enviada pelo cliente é ignorada e recalculada a partir do emoji,
+    que já foi validado contra a whitelist global — assim um "provocativo" não
+    chega com um emoji "amigável" e o broadcast sai sempre consistente.
+    """
+    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
+        if emoji in emojis:
+            return cat
+    return 'geral'
+
+
+def bot_enviar_emoji(lobby, jogador, emoji):
+    """
+    Fase 77: emite `chat_emoji` em nome de um bot (reação inteligente ao jogo).
+    O servidor é a única fonte de verdade do emoji/categoria; o rate limit por
+    `client_id` do bot (balde `bot_chat:<id>`) evita spam durante laços de IAs
+    assistidas. Não persiste estado — é broadcast efêmero como Instagram Live.
+    """
+    if lobby is None or lobby.status not in ('espera', 'jogando'):
+        return
+    if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
+        return
+    if tem_cooldown(f"bot_chat:{jogador.client_id}", COOLDOWN_EMOJI_BOT):
+        return
+    emit('chat_emoji', {
+        'jogador': jogador.username or '',
+        'emoji': emoji,
+        'categoria': _categoria_canonica_emoji(emoji),
+    }, to=lobby.sala_room())
 
 
 def reemitir_narracao_rodada(rodada, jogador):

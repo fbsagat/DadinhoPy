@@ -21,7 +21,9 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
                             gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO,
                             emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem,
-                            emitir_dispatcher_turno, reconstruir_tela_sala)
+                            emitir_dispatcher_turno, reconstruir_tela_sala,
+                            EMOJIS_PERMITIDOS, EMOJIS_POR_CATEGORIA, COOLDOWN_CHAT,
+                            _categoria_canonica_emoji, bot_enviar_emoji)
 from modelos import Jogador
 from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
@@ -69,27 +71,6 @@ def _cache_estaticos(resposta):
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
 COOLDOWN_ESCRITA = 0.5
 COOLDOWN_BUSCA = 2.0
-# Fase 77: rate limit do chat de emojis — reações em tempo real mas sem spam.
-# 0.3s permite ~3 reações/s por sid (o cliente não trava o botão; o rate limit é
-# todo do servidor). O preview (`chat_reagindo`) tem balde próprio
-# (`cooldown_chave`) para não consumir a janela do emoji real.
-COOLDOWN_CHAT = 0.3
-
-# Fase 77: lista canônica de emojis por categoria (source of truth do servidor).
-# O cliente espelha estes mesmos conjuntos para renderizar o picker; a validação
-# do emoji contra o conjunto global garante que nada além disso chegue ao
-# broadcast (a categoria é recalculada no servidor, nunca confiada ao cliente).
-EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎']
-EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌']
-EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓']
-# Map de categoria → emojis permitidos (validação estrita).
-EMOJIS_POR_CATEGORIA = {
-    'provocativo': EMOJIS_PROVOCATIVOS,
-    'amigavel': EMOJIS_AMIGAVEIS,
-    'geral': EMOJIS_GERAIS,
-}
-# Conjunto plano de todos os emojis permitidos (proibição de qualquer outro).
-EMOJIS_PERMITIDOS = set(EMOJIS_PROVOCATIVOS + EMOJIS_AMIGAVEIS + EMOJIS_GERAIS)
 
 # Nível de IA usado na jogada automática de um humano atrasado (Fase 21): um
 # nível médio produz apostas razoáveis sem virar "assistente de jogo".
@@ -2120,19 +2101,6 @@ def foguetear(dados, lobby, jogador):
         emit('soltar_fogos', to=lobby.sala_room())
     elif partida is not None and partida.vencedor_final == jogador:
         emit('soltar_fogos', to=lobby.sala_room())
-
-
-def _categoria_canonica_emoji(emoji):
-    """
-    Categoria canônica de um emoji (Fase 77). O servidor é a autoridade: a
-    `categoria` enviada pelo cliente é ignorada e recalculada a partir do emoji,
-    que já foi validado contra a whitelist global — assim um "provocativo" não
-    chega com um emoji "amigável" e o broadcast sai sempre consistente.
-    """
-    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
-        if emoji in emojis:
-            return cat
-    return 'geral'
 
 
 @socketio.on('enviar_emoji_chat')

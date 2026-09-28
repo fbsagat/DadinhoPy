@@ -134,5 +134,8 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `auditoria_partida` | funcoes_gerais:329 | cliente | 3300 |
 | `chat_emoji` (`jogador`, `emoji`, `categoria`) | app.py:enviar_emoji_chat (Fase 77) | sala | 5871 |
 | `chat_reagindo` (`jogador`, `emoji`, `categoria`) | app.py:chat_reagindo (Fase 77) | sala | 5862 |
+| `chat_emoji` (bot) | funcoes_gerais:bot_enviar_emoji ← ia.py (Fase 77) | sala | — |
+
+> **Bot emojis (Fase 77):** os bots reagem com emojis de forma inteligente — `ia.py` decide o emoji com base na ação (blefe, aposta segura, desafio certo/errado, vitória), personalidade (`ia_risco`, `ia_agressividade`, `ia_estilo`) e contexto de dados. A emissão passa por `funcoes_gerais.bot_enviar_emoji`, que valida contra a whitelist global e aplica rate limit por `client_id` (`COOLDOWN_EMOJI_BOT`). Os ganchos vivem em `_processar_turno` (aposta + observadores), `_processar_conferencia` (desafio) e `_processar_vitoria` (campeão). O cliente (`socket.on('chat_emoji')` em `script.js:5988`) não distingue fonte — o nome do bot (`🤖 …`) aparece como autor.
 
 > Legenda de escopo: "sala" = `to=lobby.sala_room()`; "cliente" = `to=jogador.client_id`. Confira sempre o `emit` real antes de assumir.
