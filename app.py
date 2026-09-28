@@ -376,6 +376,9 @@ def _remover_jogador_da_sala(lobby, jogador):
             if (lobby.pagina == 1 and rodada is not None
                     and rodada.verificar_se_todos_ja_jogaram_seus_dados()):
                 lobby.pagina = 2
+                # Mesma regra de `joguei_dados`: quem só estava esperando o
+                # desconectado não pode perder tempo de turno com a rolagem.
+                rodada.iniciar_turnos()
                 mudar_pagina(2, sala=lobby.sala_id)
 
     # Fase 22: a remoção muda quem ainda falta conferir/rolar — reapresenta o
@@ -1737,6 +1740,10 @@ def joguei_dados(dados, lobby, jogador):
     # Executar isso \/ quando o último jogar os dados
     if rodada.verificar_se_todos_ja_jogaram_seus_dados():
         lobby.pagina = 2
+        # Antes de abrir a tela de turnos: o relógio do primeiro jogador começa
+        # AGORA, não no início da rodada (que carimbou `vez_em` na tela de
+        # jogar dados) — senão ele paga a rolagem com o tempo do turno.
+        rodada.iniciar_turnos()
         mudar_pagina(2, sala=lobby.sala_id)
     ia.processar(lobby)
     salvar_sala(lobby)

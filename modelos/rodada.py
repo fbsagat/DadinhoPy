@@ -376,6 +376,25 @@ class Rodada:
                 emit('espera_turno', {'username': jogador_atual.username,
                                       'tempo_max': tempo_restante}, to=jogador.client_id)
 
+    def iniciar_turnos(self):
+        """
+        Carimba o início do PRIMEIRO turno, no instante em que a rolagem termina
+        e a tela de turnos (2) abre, e reemite os turnos com o tempo cheio.
+
+        `atualizar_front_pro_da_vez` já carimba `vez_em`, mas na criação da
+        rodada ela roda com a página ainda em 1: o relógio do primeiro jogador
+        ficava correndo desde o início da rodada e ele perdia o tempo da
+        rolagem. Num turno de 15s com 8s de rolagem, ele entrava na tela 2 com
+        7s — e o `_atrasados` (que julga a demora pelo mesmo `vez_em`) podia
+        jogar por ele antes de ele siquiera ver a mão na tela.
+
+        Nos turnos seguintes quem passa a vez já está na tela 2, então o carimbo
+        de `atualizar_front_pro_da_vez` continua sendo o certo e este método
+        não é chamado.
+        """
+        if self.vez_atual is not None:
+            self.atualizar_front_pro_da_vez(self.vez_atual)
+
     def selecionar_proximo_jogador_na_lista(self, jogador_atual):
         lista_jogadores = self.da_partida.jogadores
         indice_atual = lista_jogadores.index(jogador_atual)

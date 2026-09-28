@@ -2065,6 +2065,87 @@ def teste_autojogar():
     _ok("jogada automática por tempo máximo (Fase 21)")
 
 
+def teste_relogio_turno_apos_rolagem():
+    """
+    O relógio do PRIMEIRO turno só pode começar quando a rolagem acaba.
+
+    `atualizar_front_pro_da_vez` carimba `vez_em` já na criação da rodada, ainda
+    na tela de jogar dados (1): o primeiro jogador pagava a rolagem com o tempo
+    do seu turno. Com 15s de turno e 8s de rolagem ele entrava na tela 2 com 7s
+    — e o `_atrasados`, que julga a demora pelo mesmo `vez_em`, podia jogar por
+    ele antes de ele sequer ver a mão. O sintoma no cliente era o contador
+    "caindo" sozinho ao mudar de tela.
+    """
+    from datetime import datetime, timedelta
+
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    tempo = 15
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"tempo_max_jogada": tempo}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1, f"deve estar na rolagem, pagina={lobby.pagina}"
+
+    # Simula 20s de rolagem num turno de 15s: quando a tela de turnos abre, o
+    # `vez_em` da criação da rodada já está VENCIDO (era o bug — o primeiro
+    # jogador entrava no turno com o relógio no fim e o `_atrasados` podia
+    # jogar por ele antes de ele ver a mão).
+    rodada = lobby.partidas[-1].rodadas[-1]
+    carimbo_antigo = datetime.now() - timedelta(seconds=20)
+    rodada.vez_em = carimbo_antigo
+    modulo_store.salvar_sala(lobby)
+
+    # Drena o `meu_turno` do INICIO da rodada (que já trazia tempo cheio, com
+    # 0s decorridos): aqui só interessa o evento emitido na virada para a tela 2.
+    c1.get_received()
+    c2.get_received()
+
+    c1.emit("jogar_dados", {"chave": cs1["chave_secreta"]})
+    c2.emit("jogar_dados", {"chave": cs2["chave_secreta"]})
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
+
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, f"deve estar nos turnos, pagina={lobby.pagina}"
+    rodada = lobby.partidas[-1].rodadas[-1]
+    _checar("relogia o primeiro turno ao abrir a tela de turnos",
+            rodada.vez_em > carimbo_antigo,
+            f"vez_em nao foi recarimbado: {rodada.vez_em}")
+
+    # Quem é da vez recebe o tempo CHEIO: a rolagem não consome o turno.
+    # `get_received` DRAINS o buffer, então lê uma vez só e indexa por cliente.
+    # Sem a correção NENHUM `meu_turno` chega na virada, então as checagens
+    # abaixo reportam em vez de estourar assert e esconder as outras.
+    recebidos = {c1: c1.get_received(), c2: c2.get_received()}
+    da_vez = [c for c, evs in recebidos.items()
+              if any(e["name"] == "meu_turno" for e in evs)]
+    _checar("a virada para a tela de turnos reemite meu_turno", bool(da_vez))
+    mt = _achar_evento(recebidos[da_vez[-1]], "meu_turno") if da_vez else None
+    _checar("contador da tela de turnos volta ao tempo cheio",
+            mt is not None and mt.get("tempo_max") == tempo,
+            f"meu_turno trouxe tempo_max={None if mt is None else mt.get('tempo_max')}, esperado={tempo}")
+
+    # E a rede de segurança não julga ninguém atrasado logo ao abrir a tela.
+    _checar("ninguem atrasado logo apos a rolagem",
+            not modulo_app._atrasados(lobby, datetime.now()))
+
+    # Quem espera tambem volta ao tempo cheio.
+    outro = c2 if (da_vez and da_vez[-1] is c1) else c1
+    espera = _achar_evento(recebidos[outro], "espera_turno")
+    _checar("quem espera tambem recebe o tempo cheio",
+            espera is not None and espera.get("tempo_max") == tempo,
+            f"espera_turno trouxe tempo_max={None if espera is None else espera.get('tempo_max')}")
+
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+
+
 # --- Rede de segurança da jogada automática (Fase 75) -----------------------
 def teste_heartbeat_destrava_humano_atrasado():
     """
@@ -3113,6 +3194,7 @@ def verificar_integracao():
     ]
     testes_autojogar = [
         ("autojogar", teste_autojogar),
+    ("relogio-turno-apos-rolagem", teste_relogio_turno_apos_rolagem),
         ("heartbeat-destrava-atrasado", teste_heartbeat_destrava_humano_atrasado),
     ]
     testes_fase_d = [
