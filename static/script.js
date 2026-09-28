@@ -984,6 +984,7 @@ socket.on("update_user_list", (data) => {
             nome: user,
             master: data.masters[index] === true,
             pronto: data.prontos[index] === true,
+            bot: data.bots ? data.bots[index] === true : false,
             id: data.ids ? data.ids[index] : null,
             pontos: Number(data.pontos[index]) || 0,
         }));
@@ -1028,9 +1029,30 @@ socket.on("update_user_list", (data) => {
 
             const master = jogador.master ? '🏁' : '';
             const coroa = campeao ? '👑 ' : '';
+            // O nome fica num span próprio: o editor do master (Fase 75) troca
+            // esse span por um input sem ter que remontar a linha inteira.
+            const nomeSpan = document.createElement("span");
+            nomeSpan.className = "lista-nome-texto";
             // Sem espaço sobrando: o espaço fixo depois do nome virava largura
             // perdida na coluna do nome (que é a única elástica da linha).
-            userItem.textContent = `${coroa}${jogador.nome}${master ? ' ' + master : ''}`;
+            nomeSpan.textContent = `${coroa}${jogador.nome}${master ? ' ' + master : ''}`;
+            userItem.appendChild(nomeSpan);
+
+            // Fase 75: só o master renomeia, e só na espera (é quando o servidor
+            // aceita o `renomear_ia`) — o lápis fica na célula do nome, sem criar
+            // coluna nova, para não apertar a lista no celular.
+            if (sou_master && jogador.bot && jogador.id && data.status === 'espera') {
+                const botao_renomear = document.createElement("button");
+                botao_renomear.className = "btn btn-sm btn-link lista-lapis";
+                botao_renomear.textContent = ICONE_LAPIS;
+                botao_renomear.title = t('js.ia_renomear_titulo');
+                botao_renomear.setAttribute('aria-label', t('js.ia_renomear_titulo'));
+                botao_renomear.onclick = function () {
+                    abrir_editor_nome_ia(userItem, botao_renomear, jogador,
+                        data.marcador_ia || '', Number(data.limite_nome_ia) || 0);
+                };
+                userItem.appendChild(botao_renomear);
+            }
 
             // Fase 74: o ✅/⏳ sai do texto do nome para a coluna própria.
             const prontoDiv = document.createElement("div");
@@ -1276,6 +1298,97 @@ function completar_com_ias() {
 function remover_ias() {
     socket.emit('remover_ia', { chave: chave_secreta });
 }
+
+// --- Renomear bot (Fase 75) ---
+// O editor nasce na própria célula do nome: um input (com o `🤖` do apelido
+// guardado já retirado) mais o "ok". Enter/ok salvam, Escape e o blur cancelam
+// (mesma gramática do editor de apelido próprio). A confirmação do servidor
+// chega pelo `update_user_list` do broadcast, que já traz o nome final — com o
+// marcador e o sufixo de colisão, se houver — e remonta a linha.
+function abrir_editor_nome_ia(celula, botao_lapis, jogador, marcador_ia, limite) {
+    if (!celula || !jogador || !jogador.id || !sou_master) {
+        return;
+    }
+    const nomeSpan = celula.querySelector('.lista-nome-texto');
+    if (!nomeSpan) {
+        return;
+    }
+    const nome = jogador.nome || '';
+    const dica = t('js.ia_renomear_dica', { limite: limite });
+    let fechado = false;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "form-control form-control-sm lista-nome-input";
+    input.maxLength = limite;
+    input.placeholder = dica;
+    input.title = dica;
+    input.setAttribute('aria-label', dica);
+    input.value = (marcador_ia && nome.indexOf(marcador_ia) === 0)
+        ? nome.slice(marcador_ia.length) : nome;
+
+    const ok = document.createElement("button");
+    ok.className = "btn btn-sm btn-primary lista-ok";
+    ok.textContent = t('ui.apelido_ok');
+    ok.title = dica;
+
+    function fechar() {
+        if (fechado) {
+            return;  // um-shot: blur depois do "ok" não reabre nada
+        }
+        fechado = true;
+        input.remove();
+        ok.remove();
+        nomeSpan.style.display = '';
+        botao_lapis.style.display = '';
+    }
+
+    function salvar() {
+        const apelido = input.value.trim();
+        fechar();
+        if (!apelido) {
+            mostrar_alerta(t('msg.preencha_nome'), 'aviso');
+            return;
+        }
+        socket.emit('renomear_ia', { chave: chave_secreta, client_id: jogador.id, apelido: apelido });
+    }
+
+    ok.onclick = salvar;
+    // Sem preventDefault no pressionar o input perderia o foco primeiro e o
+    // editor fecharia por baixo do botão (o "ok" nunca dispararia). O
+    // `pointerdown` cobre o toque, onde o `mousedown` não chega.
+    ok.onmousedown = function (evento) {
+        evento.preventDefault();
+    };
+    ok.onpointerdown = function (evento) {
+        evento.preventDefault();
+    };
+    input.onkeydown = function (evento) {
+        if (evento.key === 'Enter') {
+            salvar();
+        } else if (evento.key === 'Escape') {
+            fechar();
+        }
+    };
+    input.onblur = fechar;
+
+    nomeSpan.style.display = 'none';
+    botao_lapis.style.display = 'none';
+    celula.appendChild(input);
+    celula.appendChild(ok);
+    input.focus();
+    input.select();
+}
+
+// Recusa do servidor: o motivo chega como chave + params (o servidor não escolhe
+// idioma) e a linha volta ao estado normal no próximo `update_user_list`. O
+// fallback é uma mensagem sem parametro — a chave de recusa sempre traz o
+// `{limite}` e um payload quebrado mostraria o marcador cru na tela.
+socket.on('renomear_ia_negado', function (data) {
+    const motivo = data && data.motivo;
+    mostrar_alerta(t(motivo && motivo.chave ? motivo.chave : 'msg.preencha_nome',
+        (motivo && motivo.params) || {}), 'erro');
+});
 
 // Fase 57: quando "Adicionar IA" ou "Completar vagas" LOTAR a sala de espera,
 // o servidor avisa o master (`lobby_lotado`). O drawer de configurações fecha

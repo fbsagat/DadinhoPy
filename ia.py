@@ -110,13 +110,15 @@ SUFIXOS_HIBRIDOS = ['Bot', '-9000', '.exe', ' Tron', '-X', ' 2.0', 'Tech', '-Byt
 
 _TABELA_LEET = str.maketrans('aAeEiIoOsS', '4433110055')
 
-# Marcador do bot: faz parte do apelido guardado (é o que o narrador usa para
-# saber quem é máquina) e come orçamento. Dos 8 caracteres, 2 são do marcador
-# ('🤖' + espaço) e sobram 6 para o nome em si — por isso o sabor híbrido rende
-# pouco aqui ('Robô Ana' passaria de 8) e o pool pende para as designações
-# robóticas.
-MARCADOR_IA = '🤖 '
-ORCAMENTO_NOME = funcoes_gerais.LIMITE_APELIDO - len(MARCADOR_IA)
+# Marcador do bot e orçamento do nome: os dois vivem em `funcoes_gerais` (fonte
+# única, já que o payload de `update_user_list` também os publica para o editor
+# de nome do master). O marcador faz parte do apelido guardado (é o que o
+# narrador usa para saber quem é máquina) e come orçamento: dos 8 caracteres, 2
+# são do marcador ('🤖' + espaço) e sobram 6 para o nome em si — por isso o
+# sabor híbrido rende pouco aqui ('Robô Ana' passaria de 8) e o pool pende para
+# as designações robóticas.
+MARCADOR_IA = funcoes_gerais.MARCADOR_IA
+ORCAMENTO_NOME = funcoes_gerais.LIMITE_NOME_IA
 
 
 def _montar_pool():
@@ -265,6 +267,59 @@ def remover_bots(lobby, nivel=None):
         lobby.remover_jogador(jogador.client_id)
         removidos += 1
     return removidos
+
+
+# ---------------------------------------------------------------------------
+# Renomear bot (Fase 75)
+# ---------------------------------------------------------------------------
+
+# Motivos de recusa: CHAVES i18n, não texto — o servidor nunca escolhe idioma
+# (AGENTS.md, invariante 5) e o cliente traduz em `renomear_ia_negado`.
+MOTIVO_IA_ALVO = 'msg.motivo.ia_alvo'
+MOTIVO_IA_INVALIDO = 'msg.motivo.ia_invalido'
+MOTIVO_IA_OCUPADO = 'msg.motivo.ia_ocupado'
+
+
+def renomear_bot(lobby, client_id, apelido):
+    """
+    Troca o nome de um bot da sala (Fase 75 — só o master chama, e só na espera).
+
+    Devolve o par `(jogador, apelido_final)` em caso de sucesso, ou
+    `(None, motivo)` quando recusa, com `motivo` no formato `{chave, params}`
+    das recusas do servidor (o cliente traduz; o servidor não escolhe idioma).
+    O nome entra SEM o marcador: ele é recolocado aqui, para o apelido guardado
+    continuar com o `🤖` que o narrador e a lista de confirmados usam para saber
+    quem é máquina.
+
+    A unicidade é a de `Lobby.verificar_apelido` (sufixo `_1`, `_2`…) mas com
+    teto: para humanos o sufixo pode estourar o limite porque os 8 caracteres já
+    vêm garantidos na validação do apelido; aqui o orçamento é o do nome, e um
+    sufixo que não cabe é recusa em vez de apelido estourado.
+    """
+    if lobby is None or not client_id or not isinstance(apelido, str):
+        return None, {'chave': MOTIVO_IA_ALVO}
+    bot = next((j for j in lobby.jogadores if j.is_ia and j.client_id == client_id), None)
+    if bot is None:
+        return None, {'chave': MOTIVO_IA_ALVO}
+    nome = apelido.strip()
+    if not funcoes_gerais.validar_input(nome, tamanho_maximo=ORCAMENTO_NOME):
+        return None, {'chave': MOTIVO_IA_INVALIDO, 'params': {'limite': ORCAMENTO_NOME}}
+    em_uso = _nomes_em_uso(lobby) - {bot.username}
+    completo = f"{MARCADOR_IA}{nome}"
+    if completo in em_uso:
+        livre = None
+        for indice in range(1, 100):
+            candidato = f"{MARCADOR_IA}{nome}_{indice}"
+            if len(candidato) > funcoes_gerais.LIMITE_APELIDO:
+                break  # o sufixo só cresce: acabou o orçamento
+            if candidato not in em_uso:
+                livre = candidato
+                break
+        if livre is None:
+            return None, {'chave': MOTIVO_IA_OCUPADO}
+        completo = livre
+    bot.username = completo
+    return bot, completo
 
 
 # ---------------------------------------------------------------------------

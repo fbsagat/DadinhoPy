@@ -1295,6 +1295,30 @@ def remover_ia(dados, lobby, jogador):
         atualizar_lista_usuarios(lobby)
 
 
+@socketio.on('renomear_ia')
+@evento_mutavel
+@autenticar(exigir_master=True)
+def renomear_ia(dados, lobby, jogador):
+    """
+    O master renomeia um bot da sala de espera (Fase 75). Só na espera — no
+    meio da partida o apelido já está em uso nas fichas de confirmação, no
+    narrador e no histórico da rodada, e trocar ali deixaria a sala divergente.
+
+    A recusa volta como `renomear_ia_negado` com a CHAVE do motivo (o cliente
+    traduz; o servidor não escolhe idioma). O `update_user_list` do
+    `atualizar_lista_usuarios` é quem devolve o nome final (já com o marcador e
+    o sufixo de colisão, se houver) para todo mundo.
+    """
+    if lobby.status != 'espera':
+        return
+    bot, resultado = ia.renomear_bot(lobby, dados.get('client_id'), dados.get('apelido'))
+    if bot is None:
+        emit('renomear_ia_negado', {'motivo': resultado},
+             to=jogador.client_id, ignore_queue=True)
+        return
+    atualizar_lista_usuarios(lobby)
+
+
 def _avisar_lobby_lotado(lobby, jogador):
     """
     Avisa o master quando a sala de espera lotou com os bots recém-adicionados

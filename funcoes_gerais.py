@@ -34,6 +34,15 @@ MAX_ESPECTADORES = 20
 # com nome estourado e os dois caminhos nunca divergem.
 LIMITE_APELIDO = 8
 
+# Marcador do bot: faz parte do apelido guardado (é o que o narrador usa para
+# saber quem é máquina) e come orçamento. Dos 8 caracteres, 2 são do marcador
+# ('🤖' + espaço) e sobram 6 para o nome em si. Vive aqui (e não em `ia.py`)
+# porque o payload de `update_user_list` também precisa dele — o master edita o
+# nome do bot na lista e o cliente tem de tirar o marcador do input sem duplicar
+# a constante.
+MARCADOR_IA = '\U0001f916 '
+LIMITE_NOME_IA = LIMITE_APELIDO - len(MARCADOR_IA)
+
 # Índice em processo client_id -> sala_id (Fase 7, A4). Permite achar a sala sem
 # varrer o store e adquirir o lock da sala antes do read-modify-write dos handlers.
 # É só um cache local: não substitui o estado distribuído.
@@ -379,6 +388,10 @@ def montar_payload_lista_usuarios(lobby):
     pontos = [jogador.pontos for jogador in lista if jogador.username is not None]
     masters = [jogador.master for jogador in lista if jogador.username is not None]
     prontos = [jogador.pronto for jogador in lista if jogador.username is not None]
+    # `bots` acompanha `usernames` (mesmos índices): o master só pode renomear
+    # bots, então o cliente precisa saber quais linhas são máquina. O `🤖` já
+    # está no apelido — isto é estrutura, não informação nova.
+    bots = [jogador.is_ia for jogador in lista if jogador.username is not None]
     # `ids` acompanha `usernames` (mesmos índices): permite o master expulsar um
     # jogador pelo client_id (Fase 19), sem expor as chaves secretas.
     ids = [jogador.client_id for jogador in lista if jogador.username is not None]
@@ -403,7 +416,12 @@ def montar_payload_lista_usuarios(lobby):
         "pontos": pontos,
         "masters": masters,
         "prontos": prontos,
+        "bots": bots,
         "ids": ids,
+        # O editor de nome do bot (só master, só na espera) monta o input com
+        # estes dois: o `maxlength` e o prefixo a tirar do apelido guardado.
+        "marcador_ia": MARCADOR_IA,
+        "limite_nome_ia": LIMITE_NOME_IA,
         "nome": lobby.nome,
         "status": lobby.status,
         "config": config_publica,

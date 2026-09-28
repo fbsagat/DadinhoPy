@@ -921,6 +921,33 @@ h5,
     white-space: nowrap;
 }
 
+/* Fase 75: lápis de renomear bot e o editor que ele abre. Ambos ficam na célula
+   do nome (sem coluna nova) e são `display: none` enquanto o editor assume — daí
+   o `vertical-align: middle` para o texto não pular de linha. */
+#lista_de_jogadores .lista-lapis {
+    padding: 0 0.2rem;
+    line-height: 1;
+    font-size: 0.9rem;
+    text-decoration: none;
+    vertical-align: middle;
+}
+
+#lista_de_jogadores .lista-nome-input {
+    display: inline-block;
+    width: auto;
+    max-width: 100%;
+    min-width: 5.5rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.9rem;
+    vertical-align: middle;
+}
+
+#lista_de_jogadores .lista-ok {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+
 /* No celular as três colunas fixas somavam quase 230px e o nome ficava
    espremido (quebrando no meio em telas de 360px). Aqui elas encolhem até o
    essencial — emoji de pronto, até 3 dígitos de pontos e o botão de expulsar
@@ -948,6 +975,10 @@ h5,
     #lista_de_jogadores .lista-expulsar .btn {
         padding: 0.15rem 0.4rem;
         font-size: 0.78rem;
+    }
+
+    #lista_de_jogadores .lista-nome-input {
+        font-size: 0.85rem;
     }
 
     #lista_de_jogadores .ranking-cabecalho {

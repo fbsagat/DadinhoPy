@@ -2835,6 +2835,103 @@ def teste_lobby_lotado_so_quando_lotar():
     _ok("lobby_lotado só é emitido quando as vagas acabam (Fase 57)")
 
 
+def teste_master_renomeia_ia():
+    """
+    Fase 75: o master renomeia o bot direto na lista. O `renomear_ia` recoloca
+    o marcador `🤖`, garante unicidade e cabe no orçamento do nome (6 chars); as
+    recusas voltam como `renomear_ia_negado` com a CHAVE do motivo (o servidor
+    não escolhe idioma). Nada muda para não-master, para alvo humano e no meio da
+    partida.
+    """
+    import ia
+
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 2})
+    lobby = modulo_store.carregar_sala(SALA)
+    bots = [j for j in lobby.jogadores if j.is_ia]
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert len(bots) == 2, "pré-condição: dois bots na sala"
+
+    # O payload da lista diz quais linhas são máquina (o lápis é só do master).
+    listas = [e["args"][0] for e in c1.get_received() if e["name"] == "update_user_list"]
+    assert listas, "a lista de jogadores precisa ser enviada"
+    lista = listas[-1]  # o último snapshot é o que tem os bots
+    assert sum(1 for b in lista["bots"] if b) == 2, "os dois bots marcados em `bots`"
+    assert lista["limite_nome_ia"] == ia.ORCAMENTO_NOME
+    assert lista["marcador_ia"] == ia.MARCADOR_IA
+
+    # Nome válido: o marcador volta, o apelido fica único e cabe no limite.
+    c1.emit("renomear_ia", {"chave": cs1["chave_secreta"],
+                            "client_id": bots[0].client_id, "apelido": "Zeca"})
+    lobby = modulo_store.carregar_sala(SALA)
+    bot = next(j for j in lobby.jogadores if j.client_id == bots[0].client_id)
+    assert bot.username == f"{ia.MARCADOR_IA}Zeca", f"apelido final: {bot.username!r}"
+    assert len(bot.username) <= funcoes_gerais.LIMITE_APELIDO
+
+    # Colisão com o nome que o próprio bot já tem: recusa, o apelido não muda.
+    c1.get_received()
+    c1.emit("renomear_ia", {"chave": cs1["chave_secreta"],
+                            "client_id": bots[1].client_id, "apelido": bot.username})
+    negado = _achar_evento(c1.get_received(), "renomear_ia_negado")
+    assert negado is not None, "apelido de bot em uso precisa ser recusado"
+    lobby = modulo_store.carregar_sala(SALA)
+    outro = next(j for j in lobby.jogadores if j.client_id == bots[1].client_id)
+    assert outro.username != bot.username, "recusa não pode mexer no apelido"
+
+    # Nome grande demais (o orçamento é o nome, não o apelido inteiro).
+    c1.get_received()
+    c1.emit("renomear_ia", {"chave": cs1["chave_secreta"],
+                            "client_id": bots[0].client_id, "apelido": "NomeBemLongo"})
+    negado = _achar_evento(c1.get_received(), "renomear_ia_negado")
+    assert negado and negado["motivo"]["chave"] == ia.MOTIVO_IA_INVALIDO, \
+        f"motivo: {negado}"
+    assert negado["motivo"]["params"]["limite"] == ia.ORCAMENTO_NOME
+
+    # Alvo humano (o próprio master) não é alvo de renomear_ia.
+    c1.get_received()
+    c1.emit("renomear_ia", {"chave": cs1["chave_secreta"],
+                            "client_id": ana.client_id, "apelido": "X9"})
+    negado = _achar_evento(c1.get_received(), "renomear_ia_negado")
+    assert negado and negado["motivo"]["chave"] == ia.MOTIVO_IA_ALVO, \
+        f"motivo: {negado}"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert next(j for j in lobby.jogadores if j.client_id == ana.client_id).username == "Ana", \
+        "apelido humano não pode ser mexido pelo renomear_ia"
+
+    # Não-master não renomeia (o `autenticar` aborta antes de qualquer efeito).
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    lobby = modulo_store.carregar_sala(SALA)
+    bot = next(j for j in lobby.jogadores if j.client_id == bots[0].client_id)
+    c2.get_received()
+    c2.emit("renomear_ia", {"chave": cs2["chave_secreta"],
+                            "client_id": bots[0].client_id, "apelido": "BiaBot"})
+    assert _achar_evento(c2.get_received(), "renomear_ia_negado") is None, \
+        "não-master nem chega a ser avisado (o handler aborta)"
+    lobby = modulo_store.carregar_sala(SALA)
+    bot = next(j for j in lobby.jogadores if j.client_id == bots[0].client_id)
+    assert bot.username == f"{ia.MARCADOR_IA}Zeca", "não-master não renomeia bot"
+
+    # Durante a partida o renomeio é ignorado (apelido já em uso nas fichas).
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})  # Bia pronta: libera o início
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.status == "jogando", "pré-condição: partida em andamento"
+    c1.get_received()
+    c1.emit("renomear_ia", {"chave": cs1["chave_secreta"],
+                            "client_id": bot.client_id, "apelido": "Fase"})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert next(j for j in lobby.jogadores if j.client_id == bot.client_id).username \
+        == f"{ia.MARCADOR_IA}Zeca", "fora da espera o renomeio é no-op"
+
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("master renomeia o nome dos bots (Fase 75)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -2961,12 +3058,16 @@ def verificar_integracao():
     testes_fase69 = [
         ("espectador-ritmo-so-ias", teste_espectador_ritmo_partida_so_ias),
     ]
+    testes_fase76 = [
+        ("renomear-ia", teste_master_renomeia_ia),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
                            + testes_fase23 + testes_fase25 + testes_fase46
-                           + testes_fase29 + testes_fase30 + testes_fase69):
+                           + testes_fase29 + testes_fase30 + testes_fase69
+                           + testes_fase76):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

@@ -16,7 +16,7 @@ Eventos sempre escopados à room da sala (`to=sala_<id>`) no namespace global.
 
 ## Ciclo do jogo
 
-- **Sala de espera (0):** o master edita `Lobby.config` via `configurar_partida` (nome, `dados_qtd`, `max_jogadores`, `com_coringa`, `publica`, `substituir_desconectado_por_ia`, `ia_nivel_padrao`, `verificacao_ativa`) e controla bots (`adicionar_ia`/`completar_com_ias`/`remover_ia`); o apelido (`apelido`) pode ser trocado quantas vezes quiser enquanto o jogador não está pronto — travado ao ficar pronto (e destravado ao desfazer); jogadores alternam prontidão (`ficar_pronto`); `iniciar_partida` libera somente com `Lobby.pode_iniciar()` (>=2, todos com apelido, todos os não-master prontos — bots já entram prontos; com verificacao_ativa, exige revelações de seed completas). Sala cheia recusa connect (`sala_cheia`). `status` vira `"jogando"` ao iniciar e volta a `"espera"` no `resetar_para_lobby`.
+- **Sala de espera (0):** o master edita `Lobby.config` via `configurar_partida` (nome, `dados_qtd`, `max_jogadores`, `com_coringa`, `publica`, `substituir_desconectado_por_ia`, `ia_nivel_padrao`, `verificacao_ativa`) e controla bots (`adicionar_ia`/`completar_com_ias`/`remover_ia`/`renomear_ia`); o apelido (`apelido`) pode ser trocado quantas vezes quiser enquanto o jogador não está pronto — travado ao ficar pronto (e destravado ao desfazer); jogadores alternam prontidão (`ficar_pronto`); `iniciar_partida` libera somente com `Lobby.pode_iniciar()` (>=2, todos com apelido, todos os não-master prontos — bots já entram prontos; com verificacao_ativa, exige revelações de seed completas). Sala cheia recusa connect (`sala_cheia`). `status` vira `"jogando"` ao iniciar e volta a `"espera"` no `resetar_para_lobby`.
 - **Rolagem (1):** cada um rola (`jogar_dados` → dados derivados; `joguei_dados` confirma ao servidor; `rolagem_status` mostra confirmados). Quando todos confirmam, `mudar_pagina 2`.
 - **Turnos/apostas (2):** o jogador da vez aposta (`apostar`) ou desconfia (`desconfiar`). Aposta válida avança a vez (`atualizar_turno`/`meu_turno`/`espera_turno`); desconfiança abre a conferência (página 3). Coringa (`atualizar_coringa`) segue as regras de `config.com_coringa`.
 - **Conferência (3):** todos confirmam `conferencia_final` (gated por `lobby.pagina == 3`); `cards_conferencia` + `rendimento` narrado. Perdedor perde dados; fim da rodada → `reset_rodada` (ou `reset_partida` com pontos e nova rodada) e volta à página 1 (ou página 4 se alguém zerou).
@@ -39,6 +39,10 @@ Quem entra em sala com `status == 'jogando'` vira `Jogador` em `lobby.espectador
 
 Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe `expulso_da_sala` e a room recebe `jogador_expulso`.
 
+## Renomear bot (Fase 75)
+
+Master renomeia os bots da espera via `renomear_ia` (master + `chave_secreta`, `client_id` + `apelido`). O editor nasce na própria célula do nome (input + "ok", Enter salva, Escape/blur cancela) e vem das linhas marcadas em `update_user_list.bots`; `marcador_ia`/`limite_nome_ia` do mesmo payload montam o input sem duplicar a constante no JS. O servidor recoloca o `🤖`, resolve colisão com sufixo `_1` dentro do orçamento e devolve o nome final no `update_user_list` do broadcast; recusa vai como `renomear_ia_negado` com `{motivo: {chave, params}}`. Fora da espera o evento é no-op (o apelido já está nas fichas de confirmação, no narrador e no histórico da rodada).
+
 ## Mapa de eventos
 
 ### Cliente → servidor (emits de `static/script.js` → handlers em `app.py`)
@@ -55,6 +59,7 @@ Master expulsa via `expulsar_jogador` (master + `chave_secreta`); expulso recebe
 | `revelar_seed` (`chave`, `nonce`) | `revelar_seed` | chave, cooldown=None |
 | `solicitar_auditoria` | `solicitar_auditoria` | chave |
 | `adicionar_ia`/`completar_com_ias`/`remover_ia` (chave) | app.py:712/723/734 | master + chave |
+| `renomear_ia` (`chave`, `client_id`, `apelido`) | `renomear_ia` | master + chave, só na espera; recusa → `renomear_ia_negado` |
 | `expulsar_jogador` (`chave`, `client_id`) | `expulsar_jogador` | master + chave |
 | `sair_da_sala` (`chave`) | `sair_da_sala` | cooldown=None, espectador sem chave; jogador na espera/eliminado: exige chave e remove sem janela de reconexão; jogador ativo na partida: no-op |
 | `listar_partidas` (`filtros`, `sala_atual`) | `listar_partidas` | evento_leitura |
@@ -85,6 +90,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
 | `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | fecha o drawer de configurações |
+| `renomear_ia_negado` (`motivo` {chave, params}: `msg.motivo.ia_invalido`/`ia_ocupado`/`ia_alvo`) | `renomear_ia` (Fase 75) | cliente (só o master) | mostra o alerta da recusa |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |
 | `jogador_desconectado` | app.py:699 | cliente | 1835 |
