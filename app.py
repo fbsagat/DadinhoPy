@@ -1230,6 +1230,11 @@ def ficar_pronto(dados, lobby, jogador):
     """
     if lobby.status != 'espera':
         return
+    # Fase: não pode ficar pronto sem nome definido — o jogador sem username é
+    # filtrado da lista (invisível) e ficaria "pronto" sem constar na sala.
+    if jogador.username is None:
+        emit('pronto_sem_nome', {}, to=jogador.client_id, ignore_queue=True)
+        return
     jogador.pronto = not jogador.pronto
     atualizar_lista_usuarios(lobby)
 

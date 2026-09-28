@@ -2992,6 +2992,29 @@ def teste_apelido_editavel_ate_pronto():
     _ok("apelido editável na espera e travado ao ficar pronto")
 
 
+def teste_ficar_pronto_sem_apelido_bloqueado():
+    """
+    Fase 31: clicar em "ficar pronto" sem nome definido não altera o estado
+    do jogador e devolve o evento `pronto_sem_nome` — o jogador sem username
+    é filtrado da lista (invisível), então ficar pronto sem nome deixaria o
+    lobby em estado inconsistente.
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    # O jogador entrou sem definir apelido: username é None no servidor.
+    c1.emit("ficar_pronto", {"chave": cs1["chave_secreta"]})
+    eventos = c1.get_received()
+    assert _achar_evento(eventos, "pronto_sem_nome") is not None, \
+        "deve emitir pronto_sem_nome quando fica pronto sem nome"
+    lobby = modulo_store.carregar_sala(SALA)
+    jogador = lobby.jogadores[0]
+    assert jogador.username is None, "jogador sem apelido deve ter username=None"
+    assert jogador.pronto is False, "ficar pronto sem nome não deve alternar pronto"
+    c1.disconnect()
+    _limpar()
+    _ok("ficar pronto sem apelido é bloqueado com aviso")
+
+
 def teste_iniciar_caido_sem_apelido_removido():
     """
     Fase 30: quem caiu na espera SEM apelido é removido no início (não vira bot
@@ -3419,6 +3442,7 @@ def verificar_integracao():
         ("sair-da-sala-eliminado", teste_sair_da_sala_eliminado),
         ("recupera-substituido-na-partida", teste_recupera_jogador_substituido_na_partida),
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
+        ("ficar-pronto-sem-apelido", teste_ficar_pronto_sem_apelido_bloqueado),
         ("lobby-lotado", teste_lobby_lotado_so_quando_lotar),
     ]
     testes_fase69 = [

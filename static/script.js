@@ -949,6 +949,11 @@ socket.on('iniciar_negado', function (data) {
     mostrar_alerta(t('msg.iniciar_negado', { motivo: texto }), 'aviso');
 });
 
+// Fase: avisa quem tentou ficar pronto sem nome definido.
+socket.on('pronto_sem_nome', function () {
+    mostrar_alerta(t('msg.preencha_nome'), 'aviso');
+});
+
 // O pré-preenchimento e a persistência do apelido ficam no bloco
 // `atualizar_botao_apelido` (lá embaixo), junto do estado do botão.
 
@@ -1145,9 +1150,14 @@ socket.on("update_user_list", (data) => {
         const bot_pronto = document.getElementById('bot_pronto');
         const meu_indice = data.users.indexOf(nome_jogador);
         const eu_pronto = meu_indice !== -1 && data.prontos[meu_indice] === true;
+        // Sem nome na lista (meu_indice === -1): o jogador ainda não definiu
+        // apelido — "ficar pronto" é travado para evitar o bug do invisível.
+        const sem_nome = meu_indice === -1;
         if (bot_pronto) {
             bot_pronto.textContent = eu_pronto ? t('js.pronto_desfazer') : t('js.ficar_pronto');
-            bot_pronto.disabled = data.status === 'jogando';
+            bot_pronto.disabled = data.status === 'jogando' || sem_nome;
+            bot_pronto.title = sem_nome ? t('msg.preencha_nome') : '';
+            bot_pronto.setAttribute('aria-label', sem_nome ? t('msg.preencha_nome') : (eu_pronto ? t('js.pronto_desfazer') : t('js.ficar_pronto')));
         }
         // Apelido editável na espera quantas vezes o jogador quiser, mas travado
         // ao ficar pronto (e destravado ao desfazer o pronto). O input e o botão

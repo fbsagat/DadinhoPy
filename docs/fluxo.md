@@ -59,7 +59,7 @@ Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a
 | `retomar_identidade` (`chave`) | `retomar_identidade` | cooldown=None, sem autenticar |
 | `apelido` (`apelido_msg`) | `escolher_apelido` | evento_mutavel, extrair_chave=None |
 | `configurar_partida` (`chave`, `config`) | `configurar_partida` | master + chave |
-| `ficar_pronto` (`chave`) | `ficar_pronto` | + chave |
+| `ficar_pronto` (`chave`) | `ficar_pronto` | + chave, guarda `username is None` (emit `pronto_sem_nome`) |
 | `iniciar_partida` (`chave`, `dados_qtd`) | `iniciar_partida` | master + chave, valida `pode_iniciar` |
 | `comprometer_seed` (`chave`, `compromisso`) | `comprometer_seed` | chave, cooldown=None |
 | `revelar_seed` (`chave`, `nonce`) | `revelar_seed` | chave, cooldown=None |
@@ -123,6 +123,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `jogar_dados_resultado` | app.py:916 | cliente | 1744 |
 | `jogada_invalida` | modelos:1256 (`txtchave`/`txtparams`) | cliente | 1795 |
 | `iniciar_negado` | app.py:612 (`motivo`) | cliente | 438 |
+| `pronto_sem_nome` | app.py:1237 (guard do `ficar_pronto`) | cliente | — |
 | `sala_criada` | app.py:804 | cliente | 259 |
 | `partidas_listadas` | app.py:790 | cliente | 367 |
 | `seed_compromissos` | app.py:670 | sala | 3155 |
