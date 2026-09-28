@@ -1320,6 +1320,11 @@ h5,
     height: auto;
 }
 
+/* Shake to roll hint — desktop nunca mostra. */
+#shake_hint_mobile {
+    display: none;
+}
+
 @media (max-width: 768px) {
     #tela_jogar_dados img {
         width: 64px !important;
@@ -1329,6 +1334,25 @@ h5,
     #tela_jogar_dados .btn-primary {
         min-height: 48px;
         font-size: 1.05rem;
+    }
+
+    /* Shake to roll hint — mobile only. */
+    #shake_hint_mobile {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        justify-content: center;
+        margin: 0.6rem auto 0;
+        padding: 0.4rem 0.8rem;
+        background: rgba(255, 255, 255, 0.13);
+        border-radius: 999px;
+        font-size: 0.85rem;
+        color: #fff;
+        max-width: 260px;
+    }
+
+    #shake_hint_mobile .shake-emoji {
+        font-size: 1.1rem;
     }
 }
 

@@ -1631,6 +1631,11 @@ socket.on("mudar_pagina", function (data) {
     // som/idioma do topo também fecha.
     fechar_config_sala();
     fechar_config_desktop();
+    // Shake to roll (mobile): desativa ao sair da tela de rolagem (página 1).
+    if (data.pag_numero !== 1) {
+        desativar_shake_dados();
+        esconder_shake_hint();
+    }
     // Fase 32 (P1): o título é texto "DADINHO" (sem imagens titulo.png/titulo_p).
     // Só o tamanho varia por página para abrir espaço nas telas de jogo.
     if (data.pag_numero === 2) {
@@ -1839,6 +1844,120 @@ function armar_retry_rolagem() {
     }, ROLAGEM_RETRY_MS);
 }
 
+// ---------------------------------------------------------------------------
+// Shake to roll (mobile). Aceleração do dispositivo → callback de rolagem.
+// O shake chama `jogar_dados()` diretamente: os guards já existentes
+// (`rolagem_pedida`, `chave_confirmada`) impedem duplicação. O timeout do
+// autojogar continua ativo — se estourar antes do shake, o cliente já rola
+// pelos dados do atrasado e o shake torna-se irrelevante.
+// ---------------------------------------------------------------------------
+let shake_listener_ativo = false;
+let shake_permissao_pendente = false;
+let shake_debounce_timer = null;
+let shake_amostras = [];
+const SHAKE_THRESHOLD = 2.0;    // ~2m/s² para `acceleration` (sem gravidade)
+const SHAKE_GRAVITY_THRESHOLD = 16.0;  // ~9.8 (gravidade) + shake forte, para `accelerationIncludingGravity`
+const SHAKE_JANELA_MS = 300;    // janela para acumular amostras fortes
+const SHAKE_DEBOUNCE_MS = 800;  // proteção contra shakes duplicados
+
+function processar_acelerometro(event) {
+    if (!shake_listener_ativo || shake_debounce_timer) {
+        return;
+    }
+    // Preferência por `acceleration` (sem gravidade — 0 no repouso);
+    // fallback para `accelerationIncludingGravity` (inclui ~9.8m/s²).
+    let acc = event.acceleration;
+    let threshold = SHAKE_THRESHOLD;
+    if (!acc) {
+        acc = event.accelerationIncludingGravity;
+        threshold = SHAKE_GRAVITY_THRESHOLD;
+    }
+    if (!acc) {
+        return;
+    }
+    const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+    const agora = Date.now();
+    shake_amostras = shake_amostras.filter(a => agora - a.t < SHAKE_JANELA_MS);
+    shake_amostras.push({ mag: magnitude, t: agora });
+    const fortes = shake_amostras.filter(a => a.mag > threshold);
+    if (fortes.length >= 3 && indiceAtual === 1 && !rolagem_pedida) {
+        shake_debounce_timer = setTimeout(function () {
+            shake_debounce_timer = null;
+        }, SHAKE_DEBOUNCE_MS);
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate([50, 30, 50]);
+        }
+        jogar_dados();
+    }
+}
+
+function desativar_shake_dados() {
+    if (shake_listener_ativo) {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            DeviceMotionEvent.removeEventListener('devicemotion', processar_acelerometro);
+        } else {
+            window.removeEventListener('devicemotion', processar_acelerometro);
+        }
+        shake_listener_ativo = false;
+    }
+    shake_amostras = [];
+    if (shake_debounce_timer) {
+        clearTimeout(shake_debounce_timer);
+        shake_debounce_timer = null;
+    }
+}
+
+function ativar_shake_dados() {
+    if (!eh_mobile()) {
+        return;
+    }
+    if (typeof DeviceMotionEvent === 'undefined') {
+        return;
+    }
+    // Chrome 76+: DeviceMotion exige contexto seguro (HTTPS ou localhost).
+    // Em HTTP via IP local, o evento `devicemotion` nunca dispara.
+    if (!window.isSecureContext) {
+        return;
+    }
+    desativar_shake_dados();
+    // iOS 13+: requestPermission é assíncrono e exige gesto do usuário.
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        shake_permissao_pendente = true;
+        function solicitar_permissao() {
+            shake_permissao_pendente = false;
+            DeviceMotionEvent.requestPermission()
+                .then(function (state) {
+                    if (state === 'granted') {
+                        DeviceMotionEvent.addEventListener('devicemotion', processar_acelerometro);
+                        shake_listener_ativo = true;
+                    }
+                })
+                .catch(function () {});
+            document.body.removeEventListener('pointerdown', solicitar_permissao);
+            document.body.removeEventListener('touchstart', solicitar_permissao);
+        }
+        document.body.addEventListener('pointerdown', solicitar_permissao);
+        document.body.addEventListener('touchstart', solicitar_permissao);
+    } else {
+        window.addEventListener('devicemotion', processar_acelerometro);
+        shake_listener_ativo = true;
+    }
+}
+
+function esconder_shake_hint() {
+    const hint = document.getElementById('shake_hint_mobile');
+    if (hint) {
+        hint.style.display = 'none';
+    }
+}
+
+function mostrar_shake_hint() {
+    const hint = document.getElementById('shake_hint_mobile');
+    if (hint) {
+        hint.style.display = '';
+    }
+}
+
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
     // Fase P3: primero marcador do snapshot — arma o mute de sons até o mudar_pagina.
@@ -1913,6 +2032,7 @@ socket.on('construtor_dados', function (data) {
         // Fase 75: espectador não rola nada, então não ganha relógio.
         if (!eh_espectador) {
             iniciar_timer_jogada(data.tempo_max);
+            ativar_shake_dados();
         }
     } else {
         // Cria a div principal
@@ -1959,6 +2079,15 @@ socket.on('construtor_dados', function (data) {
     status_rol.className = 'mt-3 fs-6 text-white text-wrap mx-auto';
     status_rol.style.maxWidth = '40rem';
     tela_jogar_dados.appendChild(status_rol);
+
+    // Shake to roll (mobile): hint visual — só para quem pode rolar.
+    if (!eh_espectador) {
+        const hint = document.createElement('div');
+        hint.id = 'shake_hint_mobile';
+        hint.className = 'shake-hint-mobile';
+        hint.innerHTML = '<span class="shake-emoji">&#127922;</span> ' + t('js.shake_hint');
+        tela_jogar_dados.appendChild(hint);
+    }
 })
 
 // Função para construir os cards (parte estática)
@@ -2994,6 +3123,8 @@ socket.on("jogar_dados_resultado", function (data) {
         return;
     }
     rolagem_animada = true;
+    // Shake to roll (mobile): o resultado chegou — esconde o hint.
+    esconder_shake_hint();
     const dados_lista = data.dados_jogador;
     const dados_qtd = dados_lista.length;
 
@@ -3372,7 +3503,7 @@ const dicas_por_pagina = {
         'js.dica.0.6', 'js.dica.0.7', 'js.dica.0.8', 'js.dica.0.9', 'js.dica.0.10', 'js.dica.0.11',
         'js.dica.0.12'],
     1: ['js.dica.1.0', 'js.dica.1.1', 'js.dica.1.2', 'js.dica.1.3', 'js.dica.1.4', 'js.dica.1.5',
-        'js.dica.1.6'],
+        'js.dica.1.6', 'js.dica.1.7'],
     2: ['js.dica.2.0', 'js.dica.2.1', 'js.dica.2.2', 'js.dica.2.3', 'js.dica.2.4', 'js.dica.2.5',
         'js.dica.2.6', 'js.dica.2.7', 'js.dica.2.8', 'js.dica.2.9', 'js.dica.2.10', 'js.dica.2.11',
         'js.dica.2.12', 'js.dica.2.13', 'js.dica.2.14', 'js.dica.2.15'],
