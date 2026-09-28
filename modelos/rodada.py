@@ -33,6 +33,10 @@ class Rodada:
         self.vez_atual = vez_atual
         self.perdedor = perdedor
         self.vencedor = vencedor
+        # Fase P2: histórico de narração (cópias públicas) para replay no snapshot.
+        # Inicializado vazio; preenchido por `narrador.registrar_narracao` e
+        # persistido em `_partida_para_dict`. O cap é feito no próprio registrador.
+        self.historico_narracao = []
         # Marcas de tempo da jogada automática (Fase 21): quando a vez atual
         # começou (`vez_em`) e quando a rolagem da rodada começou
         # (`inicio_rolagem_em`). O servidor confere o tempo decorrido antes de
@@ -315,8 +319,10 @@ class Rodada:
                                        so_ias=somente_ias_na_partida(self.da_partida))
              if jogador.is_ia else 0),
             anti_fraude.delay_adicional(jogador))
-        emit('narracao', narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou,
-                                                        aposta=ultimo_turno),
+        emit('narracao', narrador.registrar_narracao(
+            self,
+            narrador.narracao_desconfianca(jogador, ultimo_turno.do_jogador, pensou,
+                                                         aposta=ultimo_turno)),
              to=self.sala_room())
         emit('cards_conferencia', self.conferencia, to=self.sala_room())
         emit("mudar_pagina", {'pag_numero': 3}, to=self.sala_room())

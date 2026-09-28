@@ -39,6 +39,11 @@ NOMES_FACES = {
     6: ('sena', 'senas'),
 }
 
+# Quantas falas do narrador ficam registradas no histórico da rodada para
+# replay no snapshot de reconexão (Fase P2). É um buffer de reconstrução: só
+# a rodada corrente interessada, e o cap evita o histórico crescer sem parar.
+LIMITE_HISTORICO_NARRACAO = 15
+
 
 def tempo_pensamento(nivel, jogador=None, so_ias=False):
     """
@@ -429,3 +434,28 @@ def narracao_retorno(jogador):
     fala = _item('narr.retorno', "🔌 {nome} voltou e reassumiu o próprio controle.", nome=nome)
     return {'texto': fala['texto'].format(nome=nome), 'segmentos': [_seg(fala)],
             'tipo': 'retorno', 'is_ia': False, 'atraso': 0}
+
+
+def registrar_narracao(rodada, payload):
+    """
+    Guarda uma cópia canonônica (pública, sem dados voláteis) da narração de um
+    lance na rodada, para o replay no snapshot de reconexão (Fase P2). A cópia é
+    o que sobrevive ao store; o `payload` original (com `atraso`, `is_ia` e
+    `nivel`, para a animação do cliente) volta para o `emit` imediato sem
+    alteração. Só registra se a rodada existe e já tem o histórico inicializado.
+    """
+    if rodada is None or not isinstance(payload, dict):
+        return payload
+    historico = getattr(rodada, 'historico_narracao', None)
+    if not isinstance(historico, list):
+        historico = []
+        rodada.historico_narracao = historico
+    if len(historico) >= LIMITE_HISTORICO_NARRACAO:
+        historico.pop(0)
+    historico.append({
+        'texto': payload.get('texto', ''),
+        'segmentos': payload.get('segmentos', []),
+        'tipo': payload.get('tipo'),
+        'jogador': payload.get('jogador'),
+    })
+    return payload

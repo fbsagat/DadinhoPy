@@ -199,6 +199,56 @@ def verificar_acoes_html(node):
     )
     _checar("data-acao do HTML exportado em window.Dadinho", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
+    verificar_chave_identidade(node)
+
+
+# ---------------------------------------------------------------------------
+# 2b) a chave de identidade (retomar_identidade) é persistida POR SALA em
+# localStorage — e não mais lida de sessionStorage por aba. A sessionStorage
+# era per-aba: um jogador que reabría a partida numa aba nova entrava sem a
+# chave (tem_chave=0), virava placeholder de espectador num lobby `jogando`
+# e adotava a chave do placeholder — ficava preso e não retomava o jogador
+# (nem mesmo o substituído por IA). O guarda garante a contratação que permite
+# "voltar a jogar a qualquer momento" a partir de outra aba.
+# ---------------------------------------------------------------------------
+_CODIGO_CHAVE = r"""
+const fs = require('fs');
+const js = fs.readFileSync(process.argv[1], 'utf8');
+const code = js.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+let erros = [];
+// 1) leitura primária da chave deve passar por localStorage por sala.
+if (code.indexOf('function _chave_armazenamento(sala)') < 0)
+    erros.push('falta a funcao storage por sala');
+if (code.indexOf('let chave_resumo = (sala_atual && ler_chave_resumo(sala_atual))') < 0
+    && code.indexOf('let chave_resumo = (sala_atual && ler_chave_resumo(sala_atual)) ||') < 0)
+    erros.push('chave_resumo nao e lida via ler_chave_resumo(sala_atual)');
+// 2) a leitura legacy por-aba (sessionStorage) foi substituída: não pode mais
+//    ser a fonte da chave no boot.
+if (/let\s+chave_resumo\s*=\s*sessionStorage\.getItem\(['\x22]dadinho_chave['\x22]\)/.test(code))
+    erros.push('chave_resumo ainda lida direto do sessionStorage (per-aba)');
+// 3) gravação e limpeza do placeholder devem ter a chave por sala (não só a antiga).
+if (code.indexOf('localStorage.setItem(_chave_armazenamento(') < 0)
+    erros.push('nao grava a chave por sala no localStorage');
+if (code.indexOf('localStorage.removeItem(_chave_armazenamento(') < 0)
+    erros.push('nao limpa a chave por sala no localStorage');
+// 4) os handlers reais de conexão/saída usam os helpers (não a sessionStorage direta).
+if (code.indexOf('gravar_chave_resumo(') < 0)
+    erros.push('nao persiste a chave via gravar_chave_resumo no connect_start/retumar_negado');
+if (code.indexOf('limpar_chave_resumo(') < 0)
+    erros.push('nao limpa a chave via limpar_chave_resumo nos handlers de saída');
+if (erros.length) { console.error(erros.join(' | ')); process.exit(1); }
+console.log('chave identidade cross-tab (localStorage/sala) ok');
+"""
+
+
+def verificar_chave_identidade(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_CHAVE, os.path.join(RAIZ, "static", "script.js")],
+        capture_output=True, text=True,
+    )
+    _checar("chave de identidade por-sala em localStorage (cross-tab)",
+            resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
 
 
 # ---------------------------------------------------------------------------

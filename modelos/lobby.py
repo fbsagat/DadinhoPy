@@ -154,9 +154,11 @@ class Lobby:
                 'coringa_atual_qtd': rodada.coringa_atual_qtd,
                 'coringa_atual_jogador_id': rodada.coringa_atual_jogador.client_id
                 if rodada.coringa_atual_jogador else None,
-                'conferiram': rodada.conferiram,
-                'conferencia': rodada.conferencia,
-                'vez_atual_id': rodada.vez_atual.client_id if rodada.vez_atual else None,
+                 'conferiram': rodada.conferiram,
+                 'conferencia': rodada.conferencia,
+                 # Fase P2: histórico de narração para replay no snapshot.
+                 'historico_narracao': list(getattr(rodada, 'historico_narracao', []) or []),
+                 'vez_atual_id': rodada.vez_atual.client_id if rodada.vez_atual else None,
                 'vez_em': rodada.vez_em.isoformat() if rodada.vez_em else None,
                 'inicio_rolagem_em': rodada.inicio_rolagem_em.isoformat() if rodada.inicio_rolagem_em else None,
                 'conferencia_em': rodada.conferencia_em.isoformat() if rodada.conferencia_em else None,
@@ -358,6 +360,8 @@ class Lobby:
                 rodada.coringa_atual_jogador = jogadores.get(dados_rodada.get('coringa_atual_jogador_id'))
                 rodada.conferiram = dados_rodada.get('conferiram', 0)
                 rodada.conferencia = dados_rodada.get('conferencia')
+                # Fase P2: histórico de narração (cópias públicas) para replay.
+                rodada.historico_narracao = list(dados_rodada.get('historico_narracao') or [])
                 vez_em = dados_rodada.get('vez_em')
                 rodada.vez_em = datetime.fromisoformat(vez_em) if vez_em else None
                 inicio_rolagem = dados_rodada.get('inicio_rolagem_em')

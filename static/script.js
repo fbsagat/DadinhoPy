@@ -39,16 +39,54 @@ const diceImages = [
     "../static/imagens/dado/6.png"
 ];
 
-// Envia a chave guardada anteriormente (via sessionStorage) para o servidor
-// reconhecer um refresh/reconexão e retomar a identidade (Fase 4).
-// Fase D: a chave NÃO vai mais na query string do handshake (vazava em logs de
-// acesso). O servidor cria um "placeholder" no connect e a identidade é
-// retomada pela primeira mensagem (`retomar_identidade`). `tem_chave` é só um
-// sinal booleano não-secreto para o servidor não barrar quem pode estar
-// retomando (sala cheia/GC).
-// Fase D2: vira `let` para `retomar_negado` adotar a chave do placeholder —
-// reincidência (reconnect com sid novo) tenta retomar com a chave certa.
-let chave_resumo = sessionStorage.getItem('dadinho_chave') || '';
+// Fase D / Fase P-Recover: a chave de identidade (para `retamar_identidade`) é
+// lida de / gravada em localStorage POR SALA — e não mais em sessionStorage
+// por aba. A sessionStorage era per-aba: quem abria a partida numa nova aba
+// (ou tinha perdido a aba original) entrava sem `chave_resumo`, conectava com
+// `tem_chave=0`, virava placeholder de espectador num lobby `jogando` e adotava a
+// chave falsa do placeholder — ficava preso assistindo e NUNCA retomava o
+// jogador (o humano caído e substituído por IA não voltava). Com a chave em
+// localStorage[sala], a nova aba chega com `tem_chave=1`, o servidor adia o
+// snapshot ao placeholder e o `retamar_identidade` recupera o jogador real
+// (inclusive o substituído por IA) — "voltar a jogar a qualquer momento".
+const CHAVE_ID = 'dadinho_chave';
+// Chave de storage indexada pela sala: não vaza identidade entre abas de salas
+// distintas (um jogador pode ter duas salas abertas). O salt é só evitar colisão
+// com a chave legacy `dadinho_chave` (per-aba) durante a transição.
+function _chave_armazenamento(sala) {
+    return sala ? `${CHAVE_ID}:${sala}` : CHAVE_ID;
+}
+// Lê a chave: localStorage por sala (compartilhada entre abas) com fallback para
+// a entrada legacy por-aba — migra-a na primeira leitura e limpa a sessionStorage
+// para não deixar a aba antiga com identidade dupla.
+function ler_chave_resumo(sala) {
+    if (sala) {
+        const local = localStorage.getItem(_chave_armazenamento(sala));
+        if (local) {
+            return local;
+        }
+    }
+    const legacy = sessionStorage.getItem(CHAVE_ID) || '';
+    if (legacy && sala) {
+        localStorage.setItem(_chave_armazenamento(sala), legacy);
+    }
+    sessionStorage.removeItem(CHAVE_ID);
+    return legacy;
+}
+function gravar_chave_resumo(chave) {
+    if (chave && sala_atual) {
+        localStorage.setItem(_chave_armazenamento(sala_atual), chave);
+    }
+    sessionStorage.removeItem(CHAVE_ID);
+}
+function limpar_chave_resumo() {
+    if (sala_atual) {
+        localStorage.removeItem(_chave_armazenamento(sala_atual));
+    }
+    localStorage.removeItem(CHAVE_ID);
+    sessionStorage.removeItem(CHAVE_ID);
+}
+let chave_resumo = (sala_atual && ler_chave_resumo(sala_atual)) || '';
 // Fase 46 (VPS): URL pública da API de socket.io lida do `<meta
 // name="dadinho-api-url">` (injetado pelo servidor). Quando a API roda na VPS
 // separada do frontend, o io() conecta na origem dela; vazio = mesmo host.
@@ -570,6 +608,11 @@ if (window.addEventListener) {
 }
 
 socket.on('narracao', function (data) {
+    // Fase P3: narração de replay do snapshot (marca `reconstrucao`). O fanfarra
+    // de vitória e sons do gancho ficam mudos até o `mudar_pagina` final.
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     esconder_pensando();
     const texto = traduzirSegmentos(data && data.segmentos, data && data.texto);
     if (texto) {
@@ -1415,7 +1458,7 @@ function expulsar_jogador(client_id, nome) {
 // sem o parâmetro ?sala (o servidor já o removeu da sala e da room).
 socket.on('expulso_da_sala', function () {
     chave_secreta = '';
-    sessionStorage.removeItem('dadinho_chave');
+    limpar_chave_resumo();
     mostrar_alerta(t('msg.expulso_da_sala'), 'erro').then(function () {
         const url = new URL(window.location.href);
         url.searchParams.delete('sala');
@@ -1440,7 +1483,7 @@ function atualizar_botao_sair() {
 socket.on('saiu_da_sala', function () {
     rastrear_funil('jogador_saiu_antes');
     chave_secreta = '';
-    sessionStorage.removeItem('dadinho_chave');
+    limpar_chave_resumo();
     const url = new URL(window.location.href);
     url.searchParams.delete('sala');
     url.searchParams.delete('chave_secreta');
@@ -1474,6 +1517,10 @@ function alternar_pronto() {
 
 // Funções para mudança de página
 socket.on("mudar_pagina", function (data) {
+    // Fase P3: o snapshot de reconexão termina aqui — libera sons (bip da vez,
+    // virar_papel, etc.) e o ciclo normal de jogada volta a tocar. É o ÚLTIMO
+    // evento do reconstruction, por isso vem antes da lógica de página.
+    reconstruindo_snapshot = false;
     // Fase 42 (N2): funil — partida iniciada (página 1) e concluída (página 4).
     if (data.pag_numero === 1) {
         rastrear_funil('partida_iniciada');
@@ -1775,6 +1822,10 @@ function armar_retry_rolagem() {
 
 // Função para construir a tela dos dados (1-6 dados em tela_jogar_dados).
 socket.on('construtor_dados', function (data) {
+    // Fase P3: primero marcador do snapshot — arma o mute de sons até o mudar_pagina.
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     const espectador = data.espectador;
     // Fase 30: quem entra assistindo (vaga perdida/busca) também vê o botão.
     eh_espectador = espectador === true;
@@ -1893,6 +1944,10 @@ socket.on('construtor_dados', function (data) {
 
 // Função para construir os cards (parte estática)
 socket.on('construtor_html', function (data) {
+    // Fase P3: primero marcador do snapshot de turnos — arma o mute de sons.
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     const principal = document.getElementById('cards');
     principal.innerHTML = '';
 
@@ -2026,7 +2081,13 @@ let tempo_autojogar_seg = 0;
 // acompanha o turno (recebeu `espera_turno`) vê o contador, mas não emite.
 let timer_meu_autojogar = true;
 let sou_da_vez = false;      // recebeu `meu_turno` (a vez atual é a minha)
-let tempo_turno_max = 0;     // limite/restante do turno (vem no `meu_turno`/`espera_turno`)
+let tempo_turno_max = 0;     // limite/restanto do turno (vem no `meu_turno`/`espera_turno`)
+// Fase P3: enquanto o snapshot de reconexão reconstrói a tela, um burst de eventos
+// (um por aposta, reset nova rodada, etc.) dispara sons em rajada. A flag é
+// armada pelo primeiro evento de conteúdo que chega marcado `reconstrucao: True`
+// e desarmada pelo `mudar_pagina` final — isto garante um só flip de página e
+// silencia apenas os sons de reconstrução, sem tocar a bip da vez / virar_papel.
+let reconstruindo_snapshot = false;
 // Fase D2: apelido do jogador que o cliente acredita estar NA VEZ (vem de
 // `meu_turno`/`espera_turno`/`formatador_coletivo`). Vai no heartbeat para o
 // servidor detectar um indicador de vez perdido entre instâncias (refresh) e
@@ -2403,6 +2464,10 @@ socket.on('botao_vencedor_ativ', function () {
 })
 
 socket.on('vencedor_da_partida', function (data) {
+    // Fase P3: marca o snapshot antes da fanfarra/celebração da vitória.
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     tocar_som_variante('aposta', [1, 2]);
     tocar_som('mover_peca');
     const h1_vencedor = document.getElementById('h1_vencedor');
@@ -2453,6 +2518,10 @@ function texto_conferencia(data) {
 
 // Função para construir os cards na página conferência
 socket.on('cards_conferencia', function (data) {
+    // Fase P3: marca o snapshot antes de tocar os sons de abertura da conferência.
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     tocar_som_variante('aposta', [1, 2]);
     tocar_som('virar_papel');
     const nomes = data.nomes;
@@ -2602,6 +2671,11 @@ socket.on('vitoria_status', function (data) {
 
 // Ações a aplicar no jogador que virou espectador, broadcast=False
 socket.on('espectador', function (data) {
+    // Fase P3: no snapshot o espectador é o primeiro evento — arma o mute de sons
+    // (o "pegar_dados" do evento vivo ainda soa, só o do snapshot é mudo).
+    if (data && data.reconstrucao === true) {
+        reconstruindo_snapshot = true;
+    }
     tocar_som_variante('pegar_dados', [1, 2]);
     // Fase 30: quem virou espectador (perdeu todos os dados) ganha o botão de sair.
     eh_espectador = true;
@@ -2688,12 +2762,12 @@ socket.on("connect_start", function (data) {
     _config_local_aplicada = false;
     // Fase 18: na home (sem sala) o servidor não devolve chave — mantém a atual
     // para não apagar a identidade de uma sala anterior.
-    // Fase D: guarda a chave no sessionStorage só quando não há uma sessão
+    // Fase D: guarda a chave no storage por sala só quando não há uma sessão
     // anterior para retomar (senão o placeholder sobrescreveria a identidade).
     if (data && data.chave_secreta) {
         chave_secreta = data.chave_secreta;
         if (!chave_resumo) {
-            sessionStorage.setItem('dadinho_chave', chave_secreta);
+            gravar_chave_resumo(chave_secreta);
         }
     }
     sou_master = !!(data && data.is_master);
@@ -2771,7 +2845,7 @@ socket.on('retomar_negado', function (data) {
         // corresponder ao servidor, então as ações mutáveis já podem fluir.
         chave_confirmada = true;
         chave_resumo = chave_secreta;
-        sessionStorage.setItem('dadinho_chave', chave_secreta);
+        gravar_chave_resumo(chave_secreta);
     }
 });
 
@@ -3824,7 +3898,7 @@ function aplicar_volume_som() {
 // de tempo usa isso para subir de intensidade conforme o relógio aperta, sem
 // sair da preferência de volume.
 function tocar_som(nome, ganho_relativo) {
-    if (!som_ativado) {
+    if (!som_ativado || reconstruindo_snapshot) {
         return;
     }
     const arquivo = sons_disponiveis[nome];
@@ -3850,7 +3924,7 @@ function tocar_som_variante(base, variantes) {
 
 // Fanfarra de vitória sintetizada (Web Audio), sem depender de arquivo externo.
 function tocar_fanfarra() {
-    if (!som_ativado || !garantir_contexto_audio()) {
+    if (!som_ativado || reconstruindo_snapshot || !garantir_contexto_audio()) {
         return;
     }
     const agora = contexto_audio.currentTime;
@@ -5052,6 +5126,12 @@ function criar_confete(no_topo) {
 }
 
 function iniciar_celebracao() {
+    // Fase P3: no snapshot de reconexão a vitória não recomeça os fogos (o flag
+    // `reconstruindo_snapshot` ainda está ativo); o OK do vencedor reenvia o
+    // `comemorar` caso queira os fogos manualmente.
+    if (reconstruindo_snapshot) {
+        return;
+    }
     celebrando = true;
     if (confetes.length === 0) {
         // Fase 55 (P7): menos confetes no celular — 70 ~ 35 (cada um paga um

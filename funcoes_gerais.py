@@ -287,20 +287,49 @@ def reconstruir_tela_sala(lobby, exceto=None):
         enviar_snapshot_sala(lobby, alvo)
 
 
+def reemitir_narracao_rodada(rodada, jogador):
+    """
+    Rejoga para um cliente que acabou de reconectar a sequência de narrações
+    gravadas da rodada corrente (Fase P2). Preserva a ordem cronológica, mas:
+    - `atraso` vem zerado (sem simular o tempo de pensamento no replay);
+    - `is_ia`/`nivel` são descartados (não dispara "pensando" nem o poll do
+      espectador);
+    - leva `reconstrucao: True` para o cliente saber que é replay (a primeira
+      narração aqui também arma o sinal de mute de sons do snapshot/P3).
+    O narrador é só estética — reemitir antes do `mudar_pagina` final não afeta
+    a consistência do estado.
+    """
+    historico = getattr(rodada, 'historico_narracao', []) or []
+    for item in historico:
+        replay = {
+            'texto': item.get('texto', ''),
+            'segmentos': item.get('segmentos', []),
+            'tipo': item.get('tipo'),
+            'jogador': item.get('jogador'),
+            'atraso': 0,
+            'reconstrucao': True,
+        }
+        emit('narracao', replay, to=jogador.client_id, ignore_queue=True)
+
+
 def enviar_snapshot_sala(lobby, jogador):
     """
     Reconstrói o front-end de um jogador que acabou de conectar (tab novo, refresh
     ou reconexão), refletindo o estado persistido da sala (Fase 4).
 
     O estado autoritativo já é emitido por eventos; aqui apenas os repetimos para
-    este cliente, na ordem certa, baseado em `lobby.pagina`.
+    este cliente, na ordem certa, baseado em `lobby.pagina`. A ordem dos eventos
+    espelha o fluxo vivo do jogo — em especial o `mudar_pagina` é o ÚLTIMO da
+    página —, senão o cliente troca de tela antes do conteúdo existir (invertia
+    a página 3 antes de montar os cards) e o narrador/votos/sons disparavam em
+    rajada no refresh.
     """
     pagina = lobby.pagina
-    # Fase 40 (C5): o snapshot é sempre para o jogador que acaba de conectar/
+    # Fase 40 (C5): o snapshot é sempre para o jogador que acabou de conectar/
     # reconectar (o próprio request) — sid local à instância, então
     # `ignore_queue` evita um PUBLISH à toa na fila.
-    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id, ignore_queue=True)
     if pagina == 0:
+        emit("mudar_pagina", {'pag_numero': 0}, to=jogador.client_id, ignore_queue=True)
         return
 
     # Um tab novo que chega no meio da partida não tem partida_atual: usa a última.
@@ -308,6 +337,9 @@ def enviar_snapshot_sala(lobby, jogador):
     if partida is None and lobby.partidas:
         partida = lobby.partidas[-1]
     if partida is None:
+        # Sem partida ativa (ex.: ninguém a iniciou ainda) — ainda assim garante a
+        # página certa do lobby, já que o `mudar_pagina` precisa chegar por último.
+        emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id, ignore_queue=True)
         return
 
     rodada = partida.rodadas[-1] if partida.rodadas else None
@@ -321,74 +353,84 @@ def enviar_snapshot_sala(lobby, jogador):
     if espectador and pagina in (1, 2, 3, 4):
         emit('espectador', {'nome': jogador.username}, to=jogador.client_id, ignore_queue=True)
 
+    # Fase P1/P3: marcação de snapshot. `reconstrucao: True` no primeiro evento de
+    # conteúdo da página arma o mute de sons no cliente; o narrador replay também
+    # usa para saber que é reconstrução. O `mudar_pagina` final é o ÚLTIMO evento —
+    # espelha o fluxo vivo e deixa o conteúdo montado antes da troca de tela.
     if pagina == 1:
         if rodada is not None:
             emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador,
-                                      'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
+                                      'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0),
+                                      'reconstrucao': True},
                  to=jogador.client_id, ignore_queue=True)
             if not espectador and jogador.joguei_dados and jogador.dados:
                 # Já rolou: repete o resultado pra reapresentar os dados na tela.
                 emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados},
                      to=jogador.client_id, ignore_queue=True)
+            reemitir_narracao_rodada(rodada, jogador)
             emitir_status_rolagem(lobby)
-        return
 
-    if pagina == 2:
+    elif pagina == 2:
         if rodada is None:
-            return
-        turnos_lista = {
-            j.username: [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]]
-            for j in partida.jogadores
-        }
-        emit('construtor_html',
-             {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista,
-              'dados_tt': partida.dados_qtd}, to=jogador.client_id, ignore_queue=True)
-        # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
-        # construtor_html usa a base (partida.dados_qtd), então corrige os cards
-        # com reset_rodada (mesmo mecanismo do fluxo normal do jogo).
-        if rodada.rodada_num > 1:
-            emit('reset_rodada',
-                 {'jogadores_nomes': [j.username for j in partida.jogadores],
-                  'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores]},
-                 to=jogador.client_id, ignore_queue=True)
-        emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id, ignore_queue=True)
-        if rodada.com_coringa is False:
-            emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id, ignore_queue=True)
+            # Sem rodada não há conteúdo de turno; ainda assim avisa a página.
+            pass
         else:
-            emit('atualizar_coringa', {
-                'coringa_atual': rodada.coringa_atual_qtd,
-                'ultimo_coringa': rodada.coringa_atual_jogador.username if rodada.coringa_atual_jogador else '',
-            }, to=jogador.client_id, ignore_queue=True)
-        if not espectador:
-            emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
-        nomes = [j.username for j in partida.jogadores]
-        vez_atual = rodada.vez_atual
-        emit('formatador_coletivo', {'jogadores_nomes': nomes,
-                                     'jogador_inicial_nome': vez_atual.username if vez_atual else ''},
-             to=jogador.client_id, ignore_queue=True)
-        ultimo_turno = rodada.turnos[-1] if rodada.turnos else None
-        for j in partida.jogadores:
-            if j.turnos:
-                emit('atualizar_turno',
-                     {'jogador': j.username,
-                      'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
-                      'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
+            turnos_lista = {
+                j.username: [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]]
+                for j in partida.jogadores
+            }
+            emit('construtor_html',
+                 {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista,
+                  'dados_tt': partida.dados_qtd, 'reconstrucao': True}, to=jogador.client_id, ignore_queue=True)
+            # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
+            # construtor_html usa a base (partida.dados_qtd), então corrige os cards
+            # com reset_rodada (mesmo mecanismo do fluxo normal do jogo).
+            if rodada.rodada_num > 1:
+                emit('reset_rodada',
+                     {'jogadores_nomes': [j.username for j in partida.jogadores],
+                      'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores]},
                      to=jogador.client_id, ignore_queue=True)
-        if not espectador:
-            emitir_dispatcher_turno(lobby, jogador)
-        return
+            emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id, ignore_queue=True)
+            if rodada.com_coringa is False:
+                emit('atualizar_coringa', {'coringa_cancelado': True}, to=jogador.client_id, ignore_queue=True)
+            else:
+                emit('atualizar_coringa', {
+                    'coringa_atual': rodada.coringa_atual_qtd,
+                    'ultimo_coringa': rodada.coringa_atual_jogador.username if rodada.coringa_atual_jogador else '',
+                }, to=jogador.client_id, ignore_queue=True)
+            if not espectador:
+                emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
+            nomes = [j.username for j in partida.jogadores]
+            vez_atual = rodada.vez_atual
+            emit('formatador_coletivo', {'jogadores_nomes': nomes,
+                                         'jogador_inicial_nome': vez_atual.username if vez_atual else ''},
+                 to=jogador.client_id, ignore_queue=True)
+            ultimo_turno = rodada.turnos[-1] if rodada.turnos else None
+            for j in partida.jogadores:
+                if j.turnos:
+                    emit('atualizar_turno',
+                         {'jogador': j.username,
+                          'lista_turnos': [[t.dado_face, t.dado_qtd] for t in j.turnos[-3:][::-1]],
+                          'ultimo': ultimo_turno is not None and j == ultimo_turno.do_jogador},
+                         to=jogador.client_id, ignore_queue=True)
+            reemitir_narracao_rodada(rodada, jogador)
+            if not espectador:
+                emitir_dispatcher_turno(lobby, jogador)
 
-    if pagina == 3:
+    elif pagina == 3:
         if rodada is not None and rodada.conferencia:
-            emit('cards_conferencia', rodada.conferencia, to=jogador.client_id, ignore_queue=True)
+            snapshot_conferencia = dict(rodada.conferencia)
+            snapshot_conferencia['reconstrucao'] = True
+            emit('cards_conferencia', snapshot_conferencia, to=jogador.client_id, ignore_queue=True)
+            reemitir_narracao_rodada(rodada, jogador)
         emitir_status_conferencia(lobby)
-        return
 
-    if pagina == 4:
+    elif pagina == 4:
         if partida.vencedor_final is not None:
             emit('vencedor_da_partida',
                  {'nome': partida.vencedor_final.username,
-                  'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0)},
+                  'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0),
+                  'reconstrucao': True},
                  to=jogador.client_id, ignore_queue=True)
             nomes = [j.username for j in lobby.jogadores if j.username is not None]
             pontos = [j.pontos for j in lobby.jogadores if j.username is not None]
@@ -397,7 +439,13 @@ def enviar_snapshot_sala(lobby, jogador):
                 emit('auditoria_partida', partida.montar_auditoria(), to=jogador.client_id, ignore_queue=True)
             if not espectador and partida.vencedor_final == jogador:
                 emit('botao_vencedor_ativ', to=jogador.client_id, ignore_queue=True)
+            reemitir_narracao_rodada(partida.rodadas[-1], jogador)
         emitir_status_vitoria(lobby)
+
+    # Fase P1: o flip de página é o ÚLTIMO evento da página — o conteúdo (cards,
+    # dados, turno, etc.) já foi montado, como no fluxo vivo, e os sons do
+    # reconstruction são mantidos em mute até aqui.
+    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id, ignore_queue=True)
 
 
 def montar_payload_lista_usuarios(lobby):
@@ -464,8 +512,17 @@ def atualizar_lista_usuarios(lobby):
     """
     Atualiza a lista de usuários na tela de entrada de jogadores da sala.
     Também envia o estado da sala de espera: nome, status, configurações e prontidão.
+
+    Fase P4: o broadcast de `update_user_list` só é útil na espera — durante a
+    partida a tela de lobby está oculta e emitir para a room só gera ruído (e
+    dispara `aplicar_config_salva` → `enviar_config` no master). Os efeitos
+    colaterais leves (`master_def`, seed/verificação e a persistência) continuam
+    sempre: o lobby só de IAs assistida e o re-sync do heartbeat têm outros caminhos
+    para repor a lista quando precisam.
     """
-    emit("update_user_list", montar_payload_lista_usuarios(lobby), to=lobby.sala_room())
+    payload = montar_payload_lista_usuarios(lobby)
+    if lobby.status == 'espera':
+        emit("update_user_list", payload, to=lobby.sala_room())
     # Fase 8: índice leve de resumos p/ a busca (evita reidratar os lobbies).
     # Stamp do sinal de vida antes de persistir: resumos velhos são escondidos da
     # busca (serverless), e o próprio blob do Lobby guarda o instante renovado.

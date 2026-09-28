@@ -125,8 +125,10 @@ class Partida:
                 emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
                 emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
             emit('narracao',
-                 narrador.narracao_rodada(rodada_numero, dados_mesa, iniciante=vez_atual,
-                                          primeira=(rodada_numero == 1)),
+                 narrador.registrar_narracao(
+                     rodada,
+                     narrador.narracao_rodada(rodada_numero, dados_mesa, iniciante=vez_atual,
+                                           primeira=(rodada_numero == 1))),
                  to=self.sala_room())
             emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
             # Fase 22: status inicial da rolagem (todos pendentes) para o
@@ -200,7 +202,10 @@ class Partida:
         self.vencedor_final = jogador
         self.vitoria_em = datetime.now()
         self.do_lobby.pagina = 4
-        emit('narracao', narrador.narracao_vitoria(jogador), to=self.sala_room())
+        rodada_final = self.rodadas[-1] if self.rodadas else None
+        emit('narracao', narrador.registrar_narracao(
+            rodada_final,
+            narrador.narracao_vitoria(jogador)), to=self.sala_room())
         emit('vencedor_da_partida',
              {'nome': jogador.username,
               # Fase 22: tempo máximo de confirmação (jogada automática) da vitória.

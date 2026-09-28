@@ -2375,6 +2375,66 @@ def teste_refresh_conferencia_preserva_ok():
     _ok("refresh na conferência preserva o botão Ok (Fase D2)")
 
 
+def teste_refresh_snapshot_reconstrucao():
+    """
+    Fase P1/P2/P3/P4: um refresh na partida não pode mais inverter a ordem do
+    snapshot (o `mudar_pagina` vem por último) e os sons burst são silenciados
+    via a flag de reconstrução; além disso o narrador é rejogado a partir do
+    histórico gravado e o broadcast de `update_user_list` não vaza durante a
+    partida (status != 'espera').
+    """
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+    _rodada_ate_conferencia(clis)
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    ana_chave = ana.chave_secreta
+
+    # Refresh da Ana: novo tab, tem_chave=1, retoma identidade.
+    clis["Ana"][0].disconnect()
+    c = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    eventos = c.get_received()  # connect_start do placeholder
+    c.emit("retomar_identidade", {"chave": ana_chave})
+    eventos = c.get_received()
+
+    # P1: o `mudar_pagina` é o ÚLTIMO evento da página 3 (depois do conteúdo).
+    cards = _achar_evento(eventos, "cards_conferencia")
+    pagina = _achar_evento(eventos, "mudar_pagina")
+    assert cards is not None, "snapshot da retomada deve reconstruir a conferência"
+    assert pagina is not None, "snapshot da retomada deve emitir mudar_pagina"
+    idx_cards = next(i for i, e in enumerate(eventos) if e["name"] == "cards_conferencia")
+    idx_pagina = next(i for i, e in enumerate(eventos) if e["name"] == "mudar_pagina")
+    assert idx_cards < idx_pagina, "cards_conferencia deve vir antes do mudar_pagina (P1)"
+    assert pagina.get("pag_numero") == 3, "deve reconstruir a conferência (página 3)"
+
+    # P3: o primeiro evento de conteúdo da página carrega a marca de snapshot.
+    assert cards.get("reconstrucao") is True, \
+        "cards_conferencia do snapshot deve carregar reconstrucao:True (P3)"
+
+    # P2: a narração da partida é rejogada a partir do histórico, também como
+    # replay (reconstrucao:True, atraso zero, sem is_ia para não disparar poll).
+    nar = [e for e in eventos if e["name"] == "narracao"]
+    assert nar, "snapshot deve rejogar a narração gravada da partida (P2)"
+    replay_nar = [e for e in nar if (e["args"][0] or {}).get("reconstrucao") is True]
+    assert replay_nar, "pelo menos uma narração rejeitada deve carregar reconstrucao:True (P2)"
+    for e in replay_nar:
+        payload = e["args"][0] or {}
+        assert payload.get("atraso", 0) == 0, "narração de replay não pode carregar atraso (P2)"
+        assert payload.get("is_ia") in (False, None), \
+            "narração de replay não pode carregar is_ia (P2)"
+
+    # P4: durante a partida (status 'jogando') o broadcast de update_user_list
+    # não deve vazar para a sala.
+    lista = _achar_evento(eventos, "update_user_list")
+    assert lista is None, \
+        "snapshot/retomada na partida não deve rebroadcastar update_user_list (P4)"
+
+    c.disconnect()
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("refresh snapshot: ordem P1, reconstrucao P3, narracao P2, broadcast P4")
+
+
 def teste_heartbeat_resincroniza_vez_partida():
     """
     Fase D2: um jogador na página de turnos (2) que perdeu o dispatcher de vez
@@ -2652,6 +2712,74 @@ def teste_volta_apos_substituicao_ia():
     c2.disconnect()
     _limpar()
     _ok("volta após substituição por IA devolve o controle (Fase 30)")
+
+
+def teste_recupera_jogador_substituido_na_partida():
+    """
+    Fase P-Recover: o jogador que cai no meio da partida é substituído por IA
+    (Fase 76/11) e a IA joga no lugar; depois ele volta (nova aba com `tem_chave=1`,
+    como um browser que persiste a chave por-sala em localStorage — Fase P-Recover)
+    e PRECISA retomar o lugar de jogador, NÃO ficar como espectador.
+    Garante o invariante do usuário: "voltar a jogar a qualquer momento durante a
+    partida, mesmo quando a IA já assumiu e jogou".
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"substituir_desconectado_por_ia": True}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    for c, chave in ((c1, cs1["chave_secreta"]), (c2, cs2["chave_secreta"])):
+        c.emit("jogar_dados", {"chave": chave})
+    for c, chave in ((c1, cs1["chave_secreta"]), (c2, cs2["chave_secreta"])):
+        c.emit("joguei_dados", {"chave_secreta": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, "a mesa precisa estar aberta para a substituição"
+    ana_chave = cs1["chave_secreta"]
+
+    # Ana cai; graça 0 (runner de integração) → vira IA (Bia ainda ativa). A IA
+    # joga no lugar: deixa a partida avançar antes da volta.
+    c1.disconnect()
+    c2.emit("verificar_desconectados")
+    time.sleep(0.4)
+    lobby = modulo_store.carregar_sala(SALA)
+    ana_sub = next(j for j in lobby.jogadores if j.is_ia)
+    assert ana_sub is not None, "caído com a opção ligada deve virar IA"
+    assert lobby.status == 'jogando', "a partida segue em andamento com o substituto"
+    # A rodada da IA tem pelo menos um turno (ela acabou de jogar).
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert rodada.turnos, "a IA substituta deve ter jogado ao menos um turno"
+
+    # Nova aba (sid novo, tem_chave=1) retoma com a chave guardada por sala.
+    c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    eventos = c1b.get_received()
+    # P4/P-Recover: não chega sala_cheia na retomada (o placeholder tem_chave=1
+    # não estoura o cap de espectadores).
+    assert _achar_evento(eventos, "sala_cheia") is None, \
+        "retomada com tem_chave=1 não pode levar sala_cheia"
+    c1b.emit("retomar_identidade", {"chave": ana_chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    anas = [j for j in lobby.jogadores if j.username == "Ana"]
+    assert len(anas) == 1, "a retomada não pode duplicar; deve resgatar o jogador real"
+    ana = anas[0]
+    assert ana.is_ia is False, "retomada deve devolver o controle ao humano"
+    assert ana.ia_estilo is None and ana.ia_nivel is None, \
+        "o estado de IA deve ser limpo na retomada"
+    assert ana not in lobby.espectadores, \
+        "o jogador retomado NÃO pode ficar como espectador (Fase P-Recover)"
+    eventos = c1b.get_received()
+    assert _achar_evento(eventos, "construtor_html") is not None, \
+        "o snapshot da retomada deve reconstruir a mesa (página 2)"
+    assert any(e["name"] == "narracao" and e["args"][0].get("tipo") == "retorno"
+               for e in eventos), "a sala deve ser avisada de que Ana reassumiu o controle"
+
+    c1b.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("recupera jogador substituído pela IA a qualquer momento da partida (P-Recover)")
 
 
 def teste_grace_espera_preserva_identidade():
@@ -3243,6 +3371,7 @@ def verificar_integracao():
         ("sala-sem-jogadores", teste_sala_sem_jogadores_promove_espectador),
         ("config-nome", teste_config_nome_roundtrip),
         ("conf-ok-cooldown", teste_conferencia_ok_sem_cooldown),
+        ("refresh-reconstrucao", teste_refresh_snapshot_reconstrucao),
     ]
     testes_seed = [
         ("commit-reveal", teste_commit_reveal),
@@ -3288,6 +3417,7 @@ def verificar_integracao():
         ("sair-da-sala", teste_sair_da_sala_espectador),
         ("sair-da-sala-lobby", teste_sair_da_sala_lobby),
         ("sair-da-sala-eliminado", teste_sair_da_sala_eliminado),
+        ("recupera-substituido-na-partida", teste_recupera_jogador_substituido_na_partida),
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
         ("lobby-lotado", teste_lobby_lotado_so_quando_lotar),
     ]

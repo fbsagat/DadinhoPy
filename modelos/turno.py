@@ -41,9 +41,11 @@ class Turno:
         anterior = self.obter_turno_anterior_na_partida()
         dados_mesa = sum(getattr(jogador, 'dados_qtd', 0) or 0 for jogador in self.da_rodada.jogadores)
         emit('narracao',
-             narrador.narracao_aposta(self.do_jogador, self.dado_face, self.dado_qtd, pensou,
-                                      anterior=anterior, dados_mesa=dados_mesa,
-                                      primeira=(self.turno_num == 1), turno_num=self.turno_num),
+             narrador.registrar_narracao(
+                 self.da_rodada,
+                 narrador.narracao_aposta(self.do_jogador, self.dado_face, self.dado_qtd, pensou,
+                                          anterior=anterior, dados_mesa=dados_mesa,
+                                          primeira=(self.turno_num == 1), turno_num=self.turno_num)),
              to=self.sala_room())
         # Mostrar sempre os 3 últimos.
         turnos = self.do_jogador.turnos[-3:][::-1]
