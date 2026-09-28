@@ -35,8 +35,8 @@ MAX_ESPECTADORES = 20
 LIMITE_APELIDO = 12
 
 # Marcador do bot: faz parte do apelido guardado (é o que o narrador usa para
-# saber quem é máquina) e come orçamento. Dos 8 caracteres, 2 são do marcador
-# ('🤖' + espaço) e sobram 6 para o nome em si. Vive aqui (e não em `ia.py`)
+# saber quem é máquina) e come orçamento. Dos 12 caracteres, 2 são do marcador
+# ('🤖' + espaço) e sobram 10 para o nome em si. Vive aqui (e não em `ia.py`)
 # porque o payload de `update_user_list` também precisa dele — o master edita o
 # nome do bot na lista e o cliente tem de tirar o marcador do input sem duplicar
 # a constante.

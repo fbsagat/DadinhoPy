@@ -136,9 +136,9 @@ _TABELA_LEET = str.maketrans('aAeEiIoOsS', '4433110055')
 # Marcador do bot e orçamento do nome: os dois vivem em `funcoes_gerais` (fonte
 # única, já que o payload de `update_user_list` também os publica para o editor
 # de nome do master). O marcador faz parte do apelido guardado (é o que o
-# narrador usa para saber quem é máquina) e come orçamento: dos 8 caracteres, 2
-# são do marcador ('🤖' + espaço) e sobram 6 para o nome em si — por isso o
-# sabor híbrido rende pouco aqui ('Robô Ana' passaria de 8) e o pool pende para
+# narrador usa para saber quem é máquina) e come orçamento: dos 12 caracteres, 2
+# são do marcador ('🤖' + espaço) e sobram 10 para o nome em si — por isso o
+# sabor híbrido rende pouco aqui ('Robô Ana' passaria de 12) e o pool pende para
 # as designações robóticas.
 MARCADOR_IA = funcoes_gerais.MARCADOR_IA
 ORCAMENTO_NOME = funcoes_gerais.LIMITE_NOME_IA
@@ -267,7 +267,7 @@ def nome_livre(lobby, apelido=None):
 
     Não existe sufixo '_1' para bot: ele só estouraria o limite (o
     `Lobby.verificar_apelido` dos humanos cresce o nome sem teto, mas para eles
-    os 8 caracteres já vêm garantidos na validação do apelido).
+    os 12 caracteres já vêm garantidos na validação do apelido).
     """
     em_uso = _nomes_em_uso(lobby)
     inicio = secrets.randbelow(len(POOL))
@@ -366,7 +366,7 @@ def renomear_bot(lobby, client_id, apelido):
     quem é máquina.
 
     A unicidade é a de `Lobby.verificar_apelido` (sufixo `_1`, `_2`…) mas com
-    teto: para humanos o sufixo pode estourar o limite porque os 8 caracteres já
+    teto: para humanos o sufixo pode estourar o limite porque os 12 caracteres já
     vêm garantidos na validação do apelido; aqui o orçamento é o do nome, e um
     sufixo que não cabe é recusa em vez de apelido estourado.
     """

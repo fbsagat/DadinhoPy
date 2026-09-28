@@ -529,7 +529,7 @@ def verificar_tema():
 # 4c) apelido de IA: pool podado no limite, único e maior que a sala
 # ---------------------------------------------------------------------------
 def verificar_nomes_ia():
-    print("4c) pool de apelidos de IA (limite de 8 caracteres)")
+    print("4c) pool de apelidos de IA (limite de 12 caracteres)")
     import ia
     import funcoes_gerais
     from modelos.lobby import MAX_JOGADORES, Lobby
