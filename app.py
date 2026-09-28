@@ -1787,6 +1787,13 @@ def jogar_dados(dados, lobby, jogador):
     # Fase 10 (S4): escopo explícito — o resultado é só de quem rolou.
     emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
          to=jogador.client_id, ignore_queue=True)
+    # Fase 73: `ia.processar` marca as IAs como roladas e, se esta rolagem foi
+    # a última (todos já rolaram), abre a página 2 aqui mesmo. Sem isto a
+    # transição dependia só do `joguei_dados` do cliente — se o evento se
+    # perdia (fundo de aba, reconexão, cooldown), a sala travava até o
+    # heartbeat de cache estourado (até 60s). O `ia.processar` abre a página 2
+    # imediatamente e o `joguei_dados` posterior só reenvia `meus_dados`.
+    ia.processar(lobby)
     salvar_sala(lobby)
 
 

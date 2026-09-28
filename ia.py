@@ -1203,6 +1203,13 @@ def _processar_rolagem(lobby):
     funcoes_gerais.emitir_status_rolagem(lobby)
     if rodada.verificar_se_todos_ja_jogaram_seus_dados():
         lobby.pagina = 2
+        # Fase 73: o `vez_em` da rolagem (carimbado em `construir_rodada`) foi
+        # contado desde o início da rodada — na transição pela página 1 o
+        # relógio do primeiro turno precisa (re)começar AGORA, senão o
+        # jogador paga a rolagem com o tempo do turno. `joguei_dados` já faz
+        # isto; este é o mesmo guarda-chuva para a transição via `jogar_dados`
+        # → `ia.processar` e pelo heartbeat de recuperação.
+        rodada.iniciar_turnos()
         funcoes_gerais.mudar_pagina(2, sala=lobby.sala_id)
         return True
     return False
