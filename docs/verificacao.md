@@ -45,9 +45,12 @@ função e derruba o socket). Com uma VPS, a **API** (Socket.IO) roda como proce
 persistente em Docker; o **frontend continua na Vercel** (só a API na VPS).
 
 **Estado real (2026-09-15):** deploy feito na VPS de produção do MemeTrigger
-(`167.126.27.4` / tailscale `100.70.126.50`, Oracle Ampere A1 / Ubuntu 24.04, Docker
-Compose v5.4.0), em `/opt/dadinho` (isolado dos demais projetos — MemeTrigger,
-jellyfin, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
+(`167.126.27.4` público / tailscale `100.70.126.50` primário, Oracle Ampere A1 /
+Ubuntu 24.04, Docker Compose v5.4.0), em `/opt/dadinho` (isolado dos demais projetos —
+MemeTrigger, jellyfish, bitcoin, valheim, flask-api — sem tocar em nenhum deles).
+Acesso SSH é via Tailscale (o IP público pode ficar inacessível — visto em
+2026-09-28: timeout no 167.126.27.4:22, mas o tunnel (443) e Tailscale mantiveram
+a VPS vivo e o deploy prosseguiu via `100.70.126.50`).
 
 1. **Repositório:** o `Dockerfile`/`docker-compose.yml` na raiz sobem **4 réplicas da
    API** (Fase 61: gunicorn `gevent`, 1 worker cooperativo por container) atrás do
@@ -134,14 +137,19 @@ Pré-requisitos: acesso SSH à VPS (deploy atual usa o usuário `ubuntu`, chave
 Na raiz do repo:
 
 ```powershell
-.\atualizar_vps.ps1 -Chave "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key"
+.\atualizar_vps.ps1 -Chave "C:\Users\wwwfa\.ssh\mt-memetrigger-vps2.key"
 ```
 
 O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API **e do
 `nginx`** (Fase 59), recreate do
 tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
-8090 — e público). Params opcionais:
-`-HostVps` (padrão `167.126.27.4`) e `-Usuario` (padrão `ubuntu`).
+8090 — e público). O acesso SSH é **via Tailscale** (recomendado): o IP público
+da VPS pode ficar inacessível por mudança de IP ou firewall do provedor, mas o
+Tailscale mantém acesso estável. Params opcionais:
+`-HostVps` (padrão `100.70.126.50` — Tailscale IP; fallback `167.126.27.4`)
+e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
+`-HostVps "100.70.126.50"` (o VPS precisa estar online no Tailscale —
+`tailscale status` da lista).
 
 ### Opção B — manual (equivalente ao script)
 
@@ -154,8 +162,8 @@ tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
      --exclude='*.pyc' --exclude='.vercel' --exclude='.env*' --exclude='material' `
      --exclude='cloudflared/config.yml' `
      -C C:\Users\wwwfa\PycharmProjects\DadinhoPy . |
-     ssh -i "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key" `
-       -o StrictHostKeyChecking=no ubuntu@167.126.27.4 `
+      ssh -i "C:\Users\wwwfa\.ssh\mt-memetrigger-vps2.key" `
+        -o StrictHostKeyChecking=no ubuntu@100.70.126.50 `
        "cd /opt/dadinho && sudo tar -xzf -"
    ```
 

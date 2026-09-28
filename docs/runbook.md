@@ -27,8 +27,11 @@ por IP em `/socket.io/`). As duas topologias compartilham o mesmo código
 ## 2. Acesso e comandos básicos
 
 ```powershell
-# SSH (o deploy atual usa ubuntu + memetrigger-vps.key; ver atualizar_vps.ps1)
-ssh -i "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key" ubuntu@167.126.27.4
+# SSH via Tailscale (recomendado — o IP público 167.126.27.4 pode ficar
+# inacessível por mudança de IP/firewall do provedor; o Tailscale IP é estável).
+# Ver atualizar_vps.ps1 (-HostVps).
+ssh -i "C:\Users\wwwfa\.ssh\mt-memetrigger-vps2.key" ubuntu@100.70.126.50
+# Fallback (se o Tailscale não subir): ubuntu@167.126.27.4
 ```
 
 Na VPS, **tudo em `/opt/dadinho`** (não há git clone do Dadinho ali):

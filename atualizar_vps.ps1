@@ -5,11 +5,13 @@
 # local e publico no final.
 #
 # Uso: .\atualizar_vps.ps1 [-Chave <caminho da chave SSH>] [-HostVps <ip>] [-Usuario <user>]
-# Ex.: .\atualizar_vps.ps1 -Chave "D:\Downloads\Meme_Trigger\chave_nova\memetrigger-vps.key"
+# Ex.: .\atualizar_vps.ps1 -Chave "C:\Users\wwwfa\.ssh\mt-memetrigger-vps2.key"
+# O acesso SSH é via Tailscale (IP 100.70.126.50) — o IP público 167.126.27.4
+# pode ficar inacessível por mudança de IP/firewall do provedor.
 
 param(
     [string]$Chave,
-    [string]$HostVps = "167.126.27.4",
+    [string]$HostVps = "100.70.126.50",
     [string]$Usuario = "ubuntu"
 )
 
