@@ -32,7 +32,7 @@ MAX_ESPECTADORES = 20
 # jogador digita (`validar_input`) e para o que a IA sorteia: `ia.gerar_nome`
 # escolhe de um pool podado nesse limite já no import, então nenhum bot nasce
 # com nome estourado e os dois caminhos nunca divergem.
-LIMITE_APELIDO = 8
+LIMITE_APELIDO = 12
 
 # Marcador do bot: faz parte do apelido guardado (é o que o narrador usa para
 # saber quem é máquina) e come orçamento. Dos 8 caracteres, 2 são do marcador
