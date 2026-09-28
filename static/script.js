@@ -108,15 +108,19 @@ const socket = io(api_url || undefined, {
     autoConnect: !captcha_sitekey,
     transports: ['websocket'],
     query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
-    // Fase 68: o socket.io 4.6.0 embarca o engine.io-client 6.4, cujo default
-    // `closeOnBeforeunload: true` registra um listener de `beforeunload` que
-    // fecha o WebSocket de forma SÍNCRONA durante o reload/navegação. O close do
-    // WS pelo Cloudflare Tunnel pode atrasar o unload e a página fica "travada/
-    // em branco" no refresh — pior na rede móvel (Fase 64-66). O default só
-    // mudou para `false` no engine.io 6.5. Aqui o socket é destruído junto com a
-    // página; o servidor limpa o sid órfão no ping timeout e a retomada por
-    // `chave_secreta` reconstrói o jogador no próximo connect.
     closeOnBeforeunload: false,
+    // Fase 78: backoff exponencial alto para evitar storm de reconexão que
+    // pode disparar rate limit/WAF do Cloudflare. O default do socket.io
+    // (1s → 5s, tentativas infinitas) é muito agressivo para redes móveis/
+    // CGNAT onde o WebSocket cai com frequência — cada tentativa é um request
+    // HTTP de upgrade à frente do túnel Cloudflare, e um storm rápido pode
+    // banir o IP. Delay inicial 5s (não 1s), teto 30s, máximo 30 tentativas.
+    reconnection: true,
+    reconnectionAttempts: 30,
+    reconnectionDelay: 5000,
+    reconnectionDelayMax: 30000,
+    reconnectionRandomizationFactor: 0.5,
+    timeout: 30000,
 });
 
 // Fase 67: o captcha é um script de terceiro e o connect só sai depois que ele
@@ -217,17 +221,46 @@ if (captcha_sitekey) {
 // oscilação breve mostra "reconectando"; depois de `TENTATIVAS_SEM_CONEXAO`
 // falhas seguidas, vira um estado explícito de "sem conexão".
 const TENTATIVAS_SEM_CONEXAO = 5;
+// Fase 78: acima de `TENTATIVAS_BLOQUEIO_NUVEM` falhas consecutivas sem motivo
+// do servidor, assume-se bloqueio do Cloudflare/WAF — o socket.io tentaria
+// infinitamente a cada alguns segundos, alimentando o bloqueio em vez de parar.
+const TENTATIVAS_BLOQUEIO_NUVEM = 8;
 let _tentativas_reconexao = 0;
 // Fase 68: marcado quando o servidor recusa a conexão de propósito (captcha/
 // limite de IP). Diferente de uma queda de rede, aqui não devemos reconectar
 // sozinhos — o resync de `visibilitychange`/`online` respeita esta flag.
 let _conexao_recusada = false;
 
+function _extrair_status_http(erro) {
+    if (!erro) return null;
+    if (typeof erro.code === 'number') return erro.code;
+    if (erro.req && typeof erro.req.status === 'number') return erro.req.status;
+    const match = typeof erro.message === 'string' && erro.message.match(/\b(4[0-9]{2}|5[0-9]{2})\b/);
+    return match ? parseInt(match[0], 10) : null;
+}
+
 socket.on('connect_error', function (erro) {
     const dados = (erro && erro.data) || null;
+    // Fase 78: detecta bloqueio HTTP de borda (Cloudflare/WAF/nginx).
+    // Estes não vêm com `motivo` do servidor — são recusas de transporte
+    // (429 rate-limit / 403 WAF / 503). O código pode estar em `erro.code`,
+    // `erro.req.status` ou no texto da mensagem.
+    const codigo = _extrair_status_http(erro);
+    if (codigo === 429 || codigo === 403 || codigo === 503) {
+        _conexao_recusada = true;
+        socket.disconnect();
+        mostrar_alerta(t('js.bloqueado_cloudflare', { codigo: codigo }), 'erro');
+        return;
+    }
     if (!dados || !dados.motivo || !dados.motivo.chave) {
         _tentativas_reconexao += 1;
-        if (_tentativas_reconexao >= TENTATIVAS_SEM_CONEXAO) {
+        if (_tentativas_reconexao >= TENTATIVAS_BLOQUEIO_NUVEM) {
+            // Fase 78: muitas falhas sem resposta HTTP explícita — o bloqueio
+            // pode ser silencioso do Cloudflare (sem código visível ao browser).
+            _conexao_recusada = true;
+            socket.disconnect();
+            _atualizar_status_conexao('js.bloqueado_cloudflare_sugestao', 'text-danger');
+        } else if (_tentativas_reconexao >= TENTATIVAS_SEM_CONEXAO) {
             _atualizar_status_conexao('js.sem_conexao', 'text-danger');
         } else {
             _atualizar_status_conexao('js.reconectando', 'text-warning');

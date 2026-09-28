@@ -233,6 +233,8 @@ I18N_DICIONARIOS.en = {
     'js.conectando': '⏳ Connecting...',
     'js.reconectando': '⚠ Reconnecting...',
     'js.sem_conexao': '✖ No connection — trying to reconnect...',
+    'js.bloqueado_cloudflare': 'Cloudflare blocked your IP ({codigo}). This usually happens after too many connection drops (mobile networks, CGNAT, VPN). Try again in a minute, or switch networks.',
+    'js.bloqueado_cloudflare_sugestao': '✖ Cloudflare blocked this IP — too many connection attempts. Waiting before retrying…',
     'js.vitoria_texto': '{nome} wins<br> What a game!!!',
 
     // Busca (cards)
@@ -688,6 +690,8 @@ I18N_DICIONARIOS['pt-BR'] = {
     'js.conectando': '⏳ Conectando...',
     'js.reconectando': '⚠ Reconectando...',
     'js.sem_conexao': '✖ Sem conexão — tentando reconectar...',
+    'js.bloqueado_cloudflare': 'O Cloudflare bloqueou seu IP ({codigo}). Isso acontece quando a conexão cai muito frequentemente (rede móvel, CGNAT, VPN). Tente novamente em um minuto, ou mude de rede.',
+    'js.bloqueado_cloudflare_sugestao': '✖ Cloudflare bloqueou este IP — muitas tentativas de conexão. Aguardando antes de tentar novamente…',
     'js.vitoria_texto': 'Vitória de {nome}<br> Que jogaço!!!',
 
     'js.busca.vazia': 'Nenhuma partida encontrada com esses filtros.',
@@ -1127,6 +1131,8 @@ I18N_DICIONARIOS.es = {
     'js.conectando': '⏳ Conectando...',
     'js.reconectando': '⚠ Reconectando...',
     'js.sem_conexao': '✖ Sin conexión — intentando reconectar...',
+    'js.bloqueado_cloudflare': 'Cloudflare bloqueó tu IP ({codigo}). Esto ocurre cuando la conexión se cae con frecuencia (red móvil, CGNAT, VPN). Inténtalo de nuevo en un minuto o cambia de red.',
+    'js.bloqueado_cloudflare_sugestao': '✖ Cloudflare bloqueó esta IP — demasiados intentos de conexión. Esperando antes de reintentar…',
     'js.vitoria_texto': '¡Victoria de {nome}<br> Qué partida!!!',
 
     'js.busca.vazia': 'No se encontraron partidas con esos filtros.',
@@ -1566,6 +1572,8 @@ I18N_DICIONARIOS.fr = {
     'js.conectando': '⏳ Connexion...',
     'js.reconectando': '⚠ Reconnexion...',
     'js.sem_conexao': '✖ Pas de connexion — tentative de reconnexion...',
+    'js.bloqueado_cloudflare': 'Cloudflare a bloqué votre IP ({codigo}). Cela arrive quand la connexion tombe fréquemment (réseau mobile, CGNAT, VPN). Réessayez dans une minute ou changez de réseau.',
+    'js.bloqueado_cloudflare_sugestao': '✖ Cloudflare a bloqué cette IP — trop de tentatives de connexion. Attente avant nouvelle tentative…',
     'js.vitoria_texto': 'Victoire de {nome}<br> Quelle partie !!!',
 
     'js.busca.vazia': 'Aucune partie trouvée avec ces filtres.',
@@ -2005,6 +2013,8 @@ I18N_DICIONARIOS['zh-CN'] = {
     'js.conectando': '⏳ 连接中...',
     'js.reconectando': '⚠ 重新连接中...',
     'js.sem_conexao': '✖ 无连接 — 正在尝试重新连接...',
+    'js.bloqueado_cloudflare': 'Cloudflare 屏蔽了您的 IP ({codigo})。这通常发生在连接频繁中断时（ mobile 网络、CGNAT、VPN）。请等待一分钟后重试，或更换网络。',
+    'js.bloqueado_cloudflare_sugestao': '✖ Cloudflare 屏蔽此 IP — 连接尝试过多。正在等待后重试…',
     'js.vitoria_texto': '{nome} 获胜<br> 太精彩了！！！',
 
     'js.busca.vazia': '没有找到符合筛选条件的对局。',
