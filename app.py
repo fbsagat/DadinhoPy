@@ -69,6 +69,24 @@ def _cache_estaticos(resposta):
 # Janelas de rate limit leve por sid (Fase 7, V2): protegem o free tier da Upstash.
 COOLDOWN_ESCRITA = 0.5
 COOLDOWN_BUSCA = 2.0
+# Fase 77: rate limit do chat de emojis — reações em tempo real mas sem spam.
+# 0.3s permite 3/mensagem por jogador; o cliente também trava o botão.
+COOLDOWN_CHAT = 0.3
+
+# Fase 77: lista canônica de emojis por categoria (source of truth do servidor).
+# O cliente espelha estes mesmos conjuntos para renderizar o picker; validações
+# de categoria/emoji no handler garantem que nada além disso chegue ao broadcast.
+EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎']
+EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌']
+EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓']
+# Map de categoria → emojis permitidos (validação estrita).
+EMOJIS_POR_CATEGORIA = {
+    'provocativo': EMOJIS_PROVOCATIVOS,
+    'amigavel': EMOJIS_AMIGAVEIS,
+    'geral': EMOJIS_GERAIS,
+}
+# Conjunto plano de todos os emojis permitidos (proibição de qualquer outro).
+EMOJIS_PERMITIDOS = set(EMOJIS_PROVOCATIVOS + EMOJIS_AMIGAVEIS + EMOJIS_GERAIS)
 
 # Nível de IA usado na jogada automática de um humano atrasado (Fase 21): um
 # nível médio produz apostas razoáveis sem virar "assistente de jogo".
@@ -2080,6 +2098,77 @@ def foguetear(dados, lobby, jogador):
         emit('soltar_fogos', to=lobby.sala_room())
     elif partida is not None and partida.vencedor_final == jogador:
         emit('soltar_fogos', to=lobby.sala_room())
+
+
+@socketio.on('enviar_emoji_chat')
+@evento_mutavel(lock_distribuido=False, cooldown=COOLDOWN_CHAT)
+@autenticar()
+def enviar_emoji_chat(dados, lobby, jogador):
+    """
+    Fase 77: reações em tempo real via emoji (só emojis, sem texto).
+
+    O handler valida estritamente: o emoji deve pertencer à categoria enviada
+    — nada de texto, URLs ou caracteres não-emoji passam (invariante #4:
+    payload malformado aborta silenciosamente). Não persiste estado de jogo
+    (é broadcast efêmero como Instagram Live): não chama `salvar_sala` nem
+    `ia.processar`.
+
+    `lock_distribuido=False`: não há read-modify-write de estado da sala, só
+    um emit — o lock distribuído do Upstash seria despesa de comandos à toa
+    no free tier. O `evento_mutavel` mantém o rate-limit por sid + o lock de
+    processo (serializa o request, inofensivo). Sem `ignore_queue` no emit:
+    se houver message queue (Fase 25), o `chat_emoji` alcança instâncias
+    distintas; sem ela, cai no mesmo gap de broadcast entre instâncias já
+    documentado (arq. §119).
+    """
+    if lobby.status not in ('espera', 'jogando'):
+        return
+    emoji = dados.get('emoji', '')
+    categoria = dados.get('categoria', '') or 'geral'
+    # Validação estrita: emoji obrigatório, string pura, na lista canônica.
+    if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
+        return
+    # A categoria controla a renderização no cliente, mas o emoji é validado
+    # contra o conjunto global — um "provocativo" não pode vir com um emoji
+    # "amigável" e vice-versa. Normaliza para a categoria canônica do emoji.
+    categoria_canonica = 'geral'
+    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
+        if emoji in emojis:
+            categoria_canonica = cat
+            break
+    emit('chat_emoji', {
+        'jogador': jogador.username or '',
+        'emoji': emoji,
+        'categoria': categoria_canonica,
+     }, to=lobby.sala_room())
+
+
+@socketio.on('chat_reagindo')
+@evento_mutavel(lock_distribuido=False, cooldown=COOLDOWN_CHAT)
+@autenticar()
+def chat_reagindo(dados, lobby, jogador):
+    """
+    Fase 77: preview de reação (typing indicator). Antes do emoji chegar via
+    `chat_emoji`, o cliente que clicou no emoji emite este evento para que o
+    resto da sala veja "João está reagindo… 😎" — broadcast leve, sem estado.
+
+    Validação idêntica ao `enviar_emoji_chat`: o emoji deve estar na whitelist.
+    Não persiste nem chama `salvar_sala`/`ia.processar`.
+    """
+    emoji = dados.get('emoji', '')
+    if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
+        return
+    categoria = dados.get('categoria', '') or 'geral'
+    # Normaliza a categoria canônica do emoji (mesmo do chat emitido).
+    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
+        if emoji in emojis:
+            categoria = cat
+            break
+    emit('chat_reagindo', {
+        'jogador': jogador.username or '',
+        'emoji': emoji,
+        'categoria': categoria,
+    }, to=lobby.sala_room())
 
 
 if __name__ == '__main__':

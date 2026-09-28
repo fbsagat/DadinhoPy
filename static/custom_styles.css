@@ -2063,6 +2063,15 @@ h5,
         top: 6px !important;
         right: 52px !important;
     }
+
+    /* Fase 77: o card de dicas vai para o centro inferior da tela no desktop
+       (deixando o botão de emoji no canto inferior direito — sem conflito). */
+    .painel-dicas {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: min(83vw, 580px);
+    }
 }
 
 /* Conferência em telas muito estreitas: 1 card por linha (6 dados de 40px
@@ -2083,5 +2092,225 @@ h5,
         left: 50%;
         right: auto;
         transform: translateX(-50%);
+    }
+}
+
+/* Fase 77: chat de emojis — reações em tempo real (Instagram Live style).
+   Tudo é position-fixed e z-index alto para ficar acima de todas as telas. */
+
+/* Container de emojis flutuantes — ocupa a viewport inteira, sem scroll. */
+.chat-emoji-floating {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100dvh;
+    pointer-events: none;
+    overflow: visible;
+}
+
+/* Emoji que flutua: começa embaixo, sobe e desaparece em ~3s. */
+.chat-emoji-flutuante {
+    position: absolute;
+    bottom: 0;
+    font-size: 3rem;
+    opacity: 1;
+    text-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+    animation: chat-flutuar 3s ease-out forwards;
+    pointer-events: none;
+}
+
+@keyframes chat-flutuar {
+    0% {
+        transform: translateY(0) scale(0.5);
+        opacity: 1;
+    }
+    80% {
+        transform: translateY(-120px) scale(1.3);
+        opacity: 0.8;
+    }
+    100% {
+        transform: translateY(-200px) scale(1.5);
+        opacity: 0;
+    }
+}
+
+/* Preview de reação (typing indicator): "João está reagindo… 😎".
+   Posicionado ao LADO ESQUERDO do botão de emojis (💬), na mesma altura —
+   tanto no desktop (toggle em bottom-16/right-16) quanto no mobile
+   (toggle em bottom-170/right-12, acima do #rodape_acao). Assim ele
+   NÃO fica atrás do picker quando o card está aberto (picker está acima,
+   em bottom-80 mobile / bottom-230 mobile). */
+.chat-reagindo {
+    position: fixed;
+    bottom: 16px;
+    right: 80px;
+    z-index: 60;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    max-width: calc(100vw - 104px);
+    padding: 2px;
+}
+
+/* Badge individual: emoji + nome, com pulse sutil. */
+.chat-reagindo-badge {
+    background: rgba(2, 56, 107, 0.9);
+    border: 1px solid var(--cor-borda);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    color: #fff;
+    white-space: nowrap;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+    animation: chat-pulsar 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes chat-pulsar {
+    0% { opacity: 0.7; transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* Toggle do picker: botão redondo fixo no canto inferior direito
+   (desktop). Mobile volta para a direita, acima do #rodape_acao. */
+.chat-emoji-toggle {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 52px;
+    height: 52px;
+    border-radius: 28px;
+    background: var(--cor-painel-alto);
+    border: 2px solid var(--cor-borda);
+    color: #fff;
+    font-size: 1.6rem;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    transition: var(--transicao);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+.chat-emoji-toggle:hover {
+    background: var(--cor-destaque);
+    border-color: var(--cor-destaque);
+    transform: scale(1.1);
+    box-shadow: 0 0 18px rgba(29, 155, 240, 0.6);
+}
+
+/* Overlay do picker: posicionado acima do toggle, canto inferior direito. */
+.chat-emoji-container {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    z-index: 9999;
+    display: none;
+}
+
+/* Painel do picker: apoio branco translúcido com blur. */
+.chat-emoji-picker {
+    background: rgba(2, 56, 107, 0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio-painel);
+    box-shadow: var(--sombra-info);
+    padding: 6px;
+    min-width: 240px;
+}
+
+/* Abas de categoria: fileira horizontal. */
+.chat-emoji-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.chat-emoji-tab {
+    flex: 1;
+    background: rgba(13, 202, 240, 0.12);
+    border: 1px solid var(--cor-borda);
+    border-radius: 10px;
+    color: #e0e0e0;
+    font-size: 0.72rem;
+    padding: 4px 2px;
+    cursor: pointer;
+    transition: var(--transicao);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-emoji-tab:hover {
+    background: rgba(13, 202, 240, 0.24);
+    color: #fff;
+}
+
+.chat-emoji-tab-ativa {
+    background: var(--cor-destaque);
+    border-color: var(--cor-destaque);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Grade de emojis: wrap em 4 colunas. */
+.chat-emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+}
+
+.chat-emoji-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    font-size: 1.4rem;
+    width: 100%;
+    height: 44px;
+    cursor: pointer;
+    transition: var(--transicao);
+    line-height: 1;
+    padding: 0;
+}
+
+.chat-emoji-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+    transform: scale(1.25);
+    box-shadow: 0 0 12px rgba(29, 155, 240, 0.4);
+}
+
+/* Mobile: o toggle e o picker ficam à direita e acima do
+   #rodape_acao (card de executar jogada) para não sobrepor os botões
+   de Apostar/Desconfiar/Dados. */
+@media (max-width: 768px) {
+    .chat-emoji-toggle {
+        bottom: 170px;
+        right: 12px;
+        width: 46px;
+        height: 46px;
+        font-size: 1.4rem;
+    }
+
+    .chat-emoji-container {
+        bottom: 230px;
+        left: auto;
+        right: 12px;
+        max-width: calc(100% - 24px);
+    }
+
+    .chat-emoji-picker {
+        min-width: 200px;
+        padding: 4px;
+    }
+
+    /* Mobile: preview ao lado esquerdo do toggle (bottom-170 + 46px + gap). */
+    .chat-reagindo {
+        bottom: 170px;
+        right: 64px;
+        max-width: calc(100vw - 84px);
     }
 }

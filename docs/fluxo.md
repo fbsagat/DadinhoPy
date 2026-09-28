@@ -81,6 +81,8 @@ Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a
 | `conferencia_final` (`chave`) | `conferencia_final` | chave, cooldown=None, gated página 3 |
 | `vencedor_final` (`chave`) | `vencedor_final` | chave, cooldown=None, gated página 4 |
 | `foguetear_click` (`chave`) | `foguetear_click` | + chave |
+| `enviar_emoji_chat` (`chave`, `emoji`, `categoria`) | `enviar_emoji_chat` (Fase 77) | + chave; cooldown=COOLDOWN_CHAT; lock_distribuido=False; valida emoji contra whitelist (invariante #4) |
+| `chat_reagindo` (`chave`, `emoji`, `categoria`) | `chat_reagindo` (Fase 77) | + chave; mesmo rate-limit/cooldown; preview de reação antes do emoji (typing indicator) |
 
 ### Servidor → cliente (emits → `socket.on` em `static/script.js`)
 
@@ -130,5 +132,6 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `seed_revelar` | funcoes_gerais:361 | sala | 3161 |
 | `seed_revelacao` | app.py:695 | sala | 3175 |
 | `auditoria_partida` | funcoes_gerais:329 | cliente | 3300 |
+| `chat_emoji` (`jogador`, `emoji`, `categoria`) | app.py:enviar_emoji_chat (Fase 77) | sala | 5768 |
 
 > Legenda de escopo: "sala" = `to=lobby.sala_room()`; "cliente" = `to=jogador.client_id`. Confira sempre o `emit` real antes de assumir.

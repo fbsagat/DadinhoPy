@@ -484,6 +484,14 @@ I18N_DICIONARIOS.en = {
     'narr.substituicao.timeout': '📴 {nome} dropped and did not return in time — an AI takes over.',
     'narr.substituicao.ausente': '📴 {nome} was disconnected when the game started — an AI takes over.',
     'narr.retorno': '🔌 {nome} is back and has taken over again.',
+
+    // Fase 77: chat de emojis
+    'ui.chat.abrir': 'Open reactions',
+    'ui.chat.fechar': 'Close reactions',
+    'ui.chat.provocativo': 'Provocative',
+    'ui.chat.amigavel': 'Friendly',
+    'ui.chat.geral': 'General',
+    'ui.chat.reagir': 'Tap to react',
 };
 
 // ---------------------------------------------------------------------------
@@ -918,6 +926,14 @@ I18N_DICIONARIOS['pt-BR'] = {
     'narr.substituicao.timeout': '📴 {nome} caiu e não voltou a tempo — uma IA assume o lugar.',
     'narr.substituicao.ausente': '📴 {nome} estava desconectado quando a partida começou — uma IA assume o lugar.',
     'narr.retorno': '🔌 {nome} voltou e reassumiu o próprio controle.',
+
+    // Fase 77: chat de emojis
+    'ui.chat.abrir': 'Abrir reações',
+    'ui.chat.fechar': 'Fechar reações',
+    'ui.chat.provocativo': 'Provocativo',
+    'ui.chat.amigavel': 'Amigável',
+    'ui.chat.geral': 'Geral',
+    'ui.chat.reagir': 'Reagir',
 };
 
 I18N_DICIONARIOS.es = {
@@ -1349,6 +1365,14 @@ I18N_DICIONARIOS.es = {
     'narr.substituicao.timeout': '📴 {nome} se cayó y no volvió a tiempo — una IA toma el relevo.',
     'narr.substituicao.ausente': '📴 {nome} estaba desconectado cuando empezó la partida — una IA toma el relevo.',
     'narr.retorno': '🔌 {nome} volvió y retomó su propio control.',
+
+    // Fase 77: chat de emojis
+    'ui.chat.abrir': 'Abrir reacciones',
+    'ui.chat.fechar': 'Cerrar reacciones',
+    'ui.chat.provocativo': 'Provocativo',
+    'ui.chat.amigavel': 'Amistoso',
+    'ui.chat.geral': 'General',
+    'ui.chat.reagir': 'Reaccionar',
 };
 
 I18N_DICIONARIOS.fr = {
@@ -1780,6 +1804,14 @@ I18N_DICIONARIOS.fr = {
     'narr.substituicao.timeout': "📴 {nome} est tombé et n'est pas revenu à temps — une IA prend le relais.",
     'narr.substituicao.ausente': '📴 {nome} était déconnecté au début de la partie — une IA prend le relais.',
     'narr.retorno': '🔌 {nome} est de retour et a repris son propre contrôle.',
+
+    // Fase 77: chat de emojis
+    'ui.chat.abrir': 'Ouvrir les réactions',
+    'ui.chat.fechar': 'Fermer les réactions',
+    'ui.chat.provocativo': 'Provocateur',
+    'ui.chat.amigavel': 'Amical',
+    'ui.chat.geral': 'Général',
+    'ui.chat.reagir': 'Réagir',
 };
 
 I18N_DICIONARIOS['zh-CN'] = {
@@ -2211,6 +2243,14 @@ I18N_DICIONARIOS['zh-CN'] = {
     'narr.substituicao.timeout': '📴 {nome} 掉线了，未能及时回来——由 AI 接管。',
     'narr.substituicao.ausente': '📴 {nome} 在对局开始时处于掉线状态——由 AI 接管。',
     'narr.retorno': '🔌 {nome} 回来了，重新接管了自己的操作。',
+
+    // Fase 77: chat de emojis
+    'ui.chat.abrir': '打开反应',
+    'ui.chat.fechar': '关闭反应',
+    'ui.chat.provocativo': '挑衅',
+    'ui.chat.amigavel': '友好',
+    'ui.chat.geral': '一般',
+    'ui.chat.reagir': '点击反应',
 };
 
 // ---------------------------------------------------------------------------

@@ -765,6 +765,32 @@
             style="z-index: 60; display: none; font-size: 1.1rem;"></div>
     </div>
 
+    <!-- Fase 77: chat de emojis — reações em tempo real (só emojis).
+         Todos os elementos são `position-fixed` e fora do `#app-main`/`#tela_partida`,
+         assim aparecem em TODAS as páginas (0–4) sem serem escondidos por
+         `display:none` de tela. O toggle persiste open/closed no localStorage. -->
+    <div id="chat_emoji_floating" class="chat-emoji-floating" style="z-index: 60;"></div>
+    <!-- Fase 77: preview de reação (typing indicator) — "João está reagindo… 😎".
+         Aparece acima do topo, fora do fluxo de telas. -->
+    <div id="chat_reagindo" class="chat-reagindo" style="z-index: 60;"></div>
+    <div id="chat_emoji_container" class="chat-emoji-container" style="display: none;">
+        <div id="chat_emoji_picker" class="chat-emoji-picker">
+            <div class="chat-emoji-tabs">
+                <button type="button" class="chat-emoji-tab" data-chat-tab="geral"
+                        data-i18n="ui.chat.geral" title="Geral">Geral</button>
+                <button type="button" class="chat-emoji-tab" data-chat-tab="amigavel"
+                        data-i18n="ui.chat.amigavel" title="Amigável">Amigável</button>
+                <button type="button" class="chat-emoji-tab chat-emoji-tab-ativa" data-chat-tab="provocativo"
+                        data-i18n="ui.chat.provocativo" title="Provocativo">Provocativo</button>
+            </div>
+            <div id="chat_emoji_grid" class="chat-emoji-grid"></div>
+        </div>
+    </div>
+    <button id="chat_emoji_toggle" type="button"
+            class="chat-emoji-toggle" data-acao="alternar_chat_picker"
+            data-i18n-title="ui.chat.abrir" title="💬"
+            style="display: none; z-index: 60;">💬</button>
+
     <!-- TUTORIAL INICIO -->
     <div id="tutorial_overlay" class="tutorial-overlay" role="dialog" aria-modal="true">
         <div class="tutorial-modal">

@@ -1498,6 +1498,30 @@ function atualizar_botao_sair() {
     }
 }
 
+// Fase 77: mostra/esconde o botão de emojis conforme o jogador está ou não
+// em uma sala. Fora de sala (home, busca de partidas) — nada para quem
+// reagir. Segue o mesmo padrão do `#bot_sair_da_sala`: display:none no HTML,
+// visibilidade controlada pelo JS no connect_start e transitions de página.
+function atualizar_chat_toggle() {
+    const toggle = document.getElementById('chat_emoji_toggle');
+    if (!toggle) {
+        return;
+    }
+    const na_sala = !!sala_atual && !modo_home;
+    toggle.style.display = na_sala ? 'inline-flex' : 'none';
+    // Fora de sala: força o fechamento do picker.
+    if (!na_sala && chat_aberto) {
+        chat_aberto = false;
+        localStorage.setItem('dadinho_chat_aberto', '0');
+        const container = document.getElementById('chat_emoji_container');
+        if (container) {
+            container.style.display = 'none';
+        }
+        toggle.textContent = '💬';
+        toggle.title = t('ui.chat.abrir');
+    }
+}
+
 // O espectador escolheu sair: o servidor confirma e voltamos ao menu.
 socket.on('saiu_da_sala', function () {
     rastrear_funil('jogador_saiu_antes');
@@ -1610,6 +1634,7 @@ socket.on("mudar_pagina", function (data) {
     // jogando (só espectador continua vendo). O "zera espectador" acima vale
     // para a volta ao lobby; o refresh no meio da partida se corrige sozinho.
     atualizar_botao_sair();
+    atualizar_chat_toggle();
     aplicar_estado_narrador();
     // Mostra a próxima página
     paginas[indiceAtual].style.display = "block";
@@ -2828,6 +2853,7 @@ socket.on('espectador', function (data) {
     // Fase 30: quem virou espectador (perdeu todos os dados) ganha o botão de sair.
     eh_espectador = true;
     atualizar_botao_sair();
+    atualizar_chat_toggle();
     const painel_jogada = document.getElementById('painel_jogada');
     const bot_confe_fim = document.getElementById('bot_confe_fim');
     const painel_aguarde = document.getElementById('painel_aguarde');
@@ -2935,6 +2961,7 @@ socket.on("connect_start", function (data) {
     // Fase 30: entrou numa sala (espera) — o botão de sair fica visível na
     // página 0; na home (sem sala) ele some.
     atualizar_botao_sair();
+    atualizar_chat_toggle();
     if (data && data.username) {
         // Reconexão retomada: o servidor já tem o apelido deste jogador, então
         // o botão entra no lápis direto (sem depender do prefill do storage).
@@ -5676,6 +5703,222 @@ socket.on('auditoria_partida', function (data) {
     render_auditoria(data);
 });
 
+// ===========================================================================
+// Fase 77: chat de emojis — reações em tempo real (só emojis, sem texto).
+// Funciona como Instagram Live: emojis flutuam e desaparecem. O servidor
+// valida estritamente (whitelist) e broadcast para a room; sem message queue
+// cai no mesmo gap de broadcast entre instâncias já documentado.
+// ===========================================================================
+
+// Espelha do servidor (app.py): lista canônica de emojis por categoria.
+const EMOJIS_POR_CATEGORIA = {
+    geral: ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓'],
+    amigavel: ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌'],
+    provocativo: ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎'],
+};
+
+// Estado do picker: categoria aberta e se está visível. Persistido em
+// localStorage para o open/close sobreviver a refresh (mesmo truque do narrador).
+let categoria_chat = localStorage.getItem('dadinho_chat_categoria') || 'geral';
+let chat_aberto = false;
+
+function _render_emoji_grid(categoria) {
+    const grid = document.getElementById('chat_emoji_grid');
+    if (!grid) {
+        return;
+    }
+    const emojis = EMOJIS_POR_CATEGORIA[categoria] || EMOJIS_POR_CATEGORIA.geral;
+    grid.innerHTML = '';
+    emojis.forEach(function (emoji) {
+        const botao = document.createElement('button');
+        botao.type = 'button';
+        botao.className = 'chat-emoji-btn';
+        botao.textContent = emoji;
+        botao.title = t('ui.chat.reagir');
+        botao.onclick = function () {
+            enviar_emoji_chat(emoji, categoria);
+        };
+        grid.appendChild(botao);
+    });
+    // Atualiza as tabs: a categoria ativa fica destacada.
+    document.querySelectorAll('.chat-emoji-tab').forEach(function (tab) {
+        tab.classList.toggle('chat-emoji-tab-ativa', tab.dataset.categoria === categoria);
+    });
+}
+
+function alternar_chat_picker() {
+    const container = document.getElementById('chat_emoji_container');
+    const picker = document.getElementById('chat_emoji_picker');
+    const toggle = document.getElementById('chat_emoji_toggle');
+    if (!container || !picker || !toggle) {
+        return;
+    }
+    chat_aberto = !chat_aberto;
+    localStorage.setItem('dadinho_chat_aberto', chat_aberto ? '1' : '0');
+    container.style.display = chat_aberto ? 'block' : 'none';
+    toggle.textContent = chat_aberto ? '✖️' : '💬';
+    toggle.title = chat_aberto ? t('ui.chat.fechar') : t('ui.chat.abrir');
+    if (chat_aberto) {
+        _render_emoji_grid(categoria_chat);
+    }
+}
+
+// Restaura a preferência salva (open/closed) no boot.
+(function () {
+    const salvo = localStorage.getItem('dadinho_chat_aberto');
+    if (salvo === '1') {
+        chat_aberto = true;
+        const container = document.getElementById('chat_emoji_container');
+        if (container) {
+            container.style.display = 'block';
+            _render_emoji_grid(categoria_chat);
+        }
+        const toggle = document.getElementById('chat_emoji_toggle');
+        if (toggle) {
+            toggle.textContent = '✖️';
+            toggle.title = t('ui.chat.fechar');
+        }
+    }
+})();
+
+function enviar_emoji_chat(emoji, categoria) {
+    // Guard de identidade: sem chave confirmada o servidor rejeita silenciosamente.
+    if (!chave_confirmada || !emoji || !sala_atual) {
+        return;
+    }
+    // Validação local (o server é o authority): só emojis da whitelist.
+    const permitidos = EMOJIS_POR_CATEGORIA[categoria] || [];
+    if (!permitidos.includes(emoji)) {
+        return;
+    }
+    // Fase 77: preview de reação — o server rebroadcasta para a sala antes do
+    // emoji chegar, mostrando "João está reagindo… 😎" (typing indicator).
+    socket.emit('chat_reagindo', {
+        chave: chave_secreta,
+        emoji: emoji,
+        categoria: categoria,
+    });
+    socket.emit('enviar_emoji_chat', {
+        chave: chave_secreta,
+        emoji: emoji,
+        categoria: categoria,
+    });
+    // Auto-reação: mostra o emoji que o jogador mandou (feedback imediato).
+    _mostrar_emoji_flutuante(nome_jogador, emoji, categoria, true);
+    tocar_som_chat();
+}
+
+// Preview de reação: "João está reagindo… 😎" — indicador fixo que desaparece
+// quando o emoji chega ou após 800ms.
+const previs_reagindo = new Map();
+
+socket.on('chat_reagindo', function (data) {
+    if (!data || !data.emoji || !data.jogador) {
+        return;
+    }
+    _mostrar_preview_reagindo(data.jogador, data.emoji);
+});
+
+// Emite o emoji recebido como uma reação flutuante na tela.
+// `auto` = true quando é a própria reação do jogador (feedback local).
+socket.on('chat_emoji', function (data) {
+    if (!data || !data.emoji) {
+        return;
+    }
+    // Limpa o preview daquele jogador: o emoji chegou, o indicador vai embora.
+    _limpar_preview_reagindo(data.jogador || '');
+    _mostrar_emoji_flutuante(data.jogador || '', data.emoji, data.categoria || 'geral', false);
+    tocar_som_chat();
+});
+
+function _mostrar_preview_reagindo(nome, emoji) {
+    const indicator = document.getElementById('chat_reagindo');
+    if (!indicator) {
+        return;
+    }
+    _limpar_preview_reagindo(nome);
+    const badge = document.createElement('span');
+    badge.className = 'chat-reagindo-badge';
+    badge.textContent = emoji + ' ' + (nome || '');
+    const timer = setTimeout(function () {
+        _limpar_preview_reagindo(nome);
+    }, 800);
+    previs_reagindo.set(nome, { element: badge, timer: timer });
+    indicator.appendChild(badge);
+}
+
+function _limpar_preview_reagindo(nome) {
+    const entry = previs_reagindo.get(nome);
+    if (entry) {
+        clearTimeout(entry.timer);
+        if (entry.element.parentNode) {
+            entry.element.parentNode.removeChild(entry.element);
+        }
+        previs_reagindo.delete(nome);
+    }
+}
+
+function _mostrar_emoji_flutuante(nome, emoji, categoria, auto) {
+    const container = document.getElementById('chat_emoji_floating');
+    if (!container) {
+        return;
+    }
+    const span = document.createElement('span');
+    span.className = 'chat-emoji-flutuante';
+    span.textContent = emoji;
+    // Posiciona horizontalmente de forma aleatória, evitando a borda.
+    const margem = 12;
+    const maxX = Math.max(0, window.innerWidth - margem * 2 - 80);
+    const x = margem + Math.random() * maxX;
+    span.style.left = Math.round(x) + 'px';
+    // Auto-reação: cor mais fraca (já vimos o emoji), outrem: destacado.
+    if (auto) {
+        span.style.opacity = '0.7';
+    }
+    container.appendChild(span);
+    // Auto-remove após a animação terminar (CSS: fade-up 3s, depois display none).
+    const timer = setTimeout(function () {
+        if (span.parentNode) {
+            span.parentNode.removeChild(span);
+        }
+    }, 3200);
+    // Caso o picker abra/feche e o container suma, limpa o timer.
+    span._limpar = function () { clearTimeout(timer); };
+}
+
+// Som de chat: "pop" curto sintetizado via Web Audio (sem depender de .mp3).
+function tocar_som_chat() {
+    if (!som_ativado || !garantir_contexto_audio()) {
+        return;
+    }
+    const ctx = contexto_audio;
+    const agora = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const ganho = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(720, agora);
+    osc.frequency.exponentialRampToValueAtTime(180, agora + 0.18);
+    ganho.gain.setValueAtTime(0.0001, agora);
+    ganho.gain.exponentialRampToValueAtTime(0.22 * (volume_som / 100), agora + 0.02);
+    ganho.gain.exponentialRampToValueAtTime(0.0001, agora + 0.18);
+    osc.connect(ganho).connect(ctx.destination);
+    osc.start(agora);
+    osc.stop(agora + 0.18);
+}
+
+// Tabs do picker: troca de categoria preserva a preferência.
+document.addEventListener('click', function (evento) {
+    if (!evento.target || typeof evento.target.closest !== 'function') return;
+    const tab = evento.target.closest('[data-chat-tab]');
+    if (!tab) return;
+    const cat = tab.dataset.chatTab;
+    if (cat && EMOJIS_POR_CATEGORIA[cat]) {
+        categoria_chat = cat;
+        localStorage.setItem('dadinho_chat_categoria', cat);
+        _render_emoji_grid(cat);
+    }
+});
+
 // Fase 44 (S5): delegação de cliques — o HTML usa `data-acao` em vez de
 // `onclick` inline (que o CSP estrito sem 'unsafe-inline' bloquearia). As ações
 // são expostas em `window.Dadinho` (Fase 53); `fechar_alerta` lê o
@@ -5693,7 +5936,7 @@ document.addEventListener('click', function (evento) {
     // confirmada (senão o servidor rejeita a chave placeholder silenciosamente).
     const acoes_nao_mutaveis = ['abrir_busca', 'fechar_busca', 'buscar_partidas',
         'copiar_link_sala', 'fechar_tutorial', 'fechar_dica', 'criar_sala',
-        'abrir_config_sala', 'fechar_config_sala'];
+        'abrir_config_sala', 'fechar_config_sala', 'alternar_chat_picker'];
     if (!chave_confirmada && !acoes_nao_mutaveis.includes(acao)) {
         return;
     }
@@ -5711,6 +5954,6 @@ window.Dadinho = {
     buscar_partidas, fechar_busca,
     conferencia_final, vencedor_final,
     fechar_tutorial, fechar_alerta, fechar_dica,
-    abrir_config_sala, fechar_config_sala,
+    abrir_config_sala, fechar_config_sala, alternar_chat_picker,
 };
 })();
