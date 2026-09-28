@@ -8,6 +8,10 @@
     --raio-painel: 16px;
     --sombra-info: 0 8px 26px rgba(0, 33, 66, 0.55), 0 0 20px rgba(13, 202, 240, 0.18);
     --transicao: 0.25s ease;
+    /* Fase 74: teto da lista de jogadores da sala de espera no desktop. É o
+       altura máximo que a lista ganha com a altura livre do monitor (a cadeia
+       de flex do lobby distribui o resto); acima disso a rolagem é interna. */
+    --teto-lista-lobby: 560px;
 }
 
 * {
@@ -868,21 +872,95 @@ h5,
     border-color: var(--cor-borda) !important;
 }
 
-/* ------- Lista de jogadores (lobby): colunas lado a lado no mobile ------- */
-/* O `.row` do Bootstrap tem margens negativas (gutter) que estouravam a
-   largura da lista e criavam uma barra de rolagem horizontal inútil. Zera as
-   margens e deixa o clipping por conta do container. */
+/* ------- Lista de jogadores (lobby): 4 colunas por linha ------- */
+/* Colunas: nome (👑/🏁) | estado (✅/⏳) | pontos | expulsar. Cada coluna tem
+   base FIXA (só o nome fica com a sobra), então as células alinham de uma
+   linha para a outra sem depender de grid/subgrid. O `.row` do Bootstrap tem
+   margens negativas (gutter) que estouravam a largura da lista e criavam uma
+   barra de rolagem horizontal inútil — zera as margens e deixa o clipping por
+   conta do container; o `nowrap` trava a linha para as colunas não embolarem. */
 #lista_de_jogadores .row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
     margin-left: 0;
     margin-right: 0;
     --bs-gutter-x: 0;
 }
 
-#lista_de_jogadores .col-md-6 {
-    flex: 0 0 50%;
-    max-width: 50%;
+#lista_de_jogadores .lista-nome {
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 6px 8px;
-    word-break: break-word;
+    /* `overflow-wrap` (e não `word-break: break-word`) quebra o apelido só
+       quando a palavra não cabe inteira na linha — o nome não sai cortado no
+       meio como antes. */
+    overflow-wrap: break-word;
+}
+
+#lista_de_jogadores .lista-pronto {
+    flex: 0 0 2.4rem;
+    padding: 6px 4px;
+    text-align: center;
+}
+
+#lista_de_jogadores .lista-pontos {
+    flex: 0 0 4.6rem;
+    padding: 6px 8px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+#lista_de_jogadores .lista-expulsar {
+    flex: 0 0 6.2rem;
+    padding: 6px 8px;
+    text-align: right;
+}
+
+#lista_de_jogadores .lista-expulsar .btn {
+    white-space: nowrap;
+}
+
+/* No celular as três colunas fixas somavam quase 230px e o nome ficava
+   espremido (quebrando no meio em telas de 360px). Aqui elas encolhem até o
+   essencial — emoji de pronto, até 3 dígitos de pontos e o botão de expulsar
+   compacto — e devolvem a largura ao nome, que volta a caber numa linha. */
+@media (max-width: 768px) {
+    #lista_de_jogadores .lista-nome {
+        padding: 6px;
+    }
+
+    #lista_de_jogadores .lista-pronto {
+        flex: 0 0 1.5rem;
+        padding: 6px 2px;
+    }
+
+    #lista_de_jogadores .lista-pontos {
+        flex: 0 0 2.2rem;
+        padding: 6px 4px;
+    }
+
+    #lista_de_jogadores .lista-expulsar {
+        flex: 0 0 4.6rem;
+        padding: 6px 4px;
+    }
+
+    #lista_de_jogadores .lista-expulsar .btn {
+        padding: 0.15rem 0.4rem;
+        font-size: 0.78rem;
+    }
+
+    #lista_de_jogadores .ranking-cabecalho {
+        font-size: 0.7rem;
+    }
+
+    /* "Pontuação" é mais largo que a coluna de pontos; como as células vizinhas
+       do cabeçalho estão vazias, ele transborda só para a esquerda e continua
+       alinhado com os números. `nowrap` impede que o rótulo quebre em duas
+       linhas. */
+    #lista_de_jogadores .ranking-cabecalho>div {
+        white-space: nowrap;
+    }
 }
 
 #lista_de_jogadores .ranking-cabecalho {
@@ -903,6 +981,89 @@ h5,
 
 #lista_de_jogadores > div:hover {
     background-color: rgba(13, 110, 253, 0.12);
+}
+
+/* Largura do card da sala de espera: estreita no mobile/tablet (onde a lista é
+   rolável e 2-3 colunas bastam), mais larga no desktop (Fase 74, abaixo). */
+#painel_jogador {
+    max-width: 460px;
+}
+
+/* ------- Lobby em tela cheia (desktop): a lista ocupa a altura livre ------- */
+/* Cadeia de flex do body até a lista. O `body` já é flex-column; aqui o
+   `.app-main` cresce com a tela (`flex: 1 0 auto` — cresce até o fim, mas NÃO
+   encolhe, então as telas de jogo, mais altas que a viewport, continuam rolando
+   a página como antes). Cada elo abaixo é item flex com altura definida, o que
+   entrega a altura da tela para a lista sem número mágico de "quanto tem
+   acima": a sobra vai para a lista, até o teto `--teto-lista-lobby`, e o
+   excedente vira rolagem interna do card — a página não ganha barra de
+   rolagem. */
+@media (min-width: 992px) {
+    .app-main {
+        display: flex;
+        flex-direction: column;
+        flex: 1 0 auto;
+    }
+
+    #tela_jogadores {
+        height: 100%;
+    }
+
+    .lobby-col {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+    }
+
+    /* A home e o painel da sala mantêm a altura natural; o card fica com a
+       sobra. */
+    #painel_home,
+    #painel_sala {
+        flex: 0 0 auto;
+    }
+
+    .lobby-sala {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    /* Teto do card: chrome (título + apelido + botões + tagline, ~220px) mais o
+       teto da lista. Se a conta apertar quem encolhe é a LISTA (tem
+       `flex-shrink`), então o card nunca estoura a tela nem sobra buraco. */
+    #painel_jogador {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        max-width: 640px;
+        max-height: calc(220px + var(--teto-lista-lobby));
+    }
+
+    #lista_de_jogadores {
+        flex: 1 1 auto;
+        min-height: 140px;
+        max-height: var(--teto-lista-lobby);
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    /* Altura extra vira respiro nas linhas, não buraco. */
+    #lista_de_jogadores .row>div {
+        padding-top: 11px;
+        padding-bottom: 11px;
+    }
+
+    #lista_de_jogadores .lista-nome {
+        font-size: 1rem;
+    }
+
+    /* Os botões de ação ficam no pé do card, com a folga entre a lista e eles. */
+    #painel_jogador .lobby-acoes {
+        margin-top: auto;
+    }
 }
 
 /* ------- Cards de turnos (tela 2) ------- */
@@ -1174,14 +1335,6 @@ h5,
 @media (min-width: 992px) {
     #h1_vencedor {
         font-size: clamp(2.4rem, 3.4vw, 3.2rem) !important;
-    }
-
-    /* Lista de jogadores com scroll interno — a sala de espera não cresce
-       além da tela mesmo com o máximo de jogadores. */
-    #lista_de_jogadores {
-        max-height: 220px;
-        overflow-y: auto;
-        overflow-x: hidden;
     }
 }
 

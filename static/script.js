@@ -993,16 +993,27 @@ socket.on("update_user_list", (data) => {
         rowDiv.className = "row border-bottom ranking-cabecalho";
 
         const jogadoresDiv = document.createElement("div");
-        jogadoresDiv.className = "col-md-6 fw-bold";
+        jogadoresDiv.className = "lista-nome fw-bold";
         jogadoresDiv.textContent = t('js.ranking');
 
+        // Estado de pronto e expulsar têm coluna própria (Fase 74); no cabeçalho
+        // as duas ficam vazias — sem texto novo e as bases fixas mantêm as
+        // colunas alinhadas com as linhas.
+        const estadoCabecalhoDiv = document.createElement("div");
+        estadoCabecalhoDiv.className = "lista-pronto";
+
         const pontuacaoDiv = document.createElement("div");
-        pontuacaoDiv.className = "col-md-6 fw-bold";
+        pontuacaoDiv.className = "lista-pontos fw-bold";
         pontuacaoDiv.textContent = t('js.pontuacao');
+
+        const expulsarCabecalhoDiv = document.createElement("div");
+        expulsarCabecalhoDiv.className = "lista-expulsar";
 
         userListItems.appendChild(rowDiv);
         rowDiv.appendChild(jogadoresDiv);
+        rowDiv.appendChild(estadoCabecalhoDiv);
         rowDiv.appendChild(pontuacaoDiv);
+        rowDiv.appendChild(expulsarCabecalhoDiv);
 
         ranking.forEach((jogador, posicao) => {
             const campeao = posicao === 0 && jogador.pontos > 0;
@@ -1013,34 +1024,47 @@ socket.on("update_user_list", (data) => {
             }
 
             const userItem = document.createElement("div");
-            userItem.className = "col-md-6";
+            userItem.className = "lista-nome";
 
             const master = jogador.master ? '🏁' : '';
-            const pronto = jogador.pronto ? '✅' : '⏳';
             const coroa = campeao ? '👑 ' : '';
-            userItem.textContent = `${coroa}${jogador.nome} ${master} ${pronto}`;
+            // Sem espaço sobrando: o espaço fixo depois do nome virava largura
+            // perdida na coluna do nome (que é a única elástica da linha).
+            userItem.textContent = `${coroa}${jogador.nome}${master ? ' ' + master : ''}`;
+
+            // Fase 74: o ✅/⏳ sai do texto do nome para a coluna própria.
+            const prontoDiv = document.createElement("div");
+            prontoDiv.className = "lista-pronto";
+            prontoDiv.textContent = jogador.pronto ? '✅' : '⏳';
+
+            // A célula de expulsar é sempre criada (mesmo vazia) para a coluna
+            // ter a mesma largura em todas as linhas.
+            const expulsarDiv = document.createElement("div");
+            expulsarDiv.className = "lista-expulsar";
 
             // Fase 19: o master pode expulsar qualquer jogador (humano ou IA),
             // exceto ele mesmo. O client_id vem no payload `ids` (mesmo índice).
             if (sou_master && jogador.nome !== nome_jogador && jogador.id) {
                 const botao_expulsar = document.createElement("button");
-                botao_expulsar.className = "btn btn-sm btn-outline-danger ms-2";
+                botao_expulsar.className = "btn btn-sm btn-outline-danger";
                 botao_expulsar.textContent = t('js.expulsar');
                 botao_expulsar.title = t('js.expulsar_titulo');
                 botao_expulsar.onclick = function () {
                     expulsar_jogador(jogador.id, jogador.nome);
                 };
-                userItem.appendChild(botao_expulsar);
+                expulsarDiv.appendChild(botao_expulsar);
             }
 
             const pontosDiv = document.createElement("div");
-            pontosDiv.className = "col-md-6";
+            pontosDiv.className = "lista-pontos";
             pontosDiv.id = `pontos_${jogador.nome}`;
             pontosDiv.textContent = jogador.pontos;
 
             userListItems.appendChild(headerRow); // Adiciona cada row à lista
-            headerRow.appendChild(userItem); // Adiciona cada usuário à headerRow
-            headerRow.appendChild(pontosDiv); // Adiciona cada pontuação à lista
+            headerRow.appendChild(userItem); // Nome (com coroa e bandeira do master)
+            headerRow.appendChild(prontoDiv); // Estado de pronto (✅/⏳)
+            headerRow.appendChild(pontosDiv); // Pontuação
+            headerRow.appendChild(expulsarDiv); // Botão de expulsar (só master)
         });
 
         // Botão "Ficar pronto" reflete o estado atual do próprio jogador.
