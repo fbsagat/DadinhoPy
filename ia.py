@@ -1212,10 +1212,15 @@ def reagir_emoji_vitoria(lobby):
 # Orquestrador
 # ---------------------------------------------------------------------------
 
-def processar(lobby):
+def processar(lobby, permitir_virada_pagina=True):
     """
     Faz as IAs agirem até o jogo precisar de um humano (ou acabar). Chamado ao
     fim de cada handler mutável, sob o lock da sala. Devolve True se algo mudou.
+
+    `permitir_virada_pagina=False` suprime a virada 1→2 da rolagem: o chamador
+    (só o handler `jogar_dados`) ainda vai ver a animação dos dados no cliente e
+    a transição real vem depois, no `joguei_dados`. As IAs continuam sendo
+    marcadas como prontas; o que muda é apenas quem abre a página 2 (Fase 73).
 
     Fase 69: quando não resta humano COM DADOS (todos eliminados ou só bots) e
     ainda há quem assista, o laço NÃO simula a partida inteira — libera um lance
@@ -1235,7 +1240,7 @@ def processar(lobby):
     for _ in range(limite):
         pagina = lobby.pagina
         if pagina == 1:
-            avancou = _processar_rolagem(lobby)
+            avancou = _processar_rolagem(lobby, permitir_virada_pagina)
         elif pagina == 2:
             avancou = _processar_turno(lobby)
         elif pagina == 3:
@@ -1390,7 +1395,7 @@ def _partida_atual(lobby):
     return lobby.partidas[-1]
 
 
-def _processar_rolagem(lobby):
+def _processar_rolagem(lobby, permitir_virada_pagina=True):
     """Marca as IAs como prontas na rolagem e destrava a ida para a página 2."""
     partida = _partida_atual(lobby)
     if partida is None or not partida.rodadas:
@@ -1402,6 +1407,11 @@ def _processar_rolagem(lobby):
     # Fase 22: humanos acompanham em tempo real quem já rolou.
     funcoes_gerais.emitir_status_rolagem(lobby)
     if rodada.verificar_se_todos_ja_jogaram_seus_dados():
+        # Fase 73: a virada pode estar suprimida — as IAs foram marcadas, mas
+        # quem abriu a página 2 foi o `jogar_dados` (clique do humano), antes
+        # de a animação terminar. Ver `processar`.
+        if not permitir_virada_pagina:
+            return False
         lobby.pagina = 2
         # Fase 73: o `vez_em` da rolagem (carimbado em `construir_rodada`) foi
         # contado desde o início da rodada — na transição pela página 1 o

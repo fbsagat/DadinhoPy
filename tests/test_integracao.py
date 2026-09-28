@@ -2193,6 +2193,39 @@ def teste_relogio_turno_apos_rolagem():
     _limpar()
 
 
+def teste_rolagem_nao_vira_no_clique():
+    """
+    Fase 73 (regressão): clicar em "Jogar dados" não pode abrir a página 2 antes
+    do fim da animação. A virada vem só no `joguei_dados` (confirmação enviada
+    depois de o cliente mostrar o resultado) — o `ia.processar` do handler
+    marcava as IAs e, se o clique fosse o último, virava a tela na hora e o
+    jogador nunca via os próprios dados.
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 2})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1
+
+    c1.emit("jogar_dados", {"chave": cs1["chave_secreta"]})
+    c2.emit("jogar_dados", {"chave": cs2["chave_secreta"]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1, "o clique não pode adiantar a tela de turnos"
+
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, "a confirmação deve abrir a tela de turnos"
+
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+
+
 # --- Rede de segurança da jogada automática (Fase 75) -----------------------
 def teste_heartbeat_destrava_humano_atrasado():
     """
@@ -3518,6 +3551,7 @@ def verificar_integracao():
     testes_autojogar = [
         ("autojogar", teste_autojogar),
     ("relogio-turno-apos-rolagem", teste_relogio_turno_apos_rolagem),
+        ("rolagem-nao-vira-no-clique", teste_rolagem_nao_vira_no_clique),
         ("heartbeat-destrava-atrasado", teste_heartbeat_destrava_humano_atrasado),
     ]
     testes_fase_d = [
