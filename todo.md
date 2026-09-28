@@ -1185,3 +1185,78 @@ partida de IAs termina); `python simular_ia.py --partidas 20 --dados 3`
 hierarquia 4>3>2>1 preservada (o simulador não tem espectador: modo legado).
 Complemento manual: assistir uma partida que vira só de IAs em 2 abas (uma
 delas eliminada) e confirmar o ritmo no mobile.
+
+
+# TODO — Dadinho (Fase 75: contador em todas as telas + jogada automática sem travamento)
+
+## Problema
+
+O contador da jogada automática morava **dentro de `#tela_partida`**
+(`#rodape_acao` → `#contador_jogada`). O `mudar_pagina` esconde a tela anterior a
+cada troca, então nas páginas 1 (rolagem), 3 (conferência) e 4 (vitória) o badge
+ficava preso num ancestral com `display:none`: **o relógio corria invisível** e o
+servidor auto-confirmava o "Ok" do jogador sem ele nunca ter visto a contagem.
+O relógio em si já era armado corretamente nas quatro telas (`construtor_dados`,
+`meu_turno`, `cards_conferencia`, `vencedor_da_partida`) — o defeito era só de
+montagem no DOM.
+
+Pior: o `autojogar` **vem do cliente**. Uma aba em segundo plano, um socket
+reconectado em outra instância ou um evento perdido deixavam a sala parada
+esperando aquele humano — o pior tipo de travamento, sem erro e sem aviso. Na
+conferência isso era pior ainda: a rodada só sai quando **todo mundo** confirma,
+ então um AFK segurava a partida inteira.
+
+## Entregue
+
+- [x] **Camada `#camada_contador`** (`templates/jogo.html`) — `#contador_jogada`
+  virou **irmã** das telas, fora do `#app-main`, numa camada que nunca é
+  escondida.
+- [x] **`posicionar_contador_jogada()`** (`static/script.js`, chamada em
+  `mudar_pagina`) — move o elemento no DOM conforme a página: na de turnos (2)
+  volta para dentro de `#rodape_acao` (o rodapé do layout de app do mobile,
+  Fase 33/M3) e nas demais fica na camada. Mover **antes** de a próxima página ser
+  mostrada, senão o elemento fica preso no ancestral que acabou de ser escondido.
+- [x] **CSS** (`static/custom_styles.css`) — `body.em_tela_2 #contador_jogada`
+  (rodapé, `position: static`) inalterado; nova regra
+  `#camada_contador #contador_jogada` só desce o suficiente para não entrar no
+  notch/status bar, continuando na faixa de 64px que a `.painel-dicas` reserva.
+  Desktop mantém o `position: fixed` do topo.
+- [x] **Espectador sem relógio** (`static/script.js`) — espectador não tem botão
+  de "Ok" nem é da vez, então `iniciar_timer_jogada` é guardado por
+  `!eh_espectador` nos três handlers que armam o relógio e o selo `espectador`
+  chama `parar_timer_jogada()`. O servidor já recusava o `autojogar` dele (não está
+  em `rodada.jogadores`); agora o cliente também não anuncia um relógio que não
+  termina em nada.
+- [x] **Sem chave i18n nova** — reutilizada a existente `js.autojogar_contagem`
+  (já nos 5 dicionários).
+- [x] **Heartbeat como rede de segurança da jogada automática** (`app.py`) —
+  `_tem_prazo_vencido(lobby)` roda no estado do cache e só decide se vale a
+  entrada no lock; lá dentro, com leitura fresca, `_autojogar_vencidos(lobby)`
+  age por **todos** os humanos vencidos usando o motor da IA (o mesmo caminho do
+  `autojogar`) e o `salvar_sala_com_resumo` persiste. Cobre o `heartbeat` da
+  partida e o da espera→partida. `ia.processar` ao lado **não** cobre o caso: ele
+  só age por IAs. O handler `autojogar` continua jogador-específico — a varredura
+  é exclusiva do heartbeat, o que preserva `teite_autojogar` (Ana atrasada não
+  destrava a página sozinha).
+- [x] **Helper compartilhado** (`app.py`) — a lógica das quatro páginas foi
+  extraída para `_tempo_max`, `_atrasados`, `_executar_autojogar` e
+  `_autojogar_vencidos`, para o handler e o watchdog não divergirem. Timestamp
+  ausente = **sem prazo** (não joga), o oposto do `autojogar`, para nunca
+  auto-confirmar por estado incompleto. O fechamento das páginas 3/4 é delegado
+  ao `ia.processar` (que já reconstrói/resetava) em vez de trocar de página no
+  meio da varredura.
+
+## Verificação
+
+`python verificar.py` 100% verde (36s) — inclui o novo teste de integração
+`heartbeat-destrava-atrasado`, que cobre os três casos: o da vez atrasado joga
+sozinho no heartbeat (o heartbeat chega com página/vez **corretas** — é o caso
+real de evento perdido), um "Ok" perdido na conferência destrava a rodada (e a
+sala sai da página 3), e `tempo_max_jogada=0` continua desligando os **dois**
+caminhos (se o watchdog ignorasse o 0, ele auto-apostaria a partida de um
+jogador que desligou o tempo). `node --check static/script.js` OK;
+`simular_ia.py --partidas 20 --dados 3` hierarquia 4>3>2>1 preservada.
+
+Complemento manual (pendente): 2 abas com `tempo_max_jogada=15`, conferindo o
+contador **visível** nas páginas 1, 3 e 4 (desktop e emulação mobile) e que uma
+aba que fica em segundo plano não trava a partida quando o heartbeat assume.

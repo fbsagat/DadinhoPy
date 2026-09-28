@@ -614,10 +614,6 @@
         </div>
 
         <div id="rodape_acao">
-        <!-- Fase 33 (M3): contador da jogada automática mora no rodapé; no
-             desktop a CSS o devolve ao topo (`position: fixed`). -->
-        <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
-            style="z-index: 60; display: none; font-size: 1.1rem;"></div>
         <div id="painel_jogada" style="display: none;">
 
             <div class="container-fluid text-center">
@@ -755,6 +751,19 @@
     <!-- TELA VITORIA FIM -->
     </div>
     <!-- FIM DO APP-MAIN (container das telas) -->
+
+    <!-- Fase 75: camada do contador da jogada automática, IRMÃ das telas (fora
+         do `#app-main`) e não dentro de `#tela_partida`. O contador corre nas
+         páginas 1 (rolagem), 2 (turnos), 3 (conferência) e 4 (vitória), mas
+         morava dentro da tela de turnos: em qualquer outra página ele ficava
+         preso num ancestral com `display:none` — o relógio corria invisível e o
+         servidor auto-confirmava o "Ok" sem o jogador ver. Na página de turnos o
+         `script.js` o devolve para dentro de `#rodape_acao` (rodapé do layout de
+         app do mobile). -->
+    <div id="camada_contador">
+        <div id="contador_jogada" class="position-fixed top-0 start-50 translate-middle-x mt-2 badge text-bg-warning"
+            style="z-index: 60; display: none; font-size: 1.1rem;"></div>
+    </div>
 
     <!-- TUTORIAL INICIO -->
     <div id="tutorial_overlay" class="tutorial-overlay" role="dialog" aria-modal="true">

@@ -1824,6 +1824,14 @@ h5,
         width: fit-content;
     }
 
+    /* Fase 75: fora da tela de turnos o contador fica na `#camada_contador`
+       (irmã das telas), então mantém o `position: fixed` do topo. Desce só o
+       suficiente para não entrar no notch/status bar — continua na faixa de
+       64px que a `.painel-dicas` reserva para os elementos fixos do topo. */
+    #camada_contador #contador_jogada {
+        top: calc(env(safe-area-inset-top, 0px) + 4px);
+    }
+
     /* Barra de status compacta (uma linha, dados menores). */
     #tela_partida .d-flex.justify-content-between {
         gap: 4px;

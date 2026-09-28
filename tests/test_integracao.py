@@ -2065,6 +2065,98 @@ def teste_autojogar():
     _ok("jogada automática por tempo máximo (Fase 21)")
 
 
+# --- Rede de segurança da jogada automática (Fase 75) -----------------------
+def teste_heartbeat_destrava_humano_atrasado():
+    """
+    Fase 75: o `autojogar` chega do contador regressivo do CLIENTE. Se a aba
+    foi pra segundo plano, o socket reconectou em outra instância ou o evento
+    simplesmente se perdeu, ninguém joga por aquele humano e a SALA PARA
+    esperando ele (era o pior tipo de travamento: sem erro, sem aviso). O
+    `heartbeat` — que todo jogador ativo já emite — passa a ser a rede de
+    segurança: com o prazo do relógio estourado, ele age pelo atrasado dentro
+    do lock distribuído, igual ao `autojogar` faria, e persiste.
+    """
+    from datetime import datetime, timedelta
+
+    def _envelhecer(obj, campo, segundos=999):
+        setattr(obj, campo, datetime.now() - timedelta(seconds=segundos))
+
+    # --- Turnos (página 2): o da vez atrasado joga sozinho no heartbeat. ----
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    vez = rodada.vez_atual
+    c_vez, chave_vez = clis[vez.username]
+    _envelhecer(rodada, "vez_em")
+    modulo_store.salvar_sala(lobby)
+    assert len(rodada.turnos) == 0, "partida deve estar parada antes do heartbeat"
+
+    # O heartbeat vem com a página/vez CORRETAS: nada de divergência, só o
+    # atraso. É o caso real (aba viva, evento perdido).
+    c_vez.emit("heartbeat", {"chave": chave_vez, "pagina": 2, "vez": vez.client_id})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert len(rodada.turnos) == 1, \
+        "heartbeat deve jogar pelo da vez atrasado (senão a partida trava)"
+    assert rodada.vez_atual is not vez, "a vez deve avançar após o auto-jogo"
+    _desconectar_todos(clis)
+    _limpar()
+
+    # --- Conferência (página 3): um "Ok" perdido trava a rodada inteira. ----
+    # A conferência só sai quando TODO mundo confirma; um AFK segurava a sala
+    # em silêncio, com o "Ok" do jogador tendo se perdido pelo caminho.
+    _limpar()
+    clis, lobby = _conectar_trio(1)
+    lobby = _rodada_ate_conferencia(clis)
+    partida = lobby.partidas[-1]
+    rodada = partida.rodadas[-1]
+    pendentes = [j for j in rodada.jogadores if not j.confirmou_rodada]
+    assert pendentes, "deve sobrar alguém para confirmar"
+    alvo = pendentes[0]
+    _envelhecer(rodada, "conferencia_em")
+    modulo_store.salvar_sala(lobby)
+
+    c_alvo, chave_alvo = clis[alvo.username]
+    c_alvo.emit("heartbeat", {"chave": chave_alvo, "pagina": 3})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada_novo = lobby.partidas[-1].rodadas[-1]
+    # O relógio da tela é UM só (toda a rodada compartilha `conferencia_em`), então
+    # um único heartbeat confirma todos os que venceram o prazo e a rodada fecha
+    # — era exatamente o travamento: um AFK segurava a sala em silêncio.
+    assert rodada_novo is not rodada, \
+        "confirmar os atrasados deve construir a próxima rodada"
+    assert lobby.pagina != 3, "a sala não pode ficar presa na conferência"
+    _desconectar_todos(clis)
+    _limpar()
+
+    # --- Tempo desligado (tempo_max_jogada=0): o watchdog NÃO é atalho. ----
+    # A configuração é do master e vale para o comportamento visível E para a
+    # rede de segurança; se o watchdog ignorasse o 0, ele auto-apostaria a
+    # partida inteira de um jogador que desligou o tempo.
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"tempo_max_jogada": 0}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    rodada = lobby.partidas[-1].rodadas[-1]
+    _envelhecer(rodada, "inicio_rolagem_em")
+    modulo_store.salvar_sala(lobby)
+    c1.emit("heartbeat", {"chave": cs1["chave_secreta"], "pagina": 1})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.joguei_dados is False, \
+        "com o tempo desligado o watchdog não pode rolar os dados do jogador"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("heartbeat destrava humano atrasado (Fase 75)")
+
+
 def teste_retomar_identidade_por_evento():
     """
     Fase D: a `chave_secreta` não trafega mais na query string do handshake.
@@ -3021,6 +3113,7 @@ def verificar_integracao():
     ]
     testes_autojogar = [
         ("autojogar", teste_autojogar),
+        ("heartbeat-destrava-atrasado", teste_heartbeat_destrava_humano_atrasado),
     ]
     testes_fase_d = [
         ("retomar-identidade", teste_retomar_identidade_por_evento),

@@ -1551,6 +1551,10 @@ socket.on("mudar_pagina", function (data) {
     if (paginas[2]) {
         paginas[2].classList.toggle('tela-partida-ativa', em_partida);
     }
+    // Fase 75: o contador precisa estar no DOM ANTES de a próxima página ser
+    // mostrada, senão ele fica preso no ancestral que o `mudar_pagina` acabou de
+    // esconder. Só na tela de turnos ele volta para o rodapé de ação.
+    posicionar_contador_jogada();
     // Menu de sala: qualquer troca de página fecha o drawer de configurações
     // (o master pode estar com ele aberto ao iniciar a partida). O dropdown de
     // som/idioma do topo também fecha.
@@ -1831,7 +1835,10 @@ socket.on('construtor_dados', function (data) {
 
         // Fase 21: jogador ainda não rolou — começa o contador da jogada
         // automática da rolagem (para quando o tempo máximo expirar).
-        iniciar_timer_jogada(data.tempo_max);
+        // Fase 75: espectador não rola nada, então não ganha relógio.
+        if (!eh_espectador) {
+            iniciar_timer_jogada(data.tempo_max);
+        }
     } else {
         // Cria a div principal
         const container = document.createElement('div');
@@ -2029,6 +2036,29 @@ function atualizar_contador_jogada() {
     el.classList.toggle('text-bg-danger', tempo_autojogar_seg <= 10);
     el.classList.toggle('text-bg-warning', tempo_autojogar_seg > 10);
     el.style.display = 'inline-block';
+}
+
+// Fase 75: o contador da jogada automática vive numa camada IRMÃ das telas
+// (`#camada_contador`), fora do `#app-main`. Ele antes morava dentro de
+// `#tela_partida`, que ganha `display:none` em toda troca de página — então nas
+// páginas 1, 3 e 4 o badge ficava preso nesse ancestral invisível: o relógio
+// corria, mas ninguém via, e o servidor auto-confirmava o "Ok" do jogador sem
+// aviso. Aqui o elemento é MOVIDO no DOM conforme a página: na de turnos (2)
+// volta para dentro de `#rodape_acao` (é o rodapé do layout de app do mobile,
+// Fase 33/M3) e nas demais fica na camada, que nunca é escondida.
+function posicionar_contador_jogada() {
+    const el = document.getElementById('contador_jogada');
+    if (!el) {
+        return;
+    }
+    const destino = indiceAtual === 2
+        ? document.getElementById('rodape_acao')
+        : document.getElementById('camada_contador');
+    // `display:none` do ancestral esconde o badge mesmo com `el.style.display`
+    // = inline-block; a visibilidade depende de ESTE par de nós.
+    if (destino && el.parentElement !== destino) {
+        destino.appendChild(el);
+    }
 }
 
 function iniciar_timer_jogada(segundos, meu) {
@@ -2229,9 +2259,12 @@ socket.on('vencedor_da_partida', function (data) {
     h1_vencedor.innerHTML = t('js.vitoria_texto', { nome: data.nome });
     iniciar_celebracao();
     // Fase 22: contador da jogada automática da tela de vitória (auto-confirma
-    // o reset se o jogador ficar away from keyboard).
+    // o reset se o jogador ficar away from keyboard). Fase 75: espectador não
+    // confirma nada, então não ganha relógio.
     tempo_conf_vit = Number(data.tempo_max) || 0;
-    iniciar_timer_jogada(tempo_conf_vit);
+    if (!eh_espectador) {
+        iniciar_timer_jogada(tempo_conf_vit);
+    }
 })
 
 socket.on('soltar_fogos', function () {
@@ -2351,9 +2384,12 @@ socket.on('cards_conferencia', function (data) {
     });
 
     // Fase 22: contador da jogada automática da conferência (auto-confirma o
-    // "Ok" se o jogador ficar away from keyboard).
+    // "Ok" se o jogador ficar away from keyboard). Fase 75: espectador não
+    // confirma nada, então não ganha relógio.
     tempo_conf_vit = Number(data.tempo_max) || 0;
-    iniciar_timer_jogada(tempo_conf_vit);
+    if (!eh_espectador) {
+        iniciar_timer_jogada(tempo_conf_vit);
+    }
 })
 
 // Fase 22: status em tempo real de quem já clicou no "Ok" (ou já rolou), por
@@ -2430,6 +2466,12 @@ socket.on('espectador', function (data) {
     bot_confe_fim.style.display = 'none';
     painel_aguarde.style.display = 'none';
     painel_jogada.style.display = 'none';
+    // Fase 75: espectador não tem botão de "Ok" nem é da vez, então o contador
+    // da jogada automática não descreve nada que ele possa fazer — e o
+    // `autojogar` que ele emitiria seria recusado pelo servidor (ele não está
+    // em `rodada.jogadores`). Encerra para não mostrar um relógio que não
+    // termina em nada.
+    parar_timer_jogada();
     posicionar_toast_mobile();
     // Fase 69: quem vira espectador numa partida só de IAs passa a pagar o
     // ritmo — agenda o primeiro poll já (o `narracao` reagenda os seguintes).

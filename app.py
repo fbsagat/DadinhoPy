@@ -1606,9 +1606,17 @@ def heartbeat(dados=None):
     # lockado mesmo com o cache quente, senão a sala ficaria parada.
     partida_so_ias = (lobby.status != 'espera' and lobby.pagina in (1, 2, 3, 4)
                       and ia.somente_ias_com_dados(lobby) and ia.tem_relogio(lobby))
+    # Fase 75: mesmo raciocínio para o HUMANO atrasado. O `autojogar` normal
+    # vem do contador regressivo do cliente; se a aba ficou em segundo plano, o
+    # socket reconectou em outra instância ou o evento se perdeu, ninguém joga
+    # por aquele jogador e a sala espera por ele. Checar aqui (com o estado
+    # possivelmente defasado do cache) só decide se vale a entrada no lock — a
+    # decisão que age é refeita com leitura fresca, lá dentro.
+    humano_vencido = (lobby.status != 'espera' and lobby.pagina in (1, 2, 3, 4)
+                      and _tem_prazo_vencido(lobby))
 
     if (not veio_do_cache or pagina_cliente != pagina_sala or vez_divergente
-            or partida_so_ias) and lobby.status != 'espera':
+            or partida_so_ias or humano_vencido) and lobby.status != 'espera':
         with trancar_sala_distribuida(sala_id):
             # Re-leitura fresca DENTRO do lock: entre a leitura pré-lock e a
             # aquisição outra instância pode ter avançado o turno — processar
@@ -1624,6 +1632,16 @@ def heartbeat(dados=None):
             _emitir_re_sync(lobby, jogador, pagina_sala, _vez_divergente_de(lobby, jogador))
             if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
                 lobby.marcar_visto()
+            # Fase 75: a rede de segurança da jogada automática, com estado
+            # FRESCO (o `_tem_prazo_vencido` lá fora olhou o cache, que pode
+            # estar defasado). `ia.processar` ao lado não substitui isto: ele
+            # só age por IAs — um humano com o prazo estourado é justamente o
+            # caso em que a sala para. O `_autojogar_vencidos` roda o motor da
+            # IA para o atrasado exatamente como o `autojogar` do cliente
+            # faria, e o `salvar_sala_com_resumo` abaixo persiste.
+            if _autojogar_vencidos(lobby):
+                store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+                return
             if ia.processar(lobby):
                 # Um SÓ save para o Lobby + resumo da busca (Fase 60).
                 store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
@@ -1655,6 +1673,11 @@ def heartbeat(dados=None):
             _emitir_re_sync(lobby, jogador, pagina_sala, _vez_divergente_de(lobby, jogador))
             if lobby.visto_em is None or (datetime.now() - lobby.visto_em).total_seconds() >= 60:
                 lobby.marcar_visto()
+            # Fase 75: a partida pode ter começado (e ficado parada) desde o
+            # `cache` que dizia "espera" — mesma rede de segurança do atraso.
+            if _autojogar_vencidos(lobby):
+                store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+                return
             if ia.processar(lobby):
                 store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
                 return
@@ -1719,6 +1742,124 @@ def joguei_dados(dados, lobby, jogador):
     salvar_sala(lobby)
 
 
+def _tempo_max(lobby):
+    """`tempo_max_jogada` configurado (0 = jogada automática desligada)."""
+    return int(lobby.config.get('tempo_max_jogada', 0) or 0)
+
+
+def _atrasados(lobby, agora):
+    """
+    Humanos com uma jogada obrigatória pendente cujo prazo JÁ estourou na página
+    corrente. Lista vazia significa "ninguém está segurando a sala".
+
+    O prazo de cada página é o mesmo que o handler `autojogar` confere:
+    `rodada.inicio_rolagem_em` (rolagem), `rodada.vez_em` (turno),
+    `rodada.conferencia_em` (conferência) e `partida.vitoria_em` (vitória) — por
+    isso a varredura do heartbeat e o pedido do cliente julgam o mesmo fato.
+
+    Marca de tempo ausente = SEM prazo (não joga). É o oposto do `autojogar`,
+    que tratava `None` como "pode agir": aqui um `None` herdado de estado legado
+    dispararia uma jogada automática instantânea para a mesa inteira, que é
+    exatamente o que a functionality existe para não fazer.
+    """
+    tempo_max = _tempo_max(lobby)
+    if tempo_max <= 0:
+        return []
+    pagina = lobby.pagina
+    partida = lobby.partidas[-1] if lobby.partidas else None
+    if partida is None:
+        return []
+    rodada = partida.rodadas[-1] if partida.rodadas else None
+
+    if pagina == 1:
+        if rodada is None or rodada.inicio_rolagem_em is None:
+            return []
+        if (agora - rodada.inicio_rolagem_em).total_seconds() < tempo_max:
+            return []
+        return [j for j in rodada.jogadores if not j.is_ia and not j.joguei_dados]
+    if pagina == 2:
+        if rodada is None or rodada.vez_atual is None or rodada.vez_em is None:
+            return []
+        if (agora - rodada.vez_em).total_seconds() < tempo_max:
+            return []
+        return [] if rodada.vez_atual.is_ia else [rodada.vez_atual]
+    if pagina == 3:
+        if rodada is None or rodada.conferencia_em is None:
+            return []
+        if (agora - rodada.conferencia_em).total_seconds() < tempo_max:
+            return []
+        return [j for j in rodada.jogadores if not j.is_ia and not j.confirmou_rodada]
+    if pagina == 4:
+        if partida.vitoria_em is None:
+            return []
+        if (agora - partida.vitoria_em).total_seconds() < tempo_max:
+            return []
+        return [j for j in lobby.jogadores if not j.is_ia and not j.confirmou_vencedor]
+    return []
+
+
+def _tem_prazo_vencido(lobby):
+    """True se algum humano da página corrente já estourou o tempo máximo."""
+    return bool(_atrasados(lobby, datetime.now()))
+
+
+def _executar_autojogar(lobby, jogador):
+    """
+    Aplica a jogada automática de UM humano na página corrente (a parte que
+    MUTA o estado). O fechamento da página NÃO é feito aqui: quem fecha é o
+    `ia.processar` do chamador, tanto no fluxo normal (página 3/4 fecham em
+    `_processar_conferencia`/`_processar_vitoria`) quanto no heartbeat. Deixar
+    o fechamento para o `ia.processar` é o que permite varrer vários atrasados
+    numa passada sem trocar de página no meio da varredura.
+    """
+    if lobby.pagina == 1:
+        # Rolar os dados do atrasado (o avanço de página continua no fluxo do
+        # `ia.processar`, como na jogada manual).
+        jogador.joguei_dados = True
+        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+             to=jogador.client_id)
+        emitir_status_rolagem(lobby)
+    elif lobby.pagina == 2:
+        rodada = jogador.rodada_atual
+        acao = ia.decidir(jogador, rodada, AUTO_IA_NIVEL)
+        ia.executar_acao(jogador, rodada, acao)
+    elif lobby.pagina == 3:
+        jogador.confirmou_rodada = True
+        jogador.rodada_atual.conferiram += 1
+        emitir_status_conferencia(lobby)
+    elif lobby.pagina == 4:
+        jogador.confirmou_vencedor = True
+        lobby.conferiram_vencedor += 1
+        emitir_status_vitoria(lobby)
+
+
+def _autojogar_vencidos(lobby):
+    """
+    Rede de segurança da jogada automática: joga por TODO humano com o prazo
+    estourado na página corrente. Devolve True se algum agiu.
+
+    O gatilho normal é o `autojogar` que o cliente emite quando o contador
+    regressivo zera. Este é o caminho que independe do cliente — a aba pode ter
+    ficado em segundo plano (o `setInterval` é estrangulado e o contador não
+    dispara no tempo), o socket pode ter reconectado em outra instância e
+    perdido o evento, ou o evento pode simplesmente nunca ter sido entregue.
+    Sem isto, um único jogador ausente segura a partida inteira até o
+    `desconectado` do socket expirar a janela de graça.
+
+    Serverless-safe como o resto: roda DENTRO de um request (o heartbeat, sob
+    o lock da sala), sem thread e sem timer. O estado é o mesmo `Lobby`
+    persistido, então qualquer instância continua a partida.
+    """
+    agora = datetime.now()
+    acted = False
+    for jogador in _atrasados(lobby, agora):
+        _executar_autojogar(lobby, jogador)
+        acted = True
+    if acted:
+        ia.processar(lobby)
+    return acted
+
+
 @socketio.on('autojogar')
 @evento_mutavel(cooldown=None)
 @autenticar()
@@ -1734,75 +1875,20 @@ def autojogar(dados, lobby, jogador):
     O servidor confere o tempo decorrido desde `rodada.inicio_rolagem_em`
     (rolagem), `rodada.vez_em` (turno), `rodada.conferencia_em` (conferência) ou
     `partida.vitoria_em` (vitória) antes de agir, então o evento não vira um
-    "auto-play instantâneo" que beneficiaria o jogador.
+    "auto-play instantâneo" que beneficiaria o jogador. Quem decide é
+    `_atrasados`, o MESMO juiz da varredura de segurança do heartbeat — não
+    podem divergir, senão um jogador-preso escaparia pelo lado do cliente.
 
     `cooldown=None`: o evento é idempotente (o servidor só age se for realmente
     a vez do jogador e o tempo já tiver passado) e espaçado pelo fluxo — um drop
     silencioso pelo cooldown deixaria a sala presa, que é o travamento que esta
     funcionalidade existe para evitar.
     """
-    tempo_max = int(lobby.config.get('tempo_max_jogada', 0) or 0)
-    if tempo_max <= 0:
-        return
     agora = datetime.now()
-    if lobby.pagina == 1:
-        # Rolar os dados do atrasado (o avanço de página continua no fluxo do
-        # `joguei_dados`/`ia.processar`, como na jogada manual).
-        rodada = jogador.rodada_atual
-        if rodada is None or jogador not in rodada.jogadores or jogador.joguei_dados:
-            return
-        inicio = rodada.inicio_rolagem_em
-        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
-            return
-        jogador.joguei_dados = True
-        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
-             to=jogador.client_id)
-        emitir_status_rolagem(lobby)
-        ia.processar(lobby)
-    elif lobby.pagina == 2:
-        rodada = jogador.rodada_atual
-        if rodada is None or rodada.vez_atual is not jogador:
-            return
-        vez_em = rodada.vez_em
-        if vez_em is not None and (agora - vez_em).total_seconds() < tempo_max:
-            return
-        acao = ia.decidir(jogador, rodada, AUTO_IA_NIVEL)
-        ia.executar_acao(jogador, rodada, acao)
-        ia.processar(lobby)
-    elif lobby.pagina == 3:
-        # Fase 22: auto-confirma o "Ok" da conferência para o humano atrasado
-        # (jogador away from keyboard não trava mais a tela). O fluxo de avanço
-        # da rodada fica com o `ia.processar`, como na confirmação manual.
-        rodada = jogador.rodada_atual
-        if rodada is None or jogador not in rodada.jogadores or jogador.confirmou_rodada:
-            return
-        inicio = rodada.conferencia_em
-        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
-            return
-        jogador.confirmou_rodada = True
-        rodada.conferiram += 1
-        emitir_status_conferencia(lobby)
-        if rodada.conferiram >= len(rodada.jogadores):
-            jogador.partida_atual.construir_rodada()
-        ia.processar(lobby)
-    elif lobby.pagina == 4:
-        # Fase 22: idem na tela de vitória — confirma o reset pelo atrasado.
-        partida = jogador.partida_atual
-        if jogador not in lobby.jogadores or jogador.confirmou_vencedor:
-            return
-        inicio = partida.vitoria_em if partida else None
-        if inicio is not None and (agora - inicio).total_seconds() < tempo_max:
-            return
-        jogador.confirmou_vencedor = True
-        lobby.conferiram_vencedor += 1
-        emitir_status_vitoria(lobby)
-        if lobby.conferiram_vencedor >= len(lobby.jogadores):
-            lobby.resetar_para_lobby()
-            atualizar_lista_usuarios(lobby)
-            mudar_pagina(0, sala=lobby.sala_id)
-        ia.processar(lobby)
-    else:
+    if jogador not in _atrasados(lobby, agora):
         return
+    _executar_autojogar(lobby, jogador)
+    ia.processar(lobby)
     salvar_sala(lobby)
 
 
