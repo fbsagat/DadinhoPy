@@ -70,12 +70,15 @@ def _cache_estaticos(resposta):
 COOLDOWN_ESCRITA = 0.5
 COOLDOWN_BUSCA = 2.0
 # Fase 77: rate limit do chat de emojis — reações em tempo real mas sem spam.
-# 0.3s permite 3/mensagem por jogador; o cliente também trava o botão.
+# 0.3s permite ~3 reações/s por sid (o cliente não trava o botão; o rate limit é
+# todo do servidor). O preview (`chat_reagindo`) tem balde próprio
+# (`cooldown_chave`) para não consumir a janela do emoji real.
 COOLDOWN_CHAT = 0.3
 
 # Fase 77: lista canônica de emojis por categoria (source of truth do servidor).
-# O cliente espelha estes mesmos conjuntos para renderizar o picker; validações
-# de categoria/emoji no handler garantem que nada além disso chegue ao broadcast.
+# O cliente espelha estes mesmos conjuntos para renderizar o picker; a validação
+# do emoji contra o conjunto global garante que nada além disso chegue ao
+# broadcast (a categoria é recalculada no servidor, nunca confiada ao cliente).
 EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎']
 EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌']
 EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓']
@@ -560,12 +563,16 @@ def _gc_sala(lobby):
     return False
 
 
-def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=True):
+def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=True,
+                   cooldown_chave=None):
     """
     Wrapper padrão para handlers que mutam estado de sala (Fase 7):
     - V2: rate limit leve por sid (desligável com `cooldown=None` para eventos
       de confirmação — conferência/vitória são idempotentes e espaçados pelo
       fluxo do jogo, e um drop silencioso pelo cooldown travaria a partida);
+      `cooldown_chave` isola a janela deste handler num balde próprio
+      (`<chave>:<sid>`), para dois eventos do MESMO sid não consumirem a janela
+      um do outro (ex.: o preview do chat derrubava o emoji real).
     - A4: lock por sala no processo, cobrindo todo o read-modify-write;
     - Fase 24: lock distribuído por sala (Upstash) por dentro do local —
       serializa a mutação ENTRE instâncias (pré-requisito da message queue);
@@ -580,7 +587,9 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=Tru
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             client_id = request.sid
-            if cooldown is not None and tem_cooldown(client_id, cooldown):
+            chave_cooldown = (f"{cooldown_chave}:{client_id}"
+                              if cooldown_chave else client_id)
+            if cooldown is not None and tem_cooldown(chave_cooldown, cooldown):
                 return
             sala_id = sala_do_cliente(client_id)
             try:
@@ -1056,7 +1065,9 @@ def retomar_identidade(dados=None):
         alvo.is_ia = False
         alvo.ia_nivel = None
         alvo.ia_estilo = None  # Fase 76: o humano que volta joga como humano
-        alvo.username = ia.remover_marcador_ia(alvo.username)  # e sem o `🤖` do substituto
+        # e sem o `🤖` do substituto — a menos que o nome base já esteja em uso
+        # (ver `ia.desmarcar_substituto`: evita dois cards com o mesmo `id`).
+        alvo.username = ia.desmarcar_substituto(lobby, alvo)
     lobby.definir_master()
     emit("connect_start",
          {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
@@ -1793,8 +1804,12 @@ def joguei_dados(dados, lobby, jogador):
     # Fase 10 (S4): escopo explícito — os dados são só de quem confirmou.
     emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
     rodada = jogador.rodada_atual
-    # Executar isso \/ quando o último jogar os dados
-    if rodada.verificar_se_todos_ja_jogaram_seus_dados():
+    # Executar isso \/ quando o último jogar os dados. O guard de `lobby.pagina`
+    # torna o handler idempotente: um reenvio (retry do cliente, 2ª instância,
+    # clique duplo) já na tela 2 NÃO re-roda `iniciar_turnos` — sem ele,
+    # `atualizar_front_pro_da_vez` recarimbava `vez_em` e o jogador da vez podia
+    # estender o próprio turno indefinidamente.
+    if lobby.pagina == 1 and rodada.verificar_se_todos_ja_jogaram_seus_dados():
         lobby.pagina = 2
         # Antes de abrir a tela de turnos: o relógio do primeiro jogador começa
         # AGORA, não no início da rodada (que carimbou `vez_em` na tela de
@@ -2100,6 +2115,19 @@ def foguetear(dados, lobby, jogador):
         emit('soltar_fogos', to=lobby.sala_room())
 
 
+def _categoria_canonica_emoji(emoji):
+    """
+    Categoria canônica de um emoji (Fase 77). O servidor é a autoridade: a
+    `categoria` enviada pelo cliente é ignorada e recalculada a partir do emoji,
+    que já foi validado contra a whitelist global — assim um "provocativo" não
+    chega com um emoji "amigável" e o broadcast sai sempre consistente.
+    """
+    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
+        if emoji in emojis:
+            return cat
+    return 'geral'
+
+
 @socketio.on('enviar_emoji_chat')
 @evento_mutavel(lock_distribuido=False, cooldown=COOLDOWN_CHAT)
 @autenticar()
@@ -2107,11 +2135,12 @@ def enviar_emoji_chat(dados, lobby, jogador):
     """
     Fase 77: reações em tempo real via emoji (só emojis, sem texto).
 
-    O handler valida estritamente: o emoji deve pertencer à categoria enviada
-    — nada de texto, URLs ou caracteres não-emoji passam (invariante #4:
-    payload malformado aborta silenciosamente). Não persiste estado de jogo
-    (é broadcast efêmero como Instagram Live): não chama `salvar_sala` nem
-    `ia.processar`.
+    O handler valida estritamente: o emoji precisa estar na whitelist global
+    (`EMOJIS_PERMITIDOS`) — nada de texto, URLs ou caracteres não-emoji passam
+    (invariante #4: payload malformado aborta silenciosamente). A `categoria` do
+    payload é IGNORADA; o servidor recalcula a canônica do emoji. Não persiste
+    estado de jogo (é broadcast efêmero como Instagram Live): não chama
+    `salvar_sala` nem `ia.processar`.
 
     `lock_distribuido=False`: não há read-modify-write de estado da sala, só
     um emit — o lock distribuído do Upstash seria despesa de comandos à toa
@@ -2124,27 +2153,19 @@ def enviar_emoji_chat(dados, lobby, jogador):
     if lobby.status not in ('espera', 'jogando'):
         return
     emoji = dados.get('emoji', '')
-    categoria = dados.get('categoria', '') or 'geral'
     # Validação estrita: emoji obrigatório, string pura, na lista canônica.
     if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
         return
-    # A categoria controla a renderização no cliente, mas o emoji é validado
-    # contra o conjunto global — um "provocativo" não pode vir com um emoji
-    # "amigável" e vice-versa. Normaliza para a categoria canônica do emoji.
-    categoria_canonica = 'geral'
-    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
-        if emoji in emojis:
-            categoria_canonica = cat
-            break
     emit('chat_emoji', {
         'jogador': jogador.username or '',
         'emoji': emoji,
-        'categoria': categoria_canonica,
+        'categoria': _categoria_canonica_emoji(emoji),
      }, to=lobby.sala_room())
 
 
 @socketio.on('chat_reagindo')
-@evento_mutavel(lock_distribuido=False, cooldown=COOLDOWN_CHAT)
+@evento_mutavel(lock_distribuido=False, cooldown=COOLDOWN_CHAT,
+                cooldown_chave='chat_reagindo')
 @autenticar()
 def chat_reagindo(dados, lobby, jogador):
     """
@@ -2152,22 +2173,19 @@ def chat_reagindo(dados, lobby, jogador):
     `chat_emoji`, o cliente que clicou no emoji emite este evento para que o
     resto da sala veja "João está reagindo… 😎" — broadcast leve, sem estado.
 
-    Validação idêntica ao `enviar_emoji_chat`: o emoji deve estar na whitelist.
+    A validação é a mesma do `enviar_emoji_chat` (emoji na whitelist global; a
+    `categoria` é recalculada). Usa `cooldown_chave='chat_reagindo'` para não
+    dividir a janela de cooldown com o `enviar_emoji_chat` do MESMO sid — sem
+    isso o preview consumia a janela e o emoji real era dropado em silêncio.
     Não persiste nem chama `salvar_sala`/`ia.processar`.
     """
     emoji = dados.get('emoji', '')
     if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
         return
-    categoria = dados.get('categoria', '') or 'geral'
-    # Normaliza a categoria canônica do emoji (mesmo do chat emitido).
-    for cat, emojis in EMOJIS_POR_CATEGORIA.items():
-        if emoji in emojis:
-            categoria = cat
-            break
     emit('chat_reagindo', {
         'jogador': jogador.username or '',
         'emoji': emoji,
-        'categoria': categoria,
+        'categoria': _categoria_canonica_emoji(emoji),
     }, to=lobby.sala_room())
 
 

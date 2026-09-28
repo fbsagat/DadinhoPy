@@ -372,6 +372,51 @@ def teste_v2_cooldown():
     _ok("V2 (cooldown)")
 
 
+def teste_chat_emoji_cooldown_proprio():
+    """
+    Fase 77: o preview (`chat_reagindo`) e o emoji (`enviar_emoji_chat`) não
+    podem dividir a MESMA janela de cooldown por sid — antes o preview consumia
+    a janela e o emoji real era dropado em silêncio (a sala nunca via o emoji).
+    Cada evento agora tem o próprio balde (`cooldown_chave`); o rate limit do
+    emoji em si continua valendo.
+    """
+    _limpar()
+    modulo_app.tem_cooldown = funcoes_gerais.tem_cooldown
+    _sleep_real = time.sleep
+    try:
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        _sleep_real(0.6)
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        _sleep_real(0.6)
+        c2.get_received()
+
+        # Preview + emoji em sequência imediata (como o cliente emite).
+        c1.emit("chat_reagindo", {"chave": cs1["chave_secreta"], "emoji": "😎",
+                                  "categoria": "provocativo"})
+        c1.emit("enviar_emoji_chat", {"chave": cs1["chave_secreta"], "emoji": "😎",
+                                      "categoria": "provocativo"})
+        eventos = c2.get_received()
+        assert _contar_eventos(eventos, "chat_reagindo") == 1, \
+            "o preview deve chegar à sala"
+        assert _contar_eventos(eventos, "chat_emoji") == 1, \
+            "o emoji real NÃO pode ser dropado pelo cooldown do preview"
+
+        # O rate limit do emoji continua: um segundo emoji imediato é dropado.
+        c1.emit("enviar_emoji_chat", {"chave": cs1["chave_secreta"], "emoji": "🔥",
+                                      "categoria": "provocativo"})
+        eventos = c2.get_received()
+        assert _contar_eventos(eventos, "chat_emoji") == 0, \
+            "emoji em rajada continua limitado pelo cooldown"
+        c1.disconnect()
+        c2.disconnect()
+    finally:
+        modulo_app.tem_cooldown = lambda *a, **k: False
+    _limpar()
+    _ok("chat: preview e emoji têm cooldown próprio (Fase 77)")
+
+
 def teste_conferencia_ok_sem_cooldown():
     """
     O "Ok" da conferência não pode ser derrubado pelo cooldown de escrita (0,5s).
@@ -2740,6 +2785,20 @@ def teste_recupera_jogador_substituido_na_partida():
     assert lobby.pagina == 2, "a mesa precisa estar aberta para a substituição"
     ana_chave = cs1["chave_secreta"]
 
+    # Determinismo: quem abre a rodada é SORTEADO. Põe a vez na Ana para o
+    # substituto ter um turno de ABERTURA: sem aposta anterior a IA não pode
+    # desconfiar (o bot prudente desconfia da aposta mínima e mandaria a rodada
+    # para a conferência, e o snapshot pós-retomada não seria o da mesa). Sem
+    # isto, o teste falhava sempre que o humano era o sorteado.
+    partida = lobby.partidas[-1]
+    rodada = partida.rodadas[-1]
+    ana_jog = next(j for j in partida.jogadores if j.username == "Ana")
+    if rodada.vez_atual is not ana_jog:
+        rodada.vez_atual = ana_jog
+        modulo_store.salvar_sala(lobby)
+    assert rodada.vez_atual.username == "Ana", \
+        "pré-condição: a vez tem que ser da Ana (a futura substituta)"
+
     # Ana cai; graça 0 (runner de integração) → vira IA (Bia ainda ativa). A IA
     # joga no lugar: deixa a partida avançar antes da volta.
     c1.disconnect()
@@ -2780,6 +2839,56 @@ def teste_recupera_jogador_substituido_na_partida():
     c2.disconnect()
     _limpar()
     _ok("recupera jogador substituído pela IA a qualquer momento da partida (P-Recover)")
+
+
+def teste_retomada_nao_duplica_apelido():
+    """
+    Fase 76: se o apelido base foi reocupado enquanto o humano estava
+    substituído por IA (ex.: um espectador assumiu o mesmo nome), a retomada
+    NÃO tira o `🤖` — dois apelidos iguais dariam o mesmo `id` de card no
+    cliente e um card receberia os dados do outro. O humano volta ao controle,
+    mas com o nome marcado (único).
+    """
+    import ia
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                   "config": {"substituir_desconectado_por_ia": True}})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+    ana_chave = cs1["chave_secreta"]
+    c1.disconnect()
+    c2.emit("verificar_desconectados")
+    lobby = modulo_store.carregar_sala(SALA)
+    assert any(j.username == f"{ia.MARCADOR_IA}Ana" for j in lobby.jogadores), \
+        "pré-condição: Ana virou bot marcado"
+
+    # Um terceiro entra como espectador e assume o apelido base "Ana".
+    c3, cs3, _ = _conectar()
+    c3.emit("apelido", {"apelido_msg": "Ana"})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert any(e.username == "Ana" for e in lobby.espectadores), \
+        "pré-condição: o espectador precisa ter assumido 'Ana'"
+
+    # Ana retoma: o nome base colide, então o `🤖` é mantido (nome único).
+    c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+    c1b.emit("retomar_identidade", {"chave": ana_chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.chave_secreta == ana_chave)
+    assert ana.is_ia is False, "o controle volta ao humano"
+    assert ana.username == f"{ia.MARCADOR_IA}Ana", \
+        f"com o nome base ocupado, mantém o marcador, veio {ana.username!r}"
+    nomes = ([j.username for j in lobby.jogadores]
+             + [e.username for e in lobby.espectadores])
+    assert len(nomes) == len(set(nomes)), f"apelidos não podem duplicar: {nomes}"
+    c1b.disconnect()
+    c2.disconnect()
+    c3.disconnect()
+    _limpar()
+    _ok("retomada não duplica apelido quando o nome base foi reocupado (Fase 76)")
 
 
 def teste_grace_espera_preserva_identidade():
@@ -3394,6 +3503,7 @@ def verificar_integracao():
         ("sala-sem-jogadores", teste_sala_sem_jogadores_promove_espectador),
         ("config-nome", teste_config_nome_roundtrip),
         ("conf-ok-cooldown", teste_conferencia_ok_sem_cooldown),
+        ("chat-emoji-cooldown", teste_chat_emoji_cooldown_proprio),
         ("refresh-reconstrucao", teste_refresh_snapshot_reconstrucao),
     ]
     testes_seed = [
@@ -3441,6 +3551,7 @@ def verificar_integracao():
         ("sair-da-sala-lobby", teste_sair_da_sala_lobby),
         ("sair-da-sala-eliminado", teste_sair_da_sala_eliminado),
         ("recupera-substituido-na-partida", teste_recupera_jogador_substituido_na_partida),
+        ("retomada-sem-duplicar-apelido", teste_retomada_nao_duplica_apelido),
         ("apelido-editavel", teste_apelido_editavel_ate_pronto),
         ("ficar-pronto-sem-apelido", teste_ficar_pronto_sem_apelido_bloqueado),
         ("lobby-lotado", teste_lobby_lotado_so_quando_lotar),

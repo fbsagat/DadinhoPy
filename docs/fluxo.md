@@ -22,7 +22,7 @@ Eventos sempre escopados à room da sala (`to=sala_<id>`) no namespace global.
 - **Conferência (3):** todos confirmam `conferencia_final` (gated por `lobby.pagina == 3`); `cards_conferencia` + `rendimento` narrado. Perdedor perde dados; fim da rodada → `reset_rodada` (ou `reset_partida` com pontos e nova rodada) e volta à página 1 (ou página 4 se alguém zerou).
 - **Vitória (4):** `vencedor_da_partida` + `soltar_fogos`; todos confirmam `vencedor_final` (gated por `lobby.pagina == 4`) para `reset_partida` → página 0.
 - **Status de confirmação (Fase 22):** servidor emite `rolagem_status`/`conferencia_status`/`vitoria_status` (`{confirmados, pendentes, total}` com apelidos) sempre que alguém rola/confirma (também para IAs em `ia.processar`, remoção por desconexão e no snapshot). O cliente mostra fichas `✓ nome`/`⏳ nome` em `renderizar_status_confirmacao`.
-- **Jogada automática (Fase 21):** `tempo_max_jogada` + `autojogar` rola/aposta/desconfia/confirma pelo atrasado com o motor da IA; referências de tempo persistidas (`rodada.vez_em`, `rodada.inicio_rolagem_em`, `rodada.conferencia_em`, `partida.vitoria_em`).
+- **Jogada automática (Fase 21):** `tempo_max_jogada` + `autojogar` rola/aposta/desconfia/confirma pelo atrasado com o motor da IA; referências de tempo persistidas (`rodada.vez_em`, `rodada.inicio_rolagem_em`, `rodada.conferencia_em`, `partida.vitoria_em`). O relógio do **primeiro turno** começa quando a rolagem acaba: `Rodada.iniciar_turnos` (chamado por `joguei_dados` quando o último confirma) recarimba `vez_em` com o tempo cheio — senão o primeiro da vez pagava a rolagem com o tempo do turno. Para ser idempotente, `joguei_dados` só faz a transição na **página 1** (`lobby.pagina == 1`): um reenvio já na mesa não re-roda `iniciar_turnos` nem deixa o jogador da vez estender o próprio turno.
 - **Rede de segurança da jogada automática (Fase 75):** o `autojogar` nasce do contador regressivo do **cliente**, então uma aba em segundo plano, um socket reconectado em outra instância ou um evento perdido deixavam a sala parada esperando aquele humano (sem erro e sem aviso). O `heartbeat` passou a ser a rede: `_tem_prazo_vencido` (lê o cache, só decide se vale entrar no lock) força o caminho lockado, e `_autojogar_vencidos` age por **todos** os humanos vencidos dentro do lock, com leitura fresca, rodando o motor da IA exatamente como o `autojogar` faria. O handler `autojogar` continua jogador-específico. `tempo_max_jogada=0` desliga os dois caminhos.
 - **Contador da jogada automática (Fase 75):** o badge `#contador_jogada` vive na camada `#camada_contador`, **irmã** das telas (fora do `#app-main`). Antes ele morava dentro de `#tela_partida`, que ganha `display:none` em toda troca de página — o relógio corria invisível nas páginas 1/3/4 e o servidor auto-confirmava o "Ok" sem o jogador ver. `posicionar_contador_jogada` (chamada em `mudar_pagina`) move o elemento no DOM: na página de turnos (2) ele volta para dentro de `#rodape_acao` (rodapé do layout de app do mobile, Fase 33/M3) e nas demais fica na camada, que nunca é escondida. Espectador não tem botão de "Ok" nem é da vez, então não recebe relógio.
 
@@ -82,7 +82,7 @@ Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a
 | `vencedor_final` (`chave`) | `vencedor_final` | chave, cooldown=None, gated página 4 |
 | `foguetear_click` (`chave`) | `foguetear_click` | + chave |
 | `enviar_emoji_chat` (`chave`, `emoji`, `categoria`) | `enviar_emoji_chat` (Fase 77) | + chave; cooldown=COOLDOWN_CHAT; lock_distribuido=False; valida emoji contra whitelist (invariante #4) |
-| `chat_reagindo` (`chave`, `emoji`, `categoria`) | `chat_reagindo` (Fase 77) | + chave; mesmo rate-limit/cooldown; preview de reação antes do emoji (typing indicator) |
+| `chat_reagindo` (`chave`, `emoji`, `categoria`) | `chat_reagindo` (Fase 77) | + chave; cooldown próprio (`cooldown_chave='chat_reagindo'`), para o preview não consumir a janela do `enviar_emoji_chat`; preview de reação antes do emoji (typing indicator) |
 
 ### Servidor → cliente (emits → `socket.on` em `static/script.js`)
 
@@ -132,6 +132,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `seed_revelar` | funcoes_gerais:361 | sala | 3161 |
 | `seed_revelacao` | app.py:695 | sala | 3175 |
 | `auditoria_partida` | funcoes_gerais:329 | cliente | 3300 |
-| `chat_emoji` (`jogador`, `emoji`, `categoria`) | app.py:enviar_emoji_chat (Fase 77) | sala | 5768 |
+| `chat_emoji` (`jogador`, `emoji`, `categoria`) | app.py:enviar_emoji_chat (Fase 77) | sala | 5871 |
+| `chat_reagindo` (`jogador`, `emoji`, `categoria`) | app.py:chat_reagindo (Fase 77) | sala | 5862 |
 
 > Legenda de escopo: "sala" = `to=lobby.sala_room()`; "cliente" = `to=jogador.client_id`. Confira sempre o `emit` real antes de assumir.

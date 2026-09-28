@@ -255,6 +255,28 @@ def marcar_substituto(lobby, jogador):
     return nome
 
 
+def desmarcar_substituto(lobby, jogador):
+    """
+    Fase 76: inverso de `marcar_substituto` — tira o `🤖` do apelido quando o
+    humano retoma a identidade (`retomar_identidade`).
+
+    Simétrico ao `marcar_substituto`: se o apelido base colidir com outro nome
+    em uso na sala (alguém assumiu o nome enquanto o humano estava ausente, ex.:
+    um espectador com o mesmo apelido), **mantém o `🤖`** em vez de duplicar. O
+    apelido é a chave dos `id`s dos cards no cliente; dois nomes iguais dariam o
+    mesmo `id` e um card passaria a receber os dados do outro. O nome marcado é
+    único (ninguém o toma naturalmente), então é o fallback seguro; a narração de
+    retorno já anuncia que o humano reassumiu o controle.
+    """
+    nome = remover_marcador_ia(jogador.username)
+    if nome == jogador.username:
+        return jogador.username
+    if nome in _nomes_em_uso(lobby) - {jogador.username}:
+        return jogador.username
+    jogador.username = nome
+    return nome
+
+
 def nome_livre(lobby, apelido=None):
     """
     Apelido de bot que é único na sala e cabe no limite — sem busca.

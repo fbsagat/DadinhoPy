@@ -59,32 +59,97 @@ function _chave_armazenamento(sala) {
 // Lê a chave: localStorage por sala (compartilhada entre abas) com fallback para
 // a entrada legacy por-aba — migra-a na primeira leitura e limpa a sessionStorage
 // para não deixar a aba antiga com identidade dupla.
-function ler_chave_resumo(sala) {
-    if (sala) {
-        const local = localStorage.getItem(_chave_armazenamento(sala));
-        if (local) {
-            return local;
+// Chaves de identidade antigas não se acumulam para sempre: a entrada é
+// gravada como `{c: chave, t: timestamp}` e expira em 24h (uma partida/sessão
+// nunca dura tanto). O formato legado (string pura) é lido como fresco e migra
+// no próximo `gravar`. Todo acesso a storage é blindado.
+const CHAVE_RESUMO_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Decodifica o valor gravado: `{c, t}` (novo) ou string pura (legado, sem
+// timestamp — tratado como fresco para não descartar quem atualizou agora).
+function _decodificar_chave(bruto) {
+    if (!bruto) {
+        return null;
+    }
+    if (bruto[0] === '{') {
+        try {
+            const obj = JSON.parse(bruto);
+            if (obj && typeof obj.c === 'string' && typeof obj.t === 'number') {
+                return obj;
+            }
+        } catch (erro) { /* cai no legado abaixo */ }
+    }
+    return { c: bruto, t: Date.now() };
+}
+
+function _gravar_chave_local(sala, chave) {
+    localStorage.setItem(_chave_armazenamento(sala),
+        JSON.stringify({ c: chave, t: Date.now() }));
+}
+
+// Remove entradas `dadinho_chave*` expiradas (varre só quando grava/lembra, então
+// o custo é raro). Sem isso, cada sala visitada deixaria uma chave para sempre.
+function _purgar_chaves_expiradas() {
+    try {
+        const agora = Date.now();
+        const remover = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const nome = localStorage.key(i);
+            if (!nome) continue;
+            if (nome !== CHAVE_ID && nome.indexOf(CHAVE_ID + ':') !== 0) continue;
+            const entrada = _decodificar_chave(localStorage.getItem(nome));
+            if (entrada && agora - entrada.t > CHAVE_RESUMO_TTL_MS) {
+                remover.push(nome);
+            }
         }
+        remover.forEach(function (nome) { localStorage.removeItem(nome); });
+    } catch (erro) { /* storage indisponível */ }
+}
+
+function ler_chave_resumo(sala) {
+    // Um throw aqui aborta o boot do IIFE (sem socket). Sem storage a retomada
+    // cross-tab não funciona, mas o jogo segue.
+    try {
+        _purgar_chaves_expiradas();
+        if (sala) {
+            const entrada = _decodificar_chave(
+                localStorage.getItem(_chave_armazenamento(sala)));
+            if (entrada) {
+                if (Date.now() - entrada.t > CHAVE_RESUMO_TTL_MS) {
+                    localStorage.removeItem(_chave_armazenamento(sala));
+                } else {
+                    return entrada.c;
+                }
+            }
+        }
+        // Legado per-aba: migra para a chave por sala na primeira leitura.
+        const legacy = sessionStorage.getItem(CHAVE_ID) || '';
+        if (legacy && sala) {
+            _gravar_chave_local(sala, legacy);
+        }
+        sessionStorage.removeItem(CHAVE_ID);
+        return legacy;
+    } catch (erro) {
+        return '';
     }
-    const legacy = sessionStorage.getItem(CHAVE_ID) || '';
-    if (legacy && sala) {
-        localStorage.setItem(_chave_armazenamento(sala), legacy);
-    }
-    sessionStorage.removeItem(CHAVE_ID);
-    return legacy;
 }
 function gravar_chave_resumo(chave) {
-    if (chave && sala_atual) {
-        localStorage.setItem(_chave_armazenamento(sala_atual), chave);
-    }
-    sessionStorage.removeItem(CHAVE_ID);
+    try {
+        _purgar_chaves_expiradas();
+        if (chave && sala_atual) {
+            _gravar_chave_local(sala_atual, chave);
+        }
+        sessionStorage.removeItem(CHAVE_ID);
+    } catch (erro) { /* storage indisponível: sem retomada cross-tab */ }
 }
 function limpar_chave_resumo() {
-    if (sala_atual) {
-        localStorage.removeItem(_chave_armazenamento(sala_atual));
-    }
-    localStorage.removeItem(CHAVE_ID);
-    sessionStorage.removeItem(CHAVE_ID);
+    try {
+        if (sala_atual) {
+            localStorage.removeItem(_chave_armazenamento(sala_atual));
+        }
+        localStorage.removeItem(CHAVE_ID);
+        sessionStorage.removeItem(CHAVE_ID);
+    } catch (erro) { /* storage indisponível */ }
 }
 let chave_resumo = (sala_atual && ler_chave_resumo(sala_atual)) || '';
 // Fase 46 (VPS): URL pública da API de socket.io lida do `<meta
@@ -232,11 +297,21 @@ let _tentativas_reconexao = 0;
 let _conexao_recusada = false;
 
 function _extrair_status_http(erro) {
+    // Só confia em campos estruturados; o texto da mensagem é último recurso e
+    // só casa os três códigos de bloqueio de borda (429/403/503) — um regex
+    // genérico de 4xx/5xx dava falso-positivo em mensagens que contêm qualquer
+    // número de 3 dígitos (ex.: um id de sala).
     if (!erro) return null;
     if (typeof erro.code === 'number') return erro.code;
     if (erro.req && typeof erro.req.status === 'number') return erro.req.status;
-    const match = typeof erro.message === 'string' && erro.message.match(/\b(4[0-9]{2}|5[0-9]{2})\b/);
-    return match ? parseInt(match[0], 10) : null;
+    if (erro.context) {
+        if (typeof erro.context.status === 'number') return erro.context.status;
+        if (erro.context.response && typeof erro.context.response.status === 'number') {
+            return erro.context.response.status;
+        }
+    }
+    const match = typeof erro.message === 'string' && erro.message.match(/\b(429|403|503)\b/);
+    return match ? parseInt(match[1], 10) : null;
 }
 
 socket.on('connect_error', function (erro) {
@@ -1949,13 +2024,22 @@ function processar_acelerometro(event) {
     }
 }
 
+// O shake só pode funcionar com o sensor disponível, em mobile e num
+// contexto seguro. É a mesma condição de `ativar_shake_dados`, exposta para o
+// hint não prometer um gesto que o aparelho/navegador não entrega.
+function shake_disponivel() {
+    return eh_mobile()
+        && typeof DeviceMotionEvent !== 'undefined'
+        && window.isSecureContext === true;
+}
+
 function desativar_shake_dados() {
     if (shake_listener_ativo) {
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            DeviceMotionEvent.removeEventListener('devicemotion', processar_acelerometro);
-        } else {
-            window.removeEventListener('devicemotion', processar_acelerometro);
-        }
+        // `devicemotion` dispara em `window` — nunca em `DeviceMotionEvent`
+        // (que só tem o estático `requestPermission`). Ouvir/remover do
+        // `DeviceMotionEvent` lançava TypeError silenciosa no `.catch` e o
+        // listener jamais era anexado no iOS.
+        window.removeEventListener('devicemotion', processar_acelerometro);
         shake_listener_ativo = false;
     }
     shake_amostras = [];
@@ -1966,15 +2050,7 @@ function desativar_shake_dados() {
 }
 
 function ativar_shake_dados() {
-    if (!eh_mobile()) {
-        return;
-    }
-    if (typeof DeviceMotionEvent === 'undefined') {
-        return;
-    }
-    // Chrome 76+: DeviceMotion exige contexto seguro (HTTPS ou localhost).
-    // Em HTTP via IP local, o evento `devicemotion` nunca dispara.
-    if (!window.isSecureContext) {
+    if (!shake_disponivel()) {
         return;
     }
     desativar_shake_dados();
@@ -1986,7 +2062,7 @@ function ativar_shake_dados() {
             DeviceMotionEvent.requestPermission()
                 .then(function (state) {
                     if (state === 'granted') {
-                        DeviceMotionEvent.addEventListener('devicemotion', processar_acelerometro);
+                        window.addEventListener('devicemotion', processar_acelerometro);
                         shake_listener_ativo = true;
                     }
                 })
@@ -2138,8 +2214,9 @@ socket.on('construtor_dados', function (data) {
     status_rol.style.maxWidth = '40rem';
     tela_jogar_dados.appendChild(status_rol);
 
-    // Shake to roll (mobile): hint visual — só para quem pode rolar.
-    if (!eh_espectador) {
+    // Shake to roll (mobile): hint visual — só para quem pode rolar E num
+    // aparelho/contexto em que o sensor realmente entrega o evento.
+    if (!eh_espectador && shake_disponivel()) {
         const hint = document.createElement('div');
         hint.id = 'shake_hint_mobile';
         hint.className = 'shake-hint-mobile';
@@ -5836,9 +5913,9 @@ function enviar_emoji_chat(emoji, categoria) {
         emoji: emoji,
         categoria: categoria,
     });
-    // Auto-reação: mostra o emoji que o jogador mandou (feedback imediato).
-    _mostrar_emoji_flutuante(nome_jogador, emoji, categoria, true);
-    tocar_som_chat();
+    // Sem eco local: o servidor rebroadcasta o `chat_emoji` para a room
+    // INCLUINDO o autor — o emoji/som chegam pelo mesmo caminho dos demais
+    // (antes o autor via o emoji e ouvia o pop em dobro).
 }
 
 // Preview de reação: "João está reagindo… 😎" — indicador fixo que desaparece
@@ -5860,7 +5937,9 @@ socket.on('chat_emoji', function (data) {
     }
     // Limpa o preview daquele jogador: o emoji chegou, o indicador vai embora.
     _limpar_preview_reagindo(data.jogador || '');
-    _mostrar_emoji_flutuante(data.jogador || '', data.emoji, data.categoria || 'geral', false);
+    // Auto-reação (o próprio emoji voltando pelo broadcast) fica mais fraca.
+    const auto = (data.jogador || '') === nome_jogador;
+    _mostrar_emoji_flutuante(data.emoji, data.jogador || '', auto);
     tocar_som_chat();
 });
 
@@ -5891,14 +5970,17 @@ function _limpar_preview_reagindo(nome) {
     }
 }
 
-function _mostrar_emoji_flutuante(nome, emoji, categoria, auto) {
+function _mostrar_emoji_flutuante(emoji, nome, auto) {
     const container = document.getElementById('chat_emoji_floating');
     if (!container) {
         return;
     }
     const span = document.createElement('span');
     span.className = 'chat-emoji-flutuante';
-    span.textContent = emoji;
+    // Mostra o nome + emoji do jogador (ex.: "João: 😎") — o nome identifica
+    // quem reagiu, como o badge de preview ao lado do botão de chat.
+    span.innerHTML = '<span class="chat-emoji-nome">' +
+        (nome || '') + ':</span> ' + emoji;
     // Posiciona horizontalmente de forma aleatória, evitando a borda.
     const margem = 12;
     const maxX = Math.max(0, window.innerWidth - margem * 2 - 80);
@@ -5909,14 +5991,13 @@ function _mostrar_emoji_flutuante(nome, emoji, categoria, auto) {
         span.style.opacity = '0.7';
     }
     container.appendChild(span);
-    // Auto-remove após a animação terminar (CSS: fade-up 3s, depois display none).
-    const timer = setTimeout(function () {
+    // O CSS remove o span sozinho ao fim da animação (`forwards`); o timer
+    // garante a limpeza do DOM se a animação não rodar (aba oculta/`reduced`).
+    setTimeout(function () {
         if (span.parentNode) {
             span.parentNode.removeChild(span);
         }
     }, 3200);
-    // Caso o picker abra/feche e o container suma, limpa o timer.
-    span._limpar = function () { clearTimeout(timer); };
 }
 
 // Som de chat: "pop" curto sintetizado via Web Audio (sem depender de .mp3).
