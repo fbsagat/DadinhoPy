@@ -1026,13 +1026,17 @@ def executar_acao(jogador, rodada, acao):
 # - `_processar_vitoria`: o campeão da partida reage com celebração.
 
 # Probabilidade base de um bot reagir a um evento que o envolve diretamente.
-CHANCE_REACAO_EMOJI = 0.55
-# Probabilidade de um bot observador reagir a um evento alheio (menor).
-CHANCE_REACAO_OBSERVADOR = 0.15
+# Fase 77: reduzida — reações esparsas durante a partida soam mais naturais
+# (um clique ocasional no picker), reservando o spam pro desfecho.
+CHANCE_REACAO_EMOJI = 0.30
+# Probabilidade de um observador reagir a um evento alheio (ainda menor).
+CHANCE_REACAO_OBSERVADOR = 0.08
+# Probabilidade de reagir à vitória/derrota do desafio (conferência).
+CHANCE_REACAO_CONFERENCIA = 0.75
 # Probabilidade de reagir à vitória da partida.
-CHANCE_REACAO_VITORIA = 0.85
+CHANCE_REACAO_VITORIA = 0.95
 # Probabilidade de reagir ao coringa ser ativado (aposta no 1).
-CHANCE_REACAO_CORINGA = 0.40
+CHANCE_REACAO_CORINGA = 0.25
 
 # Emojis por tipo de reação — todos dentro de EMOJIS_PERMITIDOS
 # (validados por funcoes_gerais.bot_enviar_emoji; nada fora da whitelist).
@@ -1159,6 +1163,10 @@ def reagir_emoji_conferencia(lobby, rodada):
     antes de `construir_rodada`). O vencedor celebra, o perdedor reage conforme
     o tipo de derrota (ou reage com eliminação se perdeu o último dado), e os
     demais (observadores) comentam com chance baixa.
+
+    Fase 77: vitória/derrota da conferência usam `CHANCE_REACAO_CONFERENCIA`
+    (mais alta que a base) e mandam 2 emojis — reações fortes em momentos fortes
+    soam mais naturais que um emoji solitário.
     """
     if rodada is None:
         return
@@ -1172,18 +1180,33 @@ def reagir_emoji_conferencia(lobby, rodada):
     saiu = conferencia.get('saiu_da_partida', '')
     # Vencedor da conferência reage (celebração ou confirmação).
     if vencedor is not None and vencedor.is_ia:
-        if random.random() < _chance_reacao(vencedor):
+        if random.random() < CHANCE_REACAO_CONFERENCIA:
             emoji = _escolher_emoji_conferencia(vencedor, vencedor, verdadeira)
             if emoji:
                 funcoes_gerais.bot_enviar_emoji(lobby, vencedor, emoji)
+                # Extra dramático na vitória do desafio (pegou blefe ou confirmou).
+                if random.random() < 0.6:
+                    extra = random.choice(_EMOJI_DESCONFIANCA_ACERTO)
+                    funcoes_gerais.bot_enviar_emoji(lobby, vencedor, extra,
+                                                    ignorar_cooldown=True)
     # Perdedor reage (vergonha, defiante ou eliminação).
     if perdedor is not None and perdedor.is_ia:
-        if random.random() < _chance_reacao(perdedor):
+        if random.random() < CHANCE_REACAO_CONFERENCIA:
             eliminado = bool(saiu) and perdedor.username == saiu
             emoji = _escolher_emoji_conferencia(perdedor, vencedor, verdadeira,
                                                  eliminado=eliminado)
             if emoji:
                 funcoes_gerais.bot_enviar_emoji(lobby, perdedor, emoji)
+                # Extra na eliminação (reaja duas vezes — foi eliminado!).
+                if eliminado and random.random() < 0.7:
+                    extra = random.choice(_EMOJI_ELIMINACAO)
+                    funcoes_gerais.bot_enviar_emoji(lobby, perdedor, extra,
+                                                    ignorar_cooldown=True)
+                # Extra na derrota normal.
+                elif not eliminado and random.random() < 0.5:
+                    extra = random.choice(_EMOJI_DEFIANTE)
+                    funcoes_gerais.bot_enviar_emoji(lobby, perdedor, extra,
+                                                    ignorar_cooldown=True)
     # Observadores reagem com chance baixa.
     for jogador in rodada.jogadores:
         if jogador.is_ia and jogador not in (vencedor, perdedor):
@@ -1197,6 +1220,9 @@ def reagir_emoji_vitoria(lobby):
     """
     O bot campeão reage à vitória da partida (chamado em `_processar_vitoria`,
     antes do reset para o lobby).
+
+    Fase 77: campeão manda uma rajada de 3 emojis — é o clímax, vale a
+    celebração (o `ignorar_cooldown` libera os emojis rápidos em sequência).
     """
     partida = _partida_atual(lobby)
     if partida is None or partida.vencedor_final is None:
@@ -1205,7 +1231,10 @@ def reagir_emoji_vitoria(lobby):
     if not vencedor.is_ia:
         return
     if random.random() < CHANCE_REACAO_VITORIA:
-        funcoes_gerais.bot_enviar_emoji(lobby, vencedor, random.choice(_EMOJI_VITORIA))
+        for _ in range(3):
+            funcoes_gerais.bot_enviar_emoji(lobby, vencedor,
+                                            random.choice(_EMOJI_VITORIA),
+                                            ignorar_cooldown=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1454,15 +1483,21 @@ def _processar_conferencia(lobby):
     if partida is None or not partida.rodadas:
         return False
     rodada = partida.rodadas[-1]
+    confirmou_alguma = False
     for jogador in list(rodada.jogadores):
         if jogador.is_ia and not jogador.confirmou_rodada:
             jogador.confirmou_rodada = True
             rodada.conferiram += 1
+            confirmou_alguma = True
     # Fase 22: humanos acompanham em tempo real quem já confirmou (as IAs
     # confirmam na hora; sem isto o status ficaria desatualizado).
     funcoes_gerais.emitir_status_conferencia(lobby)
-    # Fase 77: bots reagem ao resultado do desafio antes de abrir a próxima rodada.
-    reagir_emoji_conferencia(lobby, rodada)
+    # Fase 77: reage UMA vez, no instante em que as IAs confirmam (o primeiro
+    # `processar` da conferência). Sem o guard, cada `processar` seguinte
+    # (heartbeat, OK do humano, poll) re-lançava as reações: elas acumulavam e
+    # estouravam de uma vez na tela de conferência.
+    if confirmou_alguma:
+        reagir_emoji_conferencia(lobby, rodada)
     # Fecha mesmo sem nova confirmação agora: o contador já pode estar completo
     # (ex.: um humano caiu na conferência depois de as IAs confirmarem) e, sem
     # isto, a rodada ficaria presa para sempre na tela de conferência.
@@ -1474,14 +1509,18 @@ def _processar_conferencia(lobby):
 
 def _processar_vitoria(lobby):
     """Confirma a vitória das IAs e volta ao lobby quando todos confirmam."""
+    confirmou_alguma = False
     for jogador in list(lobby.jogadores):
         if jogador.is_ia and not jogador.confirmou_vencedor:
             jogador.confirmou_vencedor = True
             lobby.conferiram_vencedor += 1
+            confirmou_alguma = True
     # Fase 22: idem `_processar_conferencia` — status em tempo real.
     funcoes_gerais.emitir_status_vitoria(lobby)
-    # Fase 77: o bot campeão reage com celebração antes do reset para o lobby.
-    reagir_emoji_vitoria(lobby)
+    # Fase 77: reage UMA vez, quando as IAs confirmam (mesmo guard do acúmulo da
+    # conferência — sem ele, a vitória estourava vários emojis por `processar`).
+    if confirmou_alguma:
+        reagir_emoji_vitoria(lobby)
     # Idem `_processar_conferencia`: fecha mesmo sem nova confirmação, senão a
     # tela de vitória fica presa quando o contador já está completo.
     if lobby.conferiram_vencedor >= len(lobby.jogadores):

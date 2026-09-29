@@ -405,6 +405,38 @@ let processando_eventos = false;
 const MAX_ATRASO_FILA = 8000;
 let atraso_pendente_total = 0;
 
+// Fase 77: emojis de bot que chegaram com uma troca de página ainda pendente na
+// fila. Ficam segurados até o `mudar_pagina` ser processado; sem isso o emoji
+// nasce antes de a nova tela/card entrarem e sai sem âncora (com nome) na tela
+// errada — era o caso da conferência, cujos cards só aparecem depois do
+// `atraso` da narração da desconfiança.
+const emojis_segurados = [];
+let _timer_emojis_segurados = null;
+
+function _segurar_emoji(packet) {
+    emojis_segurados.push(packet);
+    if (_timer_emojis_segurados !== null) {
+        clearTimeout(_timer_emojis_segurados);
+    }
+    // Rede de segurança: se a troca de página nunca vier, libera assim mesmo.
+    _timer_emojis_segurados = setTimeout(_liberar_emojis_segurados, 9000);
+}
+
+function _liberar_emojis_segurados() {
+    if (_timer_emojis_segurados !== null) {
+        clearTimeout(_timer_emojis_segurados);
+        _timer_emojis_segurados = null;
+    }
+    while (emojis_segurados.length) {
+        const pacote = emojis_segurados.shift();
+        try {
+            _onevent_original(pacote);
+        } catch (erro) {
+            console.error('Erro ao liberar emoji', erro);
+        }
+    }
+}
+
 function _processar_fila_eventos() {
     if (fila_eventos.length === 0) {
         processando_eventos = false;
@@ -423,6 +455,12 @@ function _processar_fila_eventos() {
         } catch (erro) {
             console.error('Erro ao processar evento', erro);
         }
+        const nome_item = (item.packet && Array.isArray(item.packet.data))
+            ? item.packet.data[0] : null;
+        if (nome_item === 'mudar_pagina') {
+            // A tela/cards novos já estão no DOM: solta os emojis segurados.
+            _liberar_emojis_segurados();
+        }
         _processar_fila_eventos();
     }, item.atraso);
 }
@@ -430,6 +468,31 @@ function _processar_fila_eventos() {
 socket.onevent = function (packet) {
     const dados = packet && Array.isArray(packet.data) ? packet.data : [];
     const nome = dados[0];
+    // Fase 77: reações de emoji são de TEMPO REAL — não entram na fila de
+    // animação. Se entrassem, ficariam presas atrás das pausas de "pensamento"
+    // dos bots (narrações com `atraso` de segundos), acumulando e só saindo
+    // quando a fila esvazia — no fim da rodada ou na vez do próprio jogador.
+    //
+    // EXCEÇÃO: reação de bot com uma troca de página PENDENTE na fila é
+    // segurada até o `mudar_pagina` concluir (ver `_segurar_emoji`) — na
+    // conferência o card ainda não existe e o emoji sairia sem âncora. A
+    // reação do PRÓPRIO jogador (`auto`) nunca é segurada: feedback imediato.
+    if (nome === 'chat_emoji' || nome === 'chat_reagindo') {
+        if (nome === 'chat_emoji') {
+            const payload_emoji = dados.length > 1 ? dados[1] : null;
+            const auto = !!payload_emoji && (payload_emoji.jogador || '') === nome_jogador;
+            const transicao_pendente = fila_eventos.some(function (item) {
+                return item.packet && Array.isArray(item.packet.data) &&
+                    item.packet.data[0] === 'mudar_pagina';
+            });
+            if (!auto && transicao_pendente) {
+                _segurar_emoji(packet);
+                return;
+            }
+        }
+        _onevent_original(packet);
+        return;
+    }
     const payload = dados.length > 1 ? dados[1] : null;
     let atraso = 0;
     if (payload && typeof payload === 'object' && Number.isFinite(Number(payload.atraso))) {
@@ -5985,6 +6048,15 @@ socket.on('chat_reagindo', function (data) {
 
 // Emite o emoji recebido como uma reação flutuante na tela.
 // `auto` = true quando é a própria reação do jogador (feedback local).
+//
+// Fase 77: os emojis entram numa fila com espaçamento mínimo. O servidor
+// resolve vários lances de bots no MESMO request (`ia.processar`), então chega
+// uma rajada de `chat_emoji` de uma vez; sem a fila, todos apareciam no mesmo
+// frame (o "solta tudo junto"). Um emoji sozinho continua imediato.
+const fila_emoji = [];
+const INTERVALO_EMOJI_MS = 260;
+let emoji_em_exibicao = false;
+
 socket.on('chat_emoji', function (data) {
     if (!data || !data.emoji) {
         return;
@@ -5993,9 +6065,27 @@ socket.on('chat_emoji', function (data) {
     _limpar_preview_reagindo(data.jogador || '');
     // Auto-reação (o próprio emoji voltando pelo broadcast) fica mais fraca.
     const auto = (data.jogador || '') === nome_jogador;
-    _mostrar_emoji_flutuante(data.emoji, data.jogador || '', auto);
-    tocar_som_chat();
+    _enfileirar_emoji(data.emoji, data.jogador || '', auto);
 });
+
+function _enfileirar_emoji(emoji, nome, auto) {
+    fila_emoji.push({ emoji: emoji, nome: nome, auto: auto });
+    if (!emoji_em_exibicao) {
+        _drenar_fila_emoji();
+    }
+}
+
+function _drenar_fila_emoji() {
+    if (!fila_emoji.length) {
+        emoji_em_exibicao = false;
+        return;
+    }
+    emoji_em_exibicao = true;
+    const item = fila_emoji.shift();
+    _mostrar_emoji_flutuante(item.emoji, item.nome, item.auto);
+    tocar_som_chat();
+    setTimeout(_drenar_fila_emoji, INTERVALO_EMOJI_MS);
+}
 
 function _mostrar_preview_reagindo(nome, emoji) {
     const indicator = document.getElementById('chat_reagindo');
@@ -6005,7 +6095,9 @@ function _mostrar_preview_reagindo(nome, emoji) {
     _limpar_preview_reagindo(nome);
     const badge = document.createElement('span');
     badge.className = 'chat-reagindo-badge';
-    badge.textContent = emoji + ' ' + (nome || '');
+    // Fase 77: só o emoji — o nome do jogador saiu do lado direito do badge
+    // (o emoji flutuante nasce em cima do card, que já identifica quem reagiu).
+    badge.textContent = emoji;
     const timer = setTimeout(function () {
         _limpar_preview_reagindo(nome);
     }, 800);
@@ -6024,6 +6116,41 @@ function _limpar_preview_reagindo(nome) {
     }
 }
 
+// Fase 77: localiza o card VISÍVEL de um jogador na tela corrente para ancorar
+// o emoji flutuante em cima dele. Os cards de turno (tela 2) têm id estável
+// (`card_<nome>`); os da conferência (tela 3) não têm id, então caem no match
+// pelo título. A visibilidade é obrigatória: na conferência o `card_<nome>` da
+// tela de turnos continua no DOM, só oculto — sem filtrar, ele era devolvido e
+// o emoji saía sem âncora. Sem card visível (telas 0/1/4 ou observador),
+// devolve null e o emoji volta ao modo viewport (com nome).
+function _card_visivel(el) {
+    if (!el) {
+        return false;
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+}
+
+function _card_do_jogador(nome) {
+    if (!nome) {
+        return null;
+    }
+    const por_id = document.getElementById('card_' + nome);
+    if (_card_visivel(por_id)) {
+        return por_id;
+    }
+    const titulos = document.querySelectorAll('#cards_conferencia .card-title');
+    for (let i = 0; i < titulos.length; i++) {
+        if (titulos[i].textContent === nome) {
+            const card = titulos[i].closest('.card');
+            if (_card_visivel(card)) {
+                return card;
+            }
+        }
+    }
+    return null;
+}
+
 function _mostrar_emoji_flutuante(emoji, nome, auto) {
     const container = document.getElementById('chat_emoji_floating');
     if (!container) {
@@ -6031,15 +6158,33 @@ function _mostrar_emoji_flutuante(emoji, nome, auto) {
     }
     const span = document.createElement('span');
     span.className = 'chat-emoji-flutuante';
-    // Mostra o nome + emoji do jogador (ex.: "João: 😎") — o nome identifica
-    // quem reagiu, como o badge de preview ao lado do botão de chat.
-    span.innerHTML = '<span class="chat-emoji-nome">' +
-        (nome || '') + ':</span> ' + emoji;
-    // Posiciona horizontalmente de forma aleatória, evitando a borda.
-    const margem = 12;
-    const maxX = Math.max(0, window.innerWidth - margem * 2 - 80);
-    const x = margem + Math.random() * maxX;
-    span.style.left = Math.round(x) + 'px';
+    // Fase 77: o emoji nasce em cima do card de quem reagiu; nesse caso o card
+    // já identifica o autor e o nome sai do balão. Sem card visível na tela
+    // (jogar dados/vitória), mantém o emoji + nome à direita, como era antes.
+    span.textContent = emoji;
+    let ancorado = false;
+    const card = _card_do_jogador(nome);
+    if (card) {
+        const rect = card.getBoundingClientRect();
+        ancorado = true;
+        span.classList.add('chat-emoji-ancorado');
+        // Jitter para a rajada (2–3 emojis no mesmo card) não empilhar no
+        // mesmo pixel: espalha um pouco no eixo X e no Y inicial.
+        const jitter_x = (Math.random() - 0.5) * rect.width * 0.5;
+        const jitter_y = Math.random() * 18;
+        span.style.left = Math.round(rect.left + rect.width / 2 + jitter_x) + 'px';
+        span.style.top = Math.round(Math.max(0, rect.top + rect.height * 0.1 + jitter_y)) + 'px';
+    }
+    if (!ancorado) {
+        // Nome à direita do emoji (textContent evita injeção pelo apelido).
+        if (nome) {
+            const nome_span = document.createElement('span');
+            nome_span.className = 'chat-emoji-nome';
+            nome_span.textContent = nome;
+            span.appendChild(nome_span);
+        }
+        _posicionar_emoji_viewport(span);
+    }
     // Auto-reação: cor mais fraca (já vimos o emoji), outrem: destacado.
     if (auto) {
         span.style.opacity = '0.7';
@@ -6052,6 +6197,15 @@ function _mostrar_emoji_flutuante(emoji, nome, auto) {
             span.parentNode.removeChild(span);
         }
     }, 3200);
+}
+
+// Fallback do emoji flutuante: flutua de baixo para cima, com X aleatório
+// (comportamento original, usado quando não há card visível para ancorar).
+function _posicionar_emoji_viewport(span) {
+    const margem = 12;
+    const maxX = Math.max(0, window.innerWidth - margem * 2 - 80);
+    const x = margem + Math.random() * maxX;
+    span.style.left = Math.round(x) + 'px';
 }
 
 // Som de chat: "pop" curto sintetizado via Web Audio (sem depender de .mp3).

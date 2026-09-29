@@ -2113,7 +2113,9 @@ h5,
 .chat-emoji-flutuante {
     position: absolute;
     bottom: 0;
-    font-size: 3rem;
+    /* Fase 77: 2.7rem (≈10% menor que os 3rem originais) — menos dominante
+       sobre os cards, sobretudo agora que nasce em cima deles. */
+    font-size: 2.7rem;
     opacity: 1;
     text-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
     animation: chat-flutuar 3s ease-out forwards;
@@ -2121,13 +2123,23 @@ h5,
     white-space: nowrap;
 }
 
-/* Nome do jogador ao lado do emoji flutuante — fonte proporcionalmente menor
-   para não dominar o emoji (3rem → ~1rem). O nome vai primeiro ("João: 😎"),
-   então o margin-right separa o nome do emoji. */
+/* Variante ancorada no card do jogador: o emoji nasce sobre o card (top/left
+   setados inline via getBoundingClientRect) e flutua para cima a partir dali.
+   `bottom: auto` libera o eixo vertical; `-0.5em` centraliza o glifo no ponto
+   horizontal do card (metade da própria fonte). */
+.chat-emoji-ancorado {
+    bottom: auto;
+    margin-left: -0.5em;
+    z-index: 1;
+}
+
+/* Nome do jogador ao lado DIREITO do emoji flutuante — usado apenas nas telas
+   sem card (jogar dados/vitória), onde a posição não identifica o autor. Fonte
+   proporcionalmente menor para não dominar o emoji (2.7rem → ~0.9rem). */
 .chat-emoji-nome {
     font-size: 0.35em;
     vertical-align: middle;
-    margin-right: 4px;
+    margin-left: 4px;
     text-shadow: none;
     opacity: 0.9;
 }

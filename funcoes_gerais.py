@@ -326,18 +326,21 @@ def _categoria_canonica_emoji(emoji):
     return 'geral'
 
 
-def bot_enviar_emoji(lobby, jogador, emoji):
+def bot_enviar_emoji(lobby, jogador, emoji, ignorar_cooldown=False):
     """
     Fase 77: emite `chat_emoji` em nome de um bot (reação inteligente ao jogo).
     O servidor é a única fonte de verdade do emoji/categoria; o rate limit por
     `client_id` do bot (balde `bot_chat:<id>`) evita spam durante laços de IAs
     assistidas. Não persiste estado — é broadcast efêmero como Instagram Live.
+
+    `ignorar_cooldown` pula o rate limit entre emojis — usado apenas para
+    reações de vitória/derrota, onde 2–3 emojis rápidos soam mais naturais.
     """
     if lobby is None or lobby.status not in ('espera', 'jogando'):
         return
     if not isinstance(emoji, str) or emoji not in EMOJIS_PERMITIDOS:
         return
-    if tem_cooldown(f"bot_chat:{jogador.client_id}", COOLDOWN_EMOJI_BOT):
+    if not ignorar_cooldown and tem_cooldown(f"bot_chat:{jogador.client_id}", COOLDOWN_EMOJI_BOT):
         return
     emit('chat_emoji', {
         'jogador': jogador.username or '',
