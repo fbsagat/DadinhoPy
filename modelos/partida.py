@@ -79,6 +79,22 @@ class Partida:
             # Declara este jogador o vencedor da partida.
             self.declarar_vencedor(verificar['vez_atual'])
         else:
+            # Fase 81: embaralhar a ordem de jogadores por rodada (modo 'rodada').
+            # Regra de quem começa (vez_atual) não muda — o embaralhamento só
+            # reorganiza a ordem circular dos demais. No verificado, a permutação
+            # vem da seed (indice_ordem com rodada_num); no legado, Fisher-Yates
+            # com secrets.randbelow.
+            if self.do_lobby.config.get('embaralhar') == 'rodada' and len(self.jogadores) > 1:
+                seed_final = getattr(self, 'seed_final', None)
+                if seed_final:
+                    ordem = seed.indice_ordem(seed_final, self.do_lobby.sala_id,
+                                              self.partida_num, len(self.jogadores),
+                                              rodada_numero)
+                    self.jogadores = [self.jogadores[i] for i in ordem]
+                else:
+                    for i in range(len(self.jogadores) - 1, 0, -1):
+                        j = secrets.randbelow(i + 1)
+                        self.jogadores[i], self.jogadores[j] = self.jogadores[j], self.jogadores[i]
             # Caso ainda tenhas dois ou mais, continua tudo:
             turnos_lista = {}
             # Fase 21: tempo máximo de jogada da sala (0 = sem jogada automática).

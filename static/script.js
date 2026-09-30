@@ -1431,6 +1431,10 @@ function aplicar_config(config) {
     if (config_tempo) {
         config_tempo.value = String(config.tempo_max_jogada);
     }
+    const config_embaralhar = document.getElementById('config_embaralhar');
+    if (config_embaralhar) {
+        config_embaralhar.value = config.embaralhar || 'rodada';
+    }
     const ia_nivel = document.getElementById('ia_nivel');
     if (ia_nivel && config.ia_nivel_padrao) {
         ia_nivel.value = String(config.ia_nivel_padrao);
@@ -1452,6 +1456,7 @@ function enviar_config() {
         ia_nivel_padrao: document.getElementById('ia_nivel').value,
         verificacao_ativa: document.getElementById('config_verificacao').checked,
         tempo_max_jogada: document.getElementById('config_tempo').value,
+        embaralhar: document.getElementById('config_embaralhar').value,
     };
     socket.emit('configurar_partida', { chave: chave_secreta, config: config });
     salvar_config_local();
@@ -1472,6 +1477,7 @@ let CONFIG_PADRAO_LOCAL = {
     ia_nivel_padrao: 3,
     verificacao_ativa: true,
     tempo_max_jogada: 60,
+    embaralhar: 'rodada',
 };
 
 function config_igual_padrao(config) {
@@ -1504,6 +1510,7 @@ function salvar_config_local() {
         ia_nivel_padrao: document.getElementById('ia_nivel').value,
         // A quantidade de IAs é só do cliente (controle do painel), não vai ao servidor.
         ia_quantidade: document.getElementById('ia_quantidade').value,
+        embaralhar: document.getElementById('config_embaralhar').value,
     };
     try {
         localStorage.setItem('dadinho_config', JSON.stringify(config));
@@ -5977,6 +5984,35 @@ socket.on('seed_revelacao', function (data) {
 async function valorDerivado(seedHex, sala, partida, rodada, clientId, indice) {
     const digestHex = await hmacHex(hexParaBytes(seedHex), `dadinho:v1:roll|${sala}|${partida}|${rodada}|${clientId}|${indice}`);
     return Number(BigInt('0x' + digestHex) % 6n) + 1;
+}
+
+// Permutação determinística da ordem de início — mesma fórmula do servidor
+// (seed.indice_ordem). Fisher-Yates (Durstenfeld): em cada passo i ∈ [total-1..1]
+// um j ∈ [0..i] é derivado via HMAC-SHA256 do domínio "dadinho:v1:order|...".
+// `rodada` (default 1) faz a permutação variar por rodada no modo por-rodada.
+async function indiceOrdem(seedHex, sala, partida, total, rodada = 1) {
+    if (total <= 1) {
+        return Array.from({ length: total }, (_, i) => i);
+    }
+    const chave = hexParaBytes(seedHex);
+    const ordem = Array.from({ length: total }, (_, i) => i);
+    for (let i = total - 1; i > 0; i--) {
+        const digestHex = await hmacHex(chave, `dadinho:v1:order|${sala}|${partida}|${rodada}|${i}`);
+        const j = Number(BigInt('0x' + digestHex) % BigInt(i + 1));
+        const tmp = ordem[i];
+        ordem[i] = ordem[j];
+        ordem[j] = tmp;
+    }
+    return ordem;
+}
+
+// Índice do jogador que começa a partida — mesma fórmula do servidor (seed.indice_inicial).
+async function indiceInicialDerivado(seedHex, sala, partida, total) {
+    if (total === 0) {
+        return 0;
+    }
+    const digestHex = await hmacHex(hexParaBytes(seedHex), `dadinho:v1:start|${sala}|${partida}`);
+    return Number(BigInt('0x' + digestHex) % BigInt(total));
 }
 
 // Confere a auditoria inteira sem confiar no servidor.

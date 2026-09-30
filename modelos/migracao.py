@@ -3,7 +3,7 @@
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 11
+VERSAO_ATUAL = 12
 
 # Janela (segundos) em que a vaga de um humano removido fica registrada no
 # lobby (Fase 30): permite o `retomar_identidade` dizer por que a retomada foi
@@ -104,6 +104,16 @@ def _migrar_v10_para_v11(dados):
     return dados
 
 
+def _migrar_v11_para_v12(dados):
+    """
+    v11 -> v12 (Fase 81): chave de configuração `embaralhar` — modo de
+    distribuição da ordem de jogadores por partida. Sala antiga (sem a key)
+    via para 'chegada' (ordem de chegada, comportamento original).
+    """
+    dados.setdefault('config', {}).setdefault('embaralhar', 'rodada')
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
@@ -115,4 +125,5 @@ MIGRACOES = {
     8: _migrar_v8_para_v9,
     9: _migrar_v9_para_v10,
     10: _migrar_v10_para_v11,
+    11: _migrar_v11_para_v12,
 }

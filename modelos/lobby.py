@@ -1,5 +1,6 @@
 """Modelo do Lobby (Fase 45, M4)."""
 import hmac
+import secrets
 from datetime import datetime
 from flask_socketio import emit
 
@@ -92,6 +93,13 @@ class Lobby:
             # Tempo máximo (segundos) por jogada; 0 desliga. Quando expira, o
             # jogo joga pelo jogador atrasado (jogada automática, Fase 21).
             'tempo_max_jogada': 60,
+            # Fase 81: modo de distribuição da ordem de jogadores.
+            #   'chegada'  - ordem de chegada na lobby (sem embaralhar)
+            #   'partida'  - embaralha uma vez ao iniciar a partida
+            #   'rodada'   - embaralha a cada rodada (a regra de quem começa
+            #                não muda: jogador_sorteado no primer turno,
+            #                perdedor/vencedor depois).
+            'embaralhar': 'rodada',
         }
 
     def sala_room(self):
@@ -420,7 +428,24 @@ class Lobby:
         emit('reset_partida', to=self.sala_room())  # Arruma algumas coisas da partida anterior no front-end
         partida_numero = self.proxima_partida_num
         self.proxima_partida_num += 1
-        partida = Partida(do_lobby=self, jogadores=self.jogadores.copy(), partida_numero=partida_numero,
+        # Fase 81: embaralha a ordem de início dos jogadores. Modo 'partida'
+        # embaralha uma vez aqui; modo 'rodada' deixa para construir_rodada;
+        # 'chegada' não embaralha. No verificado, a permutação vem da seed
+        # (indice_ordem) para manter o "provably fair"; no legado, secrets.
+        # A ordem da lobby em si não muda — só a cópia que vira Partida.jogadores.
+        embaralhar = self.config.get('embaralhar', 'rodada')
+        jogadores_partida = self.jogadores.copy()
+        if len(jogadores_partida) > 1 and embaralhar == 'partida':
+            seed_final = (seed_info or {}).get('seed_final')
+            if seed_final:
+                ordem = seed.indice_ordem(seed_final, self.sala_id, partida_numero,
+                                          len(jogadores_partida))
+                jogadores_partida = [jogadores_partida[i] for i in ordem]
+            else:
+                for i in range(len(jogadores_partida) - 1, 0, -1):
+                    j = secrets.randbelow(i + 1)
+                    jogadores_partida[i], jogadores_partida[j] = jogadores_partida[j], jogadores_partida[i]
+        partida = Partida(do_lobby=self, jogadores=jogadores_partida, partida_numero=partida_numero,
                           dados_qtd=dados_qtd, com_coringa=bool(self.config.get('com_coringa', True)),
                           seed_info=seed_info)
         # A seed já foi fixada na Partida; o estado pendente do lobby não é mais necessário.
@@ -496,6 +521,10 @@ class Lobby:
                     aplicado = True
         except (ValueError, TypeError):
             pass
+        # Fase 81: modo de distribuição da ordem de jogadores.
+        if 'embaralhar' in dados and dados['embaralhar'] in ('chegada', 'partida', 'rodada'):
+            config['embaralhar'] = dados['embaralhar']
+            aplicado = True
         self.config = config
         return aplicado
 

@@ -28,9 +28,18 @@ Fórmula v1 (pública, byte-a-byte):
         int_be(HMAC-SHA256(bytes(seed_final),
             "dadinho:v1:start|" + sala|partida)) mod total
 
-A mesma fórmula está implementada em static/script.js (Web Crypto) para o
-cliente conferir a auditoria sem confiar no servidor.
-"""
+    indice_ordem(total, rodada=1) =
+        Fisher-Yates (Durstenfeld) sobre [0..total-1], onde em cada passo
+        i ∈ [total-1..1] o índice de troca j ∈ [0..i] é:
+            j = int_be(HMAC-SHA256(bytes(seed_final),
+                "dadinho:v1:order|" + sala|partida|rodada|i)) mod (i+1)
+        devolvendo a permutação [p_0..p_{total-1}] que reordena os jogadores.
+        No modo por-partida (rodada=1 para todas) a ordem é fixa por partida;
+        no modo por-rodada muda a cada rodada (sorteio da ordem, não da vez).
+
+    A mesma fórmula está implementada em static/script.js (Web Crypto) para o
+    cliente conferir a auditoria sem confiar no servidor.
+    """
 
 import hashlib
 import hmac
@@ -46,6 +55,7 @@ DOMINIO_COMMIT = "dadinho:v1:commit|"
 DOMINIO_SEED = "dadinho:v1:seed|"
 DOMINIO_ROLL = "dadinho:v1:roll|"
 DOMINIO_START = "dadinho:v1:start|"
+DOMINIO_ORDEM = "dadinho:v1:order|"
 
 REGEX_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -107,11 +117,37 @@ def valor(seed_hex, sala_id, partida_num, rodada_num, client_id, indice):
 
 
 def indice_inicial(seed_hex, sala_id, partida_num, total):
-    """Índice do jogador que começa a partida (ordenado por partida.jogadores)."""
+    """Índice do jogador que começa a partida (baseado na ordenação embaralhada por indice_ordem)."""
     chave = bytes.fromhex(seed_hex)
     msg = (DOMINIO_START + "|".join([str(sala_id), str(partida_num)])).encode("utf-8")
     digest = hmac.new(chave, msg, hashlib.sha256).digest()
     return int.from_bytes(digest, "big") % total
+
+
+def indice_ordem(seed_hex, sala_id, partida_num, total, rodada_num=1):
+    """
+    Permutação determinística da ordem de início dos jogadores, derivada da
+    seed (modo verificado). Fisher-Yates (Durstenfeld) onde em cada passo i
+    ∈ [total-1..1] o índice j ∈ [0..i] é:
+        j = int_be(HMAC-SHA256(bytes(seed_final),
+            "dadinho:v1:order|<sala>|<partida>|<rodada>|<i>")) mod (i+1)
+    A fórmula é espelhada em static/script.js (``indiceOrdem``) para auditoria.
+    ``rodada_num`` (default 1) faz a permutação variar por rodada no modo
+    por-rodada; no modo por-partida é sempre 1 (ordem fixa na partida).
+    Devolve a lista de índices [0..total-1] embaralhada: a i-ésima posição
+    do resultado diz qual índice original ocupa a i-ésima posição na lista
+    de jogadores.
+    """
+    if total <= 1:
+        return list(range(total))
+    chave = bytes.fromhex(seed_hex)
+    ordem = list(range(total))
+    for i in range(total - 1, 0, -1):
+        msg = (DOMINIO_ORDEM + "|".join([str(sala_id), str(partida_num), str(rodada_num), str(i)])).encode("utf-8")
+        digest = hmac.new(chave, msg, hashlib.sha256).digest()
+        j = int.from_bytes(digest, "big") % (i + 1)
+        ordem[i], ordem[j] = ordem[j], ordem[i]
+    return ordem
 
 
 # ---------------------------------------------------------------------------

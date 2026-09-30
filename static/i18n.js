@@ -97,6 +97,11 @@ I18N_DICIONARIOS.en = {
     'ui.config.tempo.desligado': 'Off (no limit)',
     'ui.config.nota': 'Only the host edits the settings. With verification on, the audit appears on the victory screen.',
 
+    'ui.config.embaralhar': 'Player order',
+    'ui.config.embaralhar.chegada': 'By arrival order',
+    'ui.config.embaralhar.partida': 'Shuffle per match',
+    'ui.config.embaralhar.rodada': 'Shuffle per round',
+
     // IA
     'ui.ia.titulo': '🤖 AI players',
     'ui.ia.nivel': 'Level',
@@ -562,6 +567,11 @@ I18N_DICIONARIOS['pt-BR'] = {
     'ui.config.tempo.desligado': 'Desligado',
     'ui.config.nota': 'Somente o master edita as configurações. Com a verificação ligada, a auditoria aparece na tela de vitória.',
 
+    'ui.config.embaralhar': 'Ordem dos jogadores',
+    'ui.config.embaralhar.chegada': 'Por ordem de chegada',
+    'ui.config.embaralhar.partida': 'Embaralhar por partida',
+    'ui.config.embaralhar.rodada': 'Embaralhar por rodada',
+
     'ui.ia.titulo': '🤖 Jogadores IA',
     'ui.ia.nivel': 'Nível',
     'ui.ia.quantidade': 'Quantidade',
@@ -1003,6 +1013,11 @@ I18N_DICIONARIOS.es = {
     'ui.config.tempo': 'Tiempo máximo por jugada',
     'ui.config.tempo.desligado': 'Desactivado',
     'ui.config.nota': 'Solo el master edita los ajustes. Con la verificación activada, la auditoría aparece en la pantalla de victoria.',
+
+    'ui.config.embaralhar': 'Orden de jugadores',
+    'ui.config.embaralhar.chegada': 'Por orden de llegada',
+    'ui.config.embaralhar.partida': 'Barajar por partida',
+    'ui.config.embaralhar.rodada': 'Barajar por ronda',
 
     'ui.ia.titulo': '🤖 Jugadores IA',
     'ui.ia.nivel': 'Nivel',
@@ -1446,6 +1461,11 @@ I18N_DICIONARIOS.fr = {
     'ui.config.tempo.desligado': 'Désactivé',
     'ui.config.nota': "Seul le master modifie les réglages. Vérification activée : l'audit apparaît sur l'écran de victoire.",
 
+    'ui.config.embaralhar': "Ordre des joueurs",
+    'ui.config.embaralhar.chegada': "Par ordre d'arrivée",
+    'ui.config.embaralhar.partida': "Mélanger par partie",
+    'ui.config.embaralhar.rodada': "Mélanger par manche",
+
     'ui.ia.titulo': '🤖 Joueurs IA',
     'ui.ia.nivel': 'Niveau',
     'ui.ia.quantidade': 'Quantité',
@@ -1887,6 +1907,11 @@ I18N_DICIONARIOS['zh-CN'] = {
     'ui.config.tempo': '每回合最长用时',
     'ui.config.tempo.desligado': '关闭',
     'ui.config.nota': '只有房主可以修改设置。开启验证后，审计会显示在胜利界面上。',
+
+    'ui.config.embaralhar': '玩家顺序',
+    'ui.config.embaralhar.chegada': '按到达顺序',
+    'ui.config.embaralhar.partida': '按局打乱',
+    'ui.config.embaralhar.rodada': '按轮打乱',
 
     'ui.ia.titulo': '🤖 AI 玩家',
     'ui.ia.nivel': '等级',

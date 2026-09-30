@@ -561,16 +561,17 @@ def verificar_roundtrip():
     # A política de defaults da sala é fonte única (`config_padrao`); o
     # cliente só espelha via `config_padrao` do payload de `update_user_list`.
     _checar("config padrão (fonte única)",
-            modelos.Lobby.config_padrao() == {
-                'dados_qtd': 3,
-                'max_jogadores': 4,
-                'com_coringa': True,
-                'publica': True,
-                'substituir_desconectado_por_ia': True,
-                'ia_nivel_padrao': 3,
-                'verificacao_ativa': True,
-                'tempo_max_jogada': 60,
-            },
+              modelos.Lobby.config_padrao() == {
+                  'dados_qtd': 3,
+                  'max_jogadores': 4,
+                  'com_coringa': True,
+                  'publica': True,
+                  'substituir_desconectado_por_ia': True,
+                  'ia_nivel_padrao': 3,
+                  'verificacao_ativa': True,
+                  'tempo_max_jogada': 60,
+                  'embaralhar': 'rodada',
+              },
             str(modelos.Lobby.config_padrao()))
     for cid, nome in (("cli1", "Ana"), ("cli2", "Bia")):
         jogador = modelos.Jogador(client_id=cid)
@@ -684,6 +685,14 @@ def verificar_roundtrip():
         {"client_id": "h", "is_ia": False}], "espectadores": [], "partidas": []}
     m10 = modelos.Lobby.de_dict(dict(v10))
     _checar("migração v10 -> v11", m10.sem_humano_em is None, str(m10.sem_humano_em))
+
+    # v11 -> v12: a chave `embaralhar` entra no config (default 'rodada' — novo
+    # comportamento padrão da Fase 81).
+    v11 = {"sala_id": "v11", "lobby_num": 1, "versao": 11,
+           "jogadores": [], "espectadores": [], "partidas": []}
+    m11 = modelos.Lobby.de_dict(dict(v11))
+    _checar("migração v11 -> v12",
+            m11.config.get('embaralhar') == 'rodada', str(m11.config.get('embaralhar')))
 
     # O carimbo precisa sobreviver ao round-trip E viajar no resumo (é o que a
     # varredura de salas abandonadas lê, sem reidratar o Lobby inteiro).
@@ -1019,6 +1028,161 @@ def verificar_tempo_pensamento():
 
 
 # ---------------------------------------------------------------------------
+# 4f) embaralhamento da ordem de jogadores (Fase 81)
+# ---------------------------------------------------------------------------
+# Tres modos via config `embaralhar`:
+#   'chegada' — ordem de chegada na lobby (sem embaralhar)
+#   'partida' — embaralha uma vez em construir_partida
+#   'rodada'  — embaralha a cada construir_rodada
+# A regra de quem começa (vez_atual) não muda em nenhum modo. No verificado,
+# a permutação vem da seed (seed.indice_ordem, com rodada_num) — "provably
+# fair"; no legado usa secrets.
+def verificar_embaralhamento():
+    print("4f) embaralhamento da ordem (Fase 81 — chegada/partida/rodada)")
+    import seed
+    import modelos
+    from modelos.jogador import Jogador
+
+    sala, total = "emb", 4
+    seed_a = seed.derivar_seed('servidor', 'nonce_srv_a',
+                               {'c1': 'n1', 'c2': 'n2', 'c3': 'n3', 'c4': 'n4'})
+    seed_b = seed.derivar_seed('servidor', 'nonce_srv_b',
+                               {'c1': 'n1', 'c2': 'n2', 'c3': 'n3', 'c4': 'n4'})
+    oa = seed.indice_ordem(seed_a, sala, 1, total)
+    _checar("indice_ordem: permutação válida [0..n-1] sem repetição",
+            sorted(oa) == list(range(total)), str(oa))
+    _checar("indice_ordem: determinismo (mesma seed/sala/partida/rodada → igual)",
+            oa == seed.indice_ordem(seed_a, sala, 1, total), str(oa))
+    _checar("indice_ordem: seed diferente → ordem diferente (alta prob)",
+            oa != seed.indice_ordem(seed_b, sala, 1, total))
+    _checar("indice_ordem: não é identidade (realmente embaralha)",
+            oa != [0, 1, 2, 3], str(oa))
+    _checar("indice_ordem: partida diferente → ordem diferente",
+            oa != seed.indice_ordem(seed_a, sala, 2, total))
+    _checar("indice_ordem: rodada diferente → ordem diferente",
+            oa != seed.indice_ordem(seed_a, sala, 1, total, rodada_num=2))
+    _checar("indice_ordem: 0/1 jogador → ordem neutra",
+            seed.indice_ordem(seed_a, sala, 1, 0) == []
+            and seed.indice_ordem(seed_a, sala, 1, 1) == [0])
+
+    emit_salvo = _salvar_emit()
+    _silenciar_emit()
+    try:
+        def montar_lobby(nome_sala="emb_l"):
+            lby = modelos.Lobby(sala_id=nome_sala, lobby_numero=1)
+            for cid, nome in (("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")):
+                j = Jogador(client_id=cid)
+                j.username = nome
+                j.pronto = True
+                lby.adicionar_jogador(j)
+            lby.jogadores[0].master = True
+            return lby
+
+        ids_em_ordem = lambda lby: [j.client_id for j in lby.jogadores]
+
+        # --- Modo 'chegada': NADA é embaralhado -----------------------
+        lobby_c = montar_lobby("emb_chegada")
+        lobby_c.definir_config({'embaralhar': 'chegada'})
+        partida_c = lobby_c.construir_partida(dados_qtd=1)
+        _checar("chegada: partida == lobby (ordem de chegada preservada)",
+                [j.client_id for j in partida_c.jogadores] == ids_em_ordem(lobby_c))
+        rodada_c = partida_c.construir_rodada()
+        _checar("chegada: rodada não reembaralha",
+                [j.client_id for j in partida_c.jogadores] == ids_em_ordem(lobby_c))
+
+        # --- Modo 'partida': embaralha uma vez, fixo por rodada --------
+        lobby_p = montar_lobby("emb_partida")
+        lobby_p.definir_config({'embaralhar': 'partida'})
+        partida_p = lobby_p.construir_partida(dados_qtd=6)
+        ordem_p = [j.client_id for j in partida_p.jogadores]
+        _checar("partida: partida embaralha (ordem !== lobby)",
+                ordem_p != ids_em_ordem(lobby_p))
+        _checar("partida: lobby preserva ordem de chegada",
+                ids_em_ordem(lobby_p) == ["a", "b", "c", "d"])
+        rodada_p1 = partida_p.construir_rodada()
+        _checar("partida: rodada 1 não reembaralha (ordem fixa)",
+                [j.client_id for j in partida_p.jogadores] == ordem_p)
+        # Finge o fim da rodada 1 e inicia rodada 2 — a partida não reembaralha
+        # de novo; ordem fixa por toda a partida.
+        rodada_p1.perdedor = partida_p.jogadores[0]
+        rodada_p1.vencedor = partida_p.jogadores[1]
+        rodada_p2 = partida_p.construir_rodada()
+        _checar("partida: rodada 2 mantém a mesma ordem da partida",
+                [j.client_id for j in partida_p.jogadores] == ordem_p)
+
+        # --- Modo 'rodada': embaralha de novo a cada rodada ------------
+        # Usa seed_info para tornar o embaralhamento determinístico (o
+        # caminho não-verificado com secrets.randbelow é um Fisher-Yates
+        # padrão; a probabilidade de identity com 4 jogadores é 1/24, o
+        # que deixaria o teste fraco).
+        seed_final_r = seed.derivar_seed('servidor', 'nonce_srv_r',
+                                        {'a': 'na', 'b': 'nb', 'c': 'nc', 'd': 'nd'})
+        seed_info_r = {'seed_final': seed_final_r, 'fonte': 'servidor',
+                       'entropia_externa': 'nonce_srv_r', 'participantes': [],
+                       'nonce_servidor': 'nonce_srv_r',
+                       'compromisso_servidor': seed.compromisso('nonce_srv_r')}
+        lobby_r = montar_lobby("emb_rodada")
+        lobby_r.definir_config({'embaralhar': 'rodada', 'verificacao_ativa': True})
+        partida_r = lobby_r.construir_partida(dados_qtd=6, seed_info=seed_info_r)
+        _checar("rodada: construir_partida NÃO embaralha (deixa pro rodada)",
+                [j.client_id for j in partida_r.jogadores] == ids_em_ordem(lobby_r))
+        # Rodada 1: embaralha usando indice_ordem(seed, rodada=1)
+        rodada_r1 = partida_r.construir_rodada()
+        ordem_r1 = seed.indice_ordem(seed_final_r, "emb_rodada", 1, 4, rodada_num=1)
+        esperado_r1 = [lobby_r.jogadores[i].client_id for i in ordem_r1]
+        _checar("rodada: rodada 1 embaralha (indice_ordem, rodada=1)",
+                [j.client_id for j in partida_r.jogadores] == esperado_r1)
+        # Rodada 2: reembaralha usando indice_ordem(seed, rodada=2)
+        rodada_r1.perdedor = partida_r.jogadores[0]
+        rodada_r1.vencedor = partida_r.jogadores[1]
+        # Captura a ordem da rodada 1 (após possível remoção de perdedor):
+        ordem_r1_atual = [j.client_id for j in partida_r.jogadores]
+        rodada_r2 = partida_r.construir_rodada()
+        ordem_r2 = seed.indice_ordem(seed_final_r, "emb_rodada", 1, 4, rodada_num=2)
+        esperado_r2 = [ordem_r1_atual[i] for i in ordem_r2]
+        _checar("rodada: rodada 2 reembaralha (ordem !== rodada 1, ALTA PROB)",
+                [j.client_id for j in partida_r.jogadores] == esperado_r2
+                and esperado_r2 != esperado_r1)
+
+        # --- Verificado: determinismo por rodada ----------------------
+        seed_final = seed.derivar_seed('servidor', 'nonce_srv_v',
+                                       {'a': 'na', 'b': 'nb', 'c': 'nc', 'd': 'nd'})
+        lobby_v = montar_lobby("emb_verif")
+        lobby_v.definir_config({'embaralhar': 'rodada', 'verificacao_ativa': True})
+        seed_info = {'seed_final': seed_final, 'fonte': 'servidor',
+                     'entropia_externa': 'nonce_srv_v', 'participantes': [],
+                     'nonce_servidor': 'nonce_srv_v',
+                     'compromisso_servidor': seed.compromisso('nonce_srv_v')}
+        pv1 = lobby_v.construir_partida(dados_qtd=6, seed_info=seed_info)
+        # Quem começa não muda: jogador_sorteado vale para a partida inteira.
+        _checar("verificado: jogador_sorteado na partida (quem começa não muda)",
+                pv1.jogador_sorteado is not None)
+        rodada_v1 = pv1.construir_rodada()
+        ordem1 = seed.indice_ordem(seed_final, "emb_verif", 1, 4, rodada_num=1)
+        esperado1 = [lobby_v.jogadores[i].client_id for i in ordem1]
+        _checar("verificado: rodada 1 segue indice_ordem(seed, rodada=1)",
+                [j.client_id for j in pv1.jogadores] == esperado1,
+                f"{[j.username for j in pv1.jogadores]} vs {esperado1}")
+        # Captura a ordem da rodada 1 ANTES de construir rodada 2: rodada 2
+        # embaralha a sobre a lista DA RODADA 1 (não sobre a original).
+        ordem_r1_ids = [j.client_id for j in pv1.jogadores]
+        rodada_v1.perdedor = pv1.jogadores[0]
+        rodada_v1.vencedor = pv1.jogadores[1]
+        rodada_v2 = pv1.construir_rodada()
+        ordem2 = seed.indice_ordem(seed_final, "emb_verif", 1, 4, rodada_num=2)
+        esperado2 = [ordem_r1_ids[i] for i in ordem2]
+        _checar("verificado: rodada 2 segue indice_ordem(seed, rodada=2) — diferente da 1",
+                [j.client_id for j in pv1.jogadores] == esperado2
+                and esperado2 != esperado1)
+        _checar("verificado: jogador_sorteado ainda em jogo após rodada 2",
+                pv1.jogador_sorteado in pv1.jogadores)
+    finally:
+        _restaurar_emit(emit_salvo)
+
+    _ok("Fase 81 (sorteo de ordem — 3 modos + determinismo por rodada)")
+
+
+# ---------------------------------------------------------------------------
 # 5) Integração (Fases 6 e 7)
 # ---------------------------------------------------------------------------
 
@@ -1043,6 +1207,7 @@ def main():
     verificar_nomes_ia()
     verificar_bot_prudente()
     verificar_tempo_pensamento()
+    verificar_embaralhamento()
     verificar_integracao()
     verificar_cross_instance()
     verificar_anti_fraude()

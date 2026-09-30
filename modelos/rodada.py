@@ -402,7 +402,7 @@ class Rodada:
             self.atualizar_front_pro_da_vez(self.vez_atual)
 
     def selecionar_proximo_jogador_na_lista(self, jogador_atual):
-        lista_jogadores = self.da_partida.jogadores
+        lista_jogadores = self.jogadores
         indice_atual = lista_jogadores.index(jogador_atual)
         indice_proximo = (indice_atual + 1) % len(lista_jogadores)
         return lista_jogadores[indice_proximo]
