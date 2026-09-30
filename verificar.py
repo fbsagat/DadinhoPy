@@ -74,6 +74,7 @@ def verificar_node():
     verificar_musica(node)
     verificar_sons(node)
     verificar_acoes_html(node)
+    verificar_fila_eventos(node)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +331,100 @@ def verificar_chave_identidade(node):
         capture_output=True, text=True,
     )
     _checar("chave de identidade por-sala em localStorage (cross-tab)",
+            resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
+
+
+# ---------------------------------------------------------------------------
+# 2c) a fila serial de animação re-arma após uma exceção dentro de um item.
+# O motor da página não roda no servidor: os eventos chegam com `atraso`, são
+# filas de animação serial no cliente (`static/script.js`) para preservar a
+# ordem e encaixar as pausas de "pensamento" dos bots sem timers no backend.
+# O `_onevent_original` já é envolto em try/catch, mas `mostrar_pensando` e o
+# agendamento do `setTimeout` ficavam fora de proteção (Fase 80). Se um lança
+# (ex.: `narracao` de bot com chave de página que falhou de forma inesperada),
+# a exceção escapa pra cima pro Socket.IO, o `processando_eventos` fica `true`
+# pra sempre e a fila MORRE: nada mais é aplicado, incluindo o `mudar_pagina` e
+# o snapshot do heartbeat — travamento PERMANENTE e sem recupero automático.
+# Este guard é um teste comportamental: extrai a função REAL do script, a roda
+# em um sandbox com `mostrar_pensando` lançando no 1º pacote, e exige que a
+# exceção NÃO escape e que os 3 eventos seguintes (inclusive `mudar_pagina`)
+# cheguem — o mesmo caso de antes/depois que provou a correção.
+# ---------------------------------------------------------------------------
+_CODIGO_FILA = r"""
+const fs = require('fs'), vm = require('vm');
+const js = fs.readFileSync(process.argv[1], 'utf8');
+function extrair(src, header) {
+  const i = src.indexOf(header);
+  if (i < 0) return null;
+  const ini = src.indexOf('{', i);
+  let prof = 1, j = ini + 1;
+  while (j < src.length && prof > 0) {
+    if (src[j] === '{') prof++;
+    else if (src[j] === '}') prof--;
+    j++;
+  }
+  // inclui o header `function NAME() {...}` (ou `socket.onevent = function(){...}`):
+  // o wrapper evita `return` solto dentro do vm.runInContext (top-level return é ilegal).
+  return src.slice(i, j);
+}
+const corpoFila = extrair(js, 'function _processar_fila_eventos() {');
+const corpoOne = extrair(js, 'socket.onevent = function (packet) {');
+if (!corpoFila || !corpoOne) { console.error('nao extraiu fila/onevent'); process.exit(1); }
+const entregues = [];
+let mostrar_chamado = 0;
+let esconder = 0;
+let escapou = null;
+const socket = { onevent: null };
+const ctx = {
+  console: { error: () => {}, log: (m) => console.log(m) },
+  setTimeout: (f, ms) => setTimeout(f, ms),
+  clearTimeout: (t) => clearTimeout(t),
+  Math, Array, Number, Object, JSON, Boolean, String,
+  nome_jogador: 'Eu', MAX_ATRASO_FILA: 8000,
+  _segurar_emoji: () => {}, _liberar_emojis_segurados: () => {},
+  mostrar_pensando: () => {
+    mostrar_chamado += 1;
+    if (mostrar_chamado === 1) throw new Error('boom em mostrar_pensando');
+  },
+  esconder_pensando: () => { esconder += 1; },
+  _onevent_original: (p) => { entregues.push(p.data[0]); },
+  socket,
+};
+vm.createContext(ctx);
+vm.runInContext(
+  'var fila_eventos = [];\nvar processando_eventos = false;\nvar atraso_pendente_total = 0;\n'
+  + corpoFila + '\n' + corpoOne, ctx);
+const pacotes = [
+  { data: ['narracao', { is_ia: true, jogador: 'Bot', atraso: 0 }] },
+  { data: ['narracao', { is_ia: true, jogador: 'Bot', atraso: 0 }] },
+  { data: ['mudar_pagina', { pagina: 2, pag_numero: 2, atraso: 0 }] },
+  { data: ['meu_turno', { atraso: 0 }] },
+];
+for (const p of pacotes) {
+  try { socket.onevent(p); } catch (e) { escapou = e.message; }
+}
+setTimeout(() => {
+  const travou = ctx.processando_eventos === true;
+  const ok = (!escapou) && (!travou)
+      && entregues.join(',') === 'narracao,mudar_pagina,meu_turno';
+  if (!ok) {
+    console.error('fila travou apos excecao: escapou=' + escapou
+      + ' travado=' + travou + ' entregues=[' + entregues.join(',') + ']');
+    process.exit(1);
+  }
+  console.log('fila serial re-arma apos excecao em mostrar_pensando (Fase 80) ok');
+  process.exit(0);
+}, 200);
+"""
+
+
+def verificar_fila_eventos(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_FILA, os.path.join(RAIZ, "static", "script.js")],
+        capture_output=True, text=True,
+    )
+    _checar("fila serial de eventos re-arma após exceção (Fase 80)",
             resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
 

@@ -446,23 +446,41 @@ function _processar_fila_eventos() {
     }
     const item = fila_eventos.shift();
     atraso_pendente_total = Math.max(0, atraso_pendente_total - item.atraso);
-    if (item.ia_nome) {
-        mostrar_pensando(item.ia_nome, item.atraso);
+    // Fase 80: o `_onevent_original` já tem `catch` próprio (abaixo), mas o
+    // `mostrar_pensando` e o agendamento do `setTimeout` ficavam FORA de
+    // qualquer proteção. O item já saiu da fila (`shift`) e o
+    // `processando_eventos` continua `true`: se qualquer um dos dois lançar, a
+    // cadeia não se re-arma e a fila morre DEFINITIVAMENTE — todo evento
+    // seguinte (inclusive o snapshot do heartbeat) só enfileira e nada é
+    // aplicado mais. É o travamento permanente de verdade, diferente da Fase 80
+    // do `joguei_dados` (que era perdido, mas se recuperava em 60s). O item é
+    // perdido — reenviar evento que já aplicou parte dos efeitos é pior que
+    // perder —, mas a mesa continua. O re-arm é por `setTimeout` (como no
+    // caminho normal) para não crescer a pilha se o erro se repetir em todos os
+    // itens da fila.
+    try {
+        if (item.ia_nome) {
+            mostrar_pensando(item.ia_nome, item.atraso);
+        }
+        setTimeout(function () {
+            try {
+                _onevent_original(item.packet);
+            } catch (erro) {
+                console.error('Erro ao processar evento', erro);
+            }
+            const nome_item = (item.packet && Array.isArray(item.packet.data))
+                ? item.packet.data[0] : null;
+            if (nome_item === 'mudar_pagina') {
+                // A tela/cards novos já estão no DOM: solta os emojis segurados.
+                _liberar_emojis_segurados();
+            }
+            _processar_fila_eventos();
+        }, item.atraso);
+    } catch (erro) {
+        console.error('Erro ao enfileirar evento', erro);
+        esconder_pensando();
+        setTimeout(_processar_fila_eventos, 0);
     }
-    setTimeout(function () {
-        try {
-            _onevent_original(item.packet);
-        } catch (erro) {
-            console.error('Erro ao processar evento', erro);
-        }
-        const nome_item = (item.packet && Array.isArray(item.packet.data))
-            ? item.packet.data[0] : null;
-        if (nome_item === 'mudar_pagina') {
-            // A tela/cards novos já estão no DOM: solta os emojis segurados.
-            _liberar_emojis_segurados();
-        }
-        _processar_fila_eventos();
-    }, item.atraso);
 }
 
 socket.onevent = function (packet) {
@@ -1759,6 +1777,12 @@ socket.on("mudar_pagina", function (data) {
     // virar_papel, etc.) e o ciclo normal de jogada volta a tocar. É o ÚLTIMO
     // evento do reconstruction, por isso vem antes da lógica de página.
     reconstruindo_snapshot = false;
+    // Fase 80: saiu da tela de dados. A confirmação da rolagem foi consumida
+    // (ou a virada veio de outro caminho — `autojogar`, desconexão do outro
+    // jogador, heartbeat): o watchdog não pode reenviar `joguei_dados`.
+    if (data.pag_numero !== 1) {
+        cancelar_confirmacao_dados();
+    }
     // Fase 42 (N2): funil — partida iniciada (página 1) e concluída (página 4).
     if (data.pag_numero === 1) {
         rastrear_funil('partida_iniciada');
@@ -2065,6 +2089,74 @@ function armar_retry_rolagem() {
 }
 
 // ---------------------------------------------------------------------------
+// Fase 80: watchdog da CONFIRMAÇÃO da rolagem (`joguei_dados`).
+//
+// O `jogar_dados` marca a rolagem mas SUPRIME de propósito a ida para a página
+// 2 (app.py) — quem abre a página 2 é o `joguei_dados`, emitido aqui 2s depois
+// do resultado, para o jogador ver os dados. Esse emit era a única coisa que
+// tirava a mesa da tela de dados e saía UMA vez, sem retry: cooldown do balde
+// compartilhado do `sid`, `TravaIndisponivel` do lock, `ConflitoDeEstado` no
+// save ou um blip de rede deixavam a sala parada, sem o jogador poder fazer
+// nada (o botão já está desativado pelo `desativar_botao_dados`) e sem o
+// servidor saber que ficou pendente.
+//
+// Aqui o emit é reenviado enquanto a tela não mudar. Reenviar é seguro: o
+// servidor trata a confirmação como idempotente (`cooldown=None` + guard de
+// `lobby.pagina`) e, se a sala já tiver virado, responde com o snapshot da
+// página corrente — o mesmo reparo que o heartbeat usa na divergência de
+// página. Os guards abaixo mantêm o retry restrito ao estado em que ele faz
+// sentido: ainda na tela de dados, com a animação já vista e com a identidade
+// confirmada.
+//
+// O teto de tentativas existe para o watchdog ser o caminho RÁPIDO, não o
+// único: se o servidor não responder em ~24s, o heartbeat da partida (60s)
+// assume pelo `ia.processar`.
+// ---------------------------------------------------------------------------
+const CONFIRMACAO_DADOS_RETRY_MS = 4000;
+const CONFIRMACAO_DADOS_MAX_TENTATIVAS = 6;
+// `construtor_dados` incrementa: um retry de uma rodada anterior que ainda
+// voava não pode falar por esta.
+let rodada_dados_token = 0;
+let timer_confirmacao_dados = null;
+let tentativas_confirmacao_dados = 0;
+
+function cancelar_confirmacao_dados() {
+    if (timer_confirmacao_dados !== null) {
+        clearTimeout(timer_confirmacao_dados);
+        timer_confirmacao_dados = null;
+    }
+    tentativas_confirmacao_dados = 0;
+}
+
+function passo_confirmacao_dados(token) {
+    if (token !== rodada_dados_token || indiceAtual !== 1 || !rolagem_animada) {
+        cancelar_confirmacao_dados();
+        return;
+    }
+    if (tentativas_confirmacao_dados >= CONFIRMACAO_DADOS_MAX_TENTATIVAS) {
+        cancelar_confirmacao_dados();
+        return;
+    }
+    tentativas_confirmacao_dados += 1;
+    // Reconexão/identidade em curso: conta a tentativa e tenta de novo em vez
+    // de desistir — o `setTimeout` do navegador não é estrangulado por
+    // desconexão, então a cadeia sobrevive a um socket que caiu. Se o emit foi
+    // perdido, o próximo disparo é o reenvio.
+    if (chave_confirmada && socket.connected) {
+        socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
+    }
+    timer_confirmacao_dados = setTimeout(function () {
+        timer_confirmacao_dados = null;
+        passo_confirmacao_dados(token);
+    }, CONFIRMACAO_DADOS_RETRY_MS);
+}
+
+function confirmar_dados_vistos() {
+    cancelar_confirmacao_dados();
+    passo_confirmacao_dados(rodada_dados_token);
+}
+
+// ---------------------------------------------------------------------------
 // Shake to roll (mobile). Aceleração do dispositivo → callback de rolagem.
 // O shake chama `jogar_dados()` diretamente: os guards já existentes
 // (`rolagem_pedida`, `chave_confirmada`) impedem duplicação. O timeout do
@@ -2244,6 +2336,10 @@ socket.on('construtor_dados', function (data) {
     rolagem_pedida = false;
     rolagem_animada = false;
     cancelar_retry_rolagem();
+    // Fase 80: rodada nova invalida qualquer confirmação ainda em voo (o
+    // watchdog queimar a rodada errada é o erro que o token evita).
+    rodada_dados_token += 1;
+    cancelar_confirmacao_dados();
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
     tela_jogar_dados.innerHTML = ""
@@ -3446,7 +3542,7 @@ socket.on("jogar_dados_resultado", function (data) {
         // Mostra o resultado por ~2 seg antes de enviar a confirmação
         // e o servidor mudar de tela.
         setTimeout(() => {
-            socket.emit('joguei_dados', { 'chave_secreta': chave_secreta });
+            confirmar_dados_vistos();
         }, 2000);
     }, rollTime);
 });

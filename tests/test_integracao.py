@@ -3837,6 +3837,136 @@ def teste_sala_sem_humano_tem_ttl_curto():
     _ok("sala sem humano recebe TTL curto (Fase 77)")
 
 
+def teste_confirmacao_rolagem_retry_idempotente():
+    """
+    Fase 80: o `joguei_dados` é a ÚNICA coisa que abre a página 2 depois da
+    rolagem (o `jogar_dados` a suprime de propósito, para o cliente ver a
+    animação) e ele saía uma vez só, sem retry. O cliente agora reenvia enquanto
+    a tela não mudar, o que só é seguro se o handler repetir a resposta sem
+    efeito colateral. Três garantias, uma por cenário:
+
+    (a) reenvio com a sala JÁ na página 2 é no-op pro estado — o `mudar_pagina`
+        perdido é reemitido (o reparo é o mesmo do heartbeat na divergência de
+        página) e o relógio do primeiro turno NÃO é recarimbado, senão o
+        jogador da vez estenderia o próprio turno a cada reenvio;
+    (b) confirmação de quem NÃO rolou é ignorada (retry da rodada anterior que
+        ainda voava): sem `meus_dados` com dados velhos;
+    (c) a confirmação não divide a janela de cooldown do `sid` cru — o mesmo
+        descarte mudo que comia o "Adicionar IA" (Fase 79) deixava a mesa
+        parada na tela de dados.
+    """
+    _limpar()
+    c1, cs1, _ = _conectar()
+    c2, cs2, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 2})
+    assert modulo_store.carregar_sala(SALA).pagina == 1
+
+    # (b) ninguém rolou ainda: a confirmação chega "antecipada" e é ignorada.
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    assert _achar_evento(c1.get_received(), "meus_dados") is None, \
+        "quem não rolou não tem dados a confirmar (Fase 80)"
+    lobby = modulo_store.carregar_sala(SALA)
+    ana = next(j for j in lobby.jogadores if j.username == "Ana")
+    assert ana.joguei_dados is False, "a confirmação não pode marcar a rolagem"
+    assert lobby.pagina == 1
+
+    for c, chave in ((c1, cs1["chave_secreta"]), (c2, cs2["chave_secreta"])):
+        c.emit("jogar_dados", {"chave": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert all(j.joguei_dados for j in lobby.jogadores), "os dois rolaram"
+    # `jogar_dados` NÃO abre a página 2 (a supressão é de propósito, para o
+    # cliente ver a animação) — quem abre é a confirmação. E o gatilho é a
+    # PRIMEIRA confirmação que chega depois do último dado, não a última: por
+    # isso o emit perdido do humano (com IAs na mesa) travava a sala.
+    assert lobby.pagina == 1, "rolar não pode abrir a página 2 antes da confirmação"
+    c1.get_received()
+    c2.get_received()
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, "a primeira confirmação depois do último dado abre a página 2"
+    c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
+    assert modulo_store.carregar_sala(SALA).pagina == 2, "a confirmação do outro é inofensiva"
+
+    # (a) retry com a sala já virada: repara a tela, não mexe no relógio.
+    rodada = lobby.partidas[-1].rodadas[-1]
+    vez_em = rodada.vez_em
+    c1.get_received()
+    c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+    eventos = c1.get_received()
+    paginas = [e["args"][0].get("pag_numero") for e in eventos
+               if e["name"] == "mudar_pagina"]
+    assert 2 in paginas, \
+        f"o retry precisa reemitir a página atual para o cliente destravar, veio {paginas}"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2
+    rodada = lobby.partidas[-1].rodadas[-1]
+    assert rodada.vez_em == vez_em, \
+        "retry não pode recarimbrar `vez_em` (estenderia o turno do da vez)"
+    assert rodada.vez_atual is not None, "a vez continua com alguém"
+
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+    _ok("confirmação da rolagem aguenta retry (Fase 80)")
+
+
+def teste_confirmacao_rolagem_ignora_cooldown():
+    """
+    Fase 80 (c): a confirmação da rolagem é `cooldown=None`. Sendo o único emit
+    que abre a página 2, um descarte mudo pelo rate limit não custava um clique
+    — custava a partida parada na tela de dados, sem o jogador poder refazer
+    nada (o botão já está desativado) e sem o servidor saber que ficou pendente.
+    Aqui o cooldown REAL está ligado: um handler mutável qualquer (o `heartbeat`,
+    bare como era o `joguei_dados`) consome a janela do `sid` e a confirmação
+    colada nele precisa mesmo assim passar.
+    """
+    _limpar()
+    _cooldown_falso = modulo_app.tem_cooldown
+    modulo_app.tem_cooldown = funcoes_gerais.tem_cooldown
+    _sleep_real = time.sleep
+    try:
+        c1, cs1, _ = _conectar()
+        c2, cs2, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c2.emit("apelido", {"apelido_msg": "Bia"})
+        _sleep_real(0.6)
+        c2.emit("ficar_pronto", {"chave": cs2["chave_secreta"]})
+        _sleep_real(0.6)
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 2})
+        # Com o cooldown REAL, dois handlers mutáveis bare colados no mesmo
+        # `sid` se anulam (o `apelido` do master com o `iniciar_partida` logo
+        # em seguida seria engolido) — daí as pausas. A ÚNICA colisão que o
+        # teste provoca de propósito é a do heartbeat com a confirmação.
+        assert modulo_store.carregar_sala(SALA).pagina == 1, "a partida tem que ter começado"
+        _sleep_real(0.6)
+        c1.emit("jogar_dados", {"chave": cs1["chave_secreta"]})
+        lobby = modulo_store.carregar_sala(SALA)
+        ana = next(j for j in lobby.jogadores if j.username == "Ana")
+        assert ana.joguei_dados is True, "a rolagem de Ana tem que ter entrado"
+        c1.get_received()
+        c1.emit("heartbeat", {"chave": cs1["chave_secreta"], "pagina": 1})
+        c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
+        assert _achar_evento(c1.get_received(), "meus_dados") is not None, \
+            "a confirmação não pode ser descartada pelo cooldown de outro handler (Fase 80)"
+        # E a virada acontece assim que o outro jogador confirmar.
+        c2.emit("jogar_dados", {"chave": cs2["chave_secreta"]})
+        lobby = modulo_store.carregar_sala(SALA)
+        bia = next(j for j in lobby.jogadores if j.username == "Bia")
+        assert bia.joguei_dados is True, "a rolagem da Bia tem que ter entrado"
+        c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.pagina == 2, "a mesa não pode ficar presa na rolagem"
+    finally:
+        modulo_app.tem_cooldown = _cooldown_falso
+        c1.disconnect()
+        c2.disconnect()
+        _limpar()
+    _ok("confirmação da rolagem não divide o balde do sid (Fase 80)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -3986,13 +4116,18 @@ def verificar_integracao():
         ("bot-adicionado", teste_bot_adicionado_confirma_master),
         ("painel-ia-cooldown", teste_painel_ia_tem_cooldown_proprio),
     ]
+    testes_fase80 = [
+        ("confirmacao-retry", teste_confirmacao_rolagem_retry_idempotente),
+        ("confirmacao-cooldown", teste_confirmacao_rolagem_ignora_cooldown),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
                            + testes_fase23 + testes_fase25 + testes_fase46
                            + testes_fase29 + testes_fase30 + testes_fase69
-                           + testes_fase76 + testes_fase77 + testes_fase79):
+                           + testes_fase76 + testes_fase77 + testes_fase79
+                           + testes_fase80):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

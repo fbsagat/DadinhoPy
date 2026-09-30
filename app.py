@@ -1899,15 +1899,39 @@ def jogar_dados(dados, lobby, jogador):
 
 
 @socketio.on('joguei_dados')
-@evento_mutavel
+@evento_mutavel(cooldown=None)
 @autenticar(extrair_chave=lambda d: d.get('chave_secreta', ''))
 def joguei_dados(dados, lobby, jogador):
     """
     Esta função é executada por cada jogador da partida quando termina de executar e visualizar o resultado de seus
     dados. Ela deve redirecionar todos os jogadores para a próxima tela (2), onde se inicia a partida de fato, com os
     turnos, mas somente depois de todos os dados terem sido jogados.
+
+    `cooldown=None` (Fase 80): este é o ÚNICO emit que abre a página 2 depois da
+    rolagem — o `jogar_dados` a suprime de propósito, para o cliente ver a
+    animação (ver `ia.processar(..., permitir_virada_pagina=False)`). Sendo
+    `@evento_mutavel` bare, ele dividia a janela de 0,5s do `sid` cru com ~16
+    outros handlers (incluindo o `heartbeat`) e o descarte é um `return` mudo:
+    a mesa ficava parada na tela de dados, sem o jogador poder refazer nada
+    (o botão já está desativado), até o heartbeat da partida (60s) fechar pelo
+    `ia.processar`. É uma confirmação idempotente e espaçada pelo fluxo do
+    jogo — o mesmo motivo de `autojogar` e das confirmações de conferência e
+    vitória. O cliente agora reenvia enquanto a tela não mudar (watchdog da
+    confirmação), o que torna o reenvio seguro: o guard de `lobby.pagina`
+    abaixo mantém a idempotência e o `elif` repara o cliente que ficou para
+    trás.
     """
     if jogador.rodada_atual is None:
+        return
+    # Fase 80: guard "precisa ter rolado". A confirmação só faz sentido depois
+    # do `jogar_dados` (é o que liga a animação ao servidor). Sem este guard, o
+    # retry do cliente numa rodada NOVA (o watchdog da confirmação ainda voando
+    # enquanto o `construtor_dados` da rodada seguinte não chegou) emitia
+    # `meus_dados` com os dados da rodada anterior. Confirmar sem rolar não
+    # abre a página 2 de todo modo (`verificar_se_todos_ja_jogaram_seus_dados`
+    # exige a flag do próprio jogador) — aqui é só para o evento não ter
+    # efeito colateral quando chega atrasado.
+    if not jogador.joguei_dados:
         return
     # Fase 10 (S4): escopo explícito — os dados são só de quem confirmou.
     emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
@@ -1924,6 +1948,15 @@ def joguei_dados(dados, lobby, jogador):
         # jogar dados) — senão ele paga a rolagem com o tempo do turno.
         rodada.iniciar_turnos()
         mudar_pagina(2, sala=lobby.sala_id)
+    elif lobby.pagina != 1:
+        # Fase 80: a sala JÁ abriu a página 2, mas o cliente que perguntou não
+        # recebeu o `mudar_pagina` (broadcast preso na instância de origem, fila
+        # de animação do cliente engasgada, reconexão no meio da transição).
+        # O emit acima prova que ele continua na tela de dados, então responde
+        # com o mesmo reparo do heartbeat na divergência de página
+        # (`_emitir_re_sync`): o snapshot reconstrói a página corrente para
+        # este jogador. É a rede que fecha a janela de 60s do heartbeat.
+        enviar_snapshot_sala(lobby, jogador)
     ia.processar(lobby)
     salvar_sala(lobby)
 
