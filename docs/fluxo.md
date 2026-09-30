@@ -98,6 +98,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
 | `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | fecha o drawer de configurações |
+| `bot_adicionado` (`quantidade`) | app.py:1458 (`_confirmar_bots_ao_master`, em `adicionar_ia`/`completar_com_ias`, Fase 79) | cliente (só o master que pediu; só quando o bot entrou mesmo) | bip sintetizado (`tocar_som_bot`), um por bot |
 | `renomear_ia_negado` (`motivo` {chave, params}: `msg.motivo.ia_invalido`/`ia_ocupado`/`ia_alvo`) | `renomear_ia` (Fase 75) | cliente (só o master) | mostra o alerta da recusa |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |

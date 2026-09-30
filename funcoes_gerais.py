@@ -84,9 +84,9 @@ COOLDOWN_CHAT = 0.3
 # O cliente espelha estes conjuntos para renderizar o picker; a validação do emoji
 # contra o conjunto global garante que nada além disso chegue ao broadcast
 # (a categoria é recalculada no servidor, nunca confiada ao cliente).
-EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎']
-EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌']
-EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓']
+EMOJIS_PROVOCATIVOS = ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎', '🤫', '🖕']
+EMOJIS_AMIGAVEIS = ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌', '😭', '😵‍💫']
+EMOJIS_GERAIS = ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '🍀', '😴', '💤', '⚡', '⭐', '❓', '🎲']
 # Mapa de categoria → emojis permitidos (validação estrita).
 EMOJIS_POR_CATEGORIA = {
     'provocativo': EMOJIS_PROVOCATIVOS,

@@ -1632,6 +1632,13 @@ socket.on('lobby_lotado', function () {
     fechar_config_desktop();
 });
 
+// Fase 79: som de feedback para o master — o bip só toca quando o servidor
+// confirma que o(s) bot(s) entraram na mesa (`bot_adicionado`, individual).
+// Os outros jogadores da sala não recebem: adicionar bot é ação do master.
+socket.on('bot_adicionado', function (data) {
+    tocar_som_bot(data && data.quantidade);
+});
+
 // --- Expulsão de jogador (Fase 19) ---
 function expulsar_jogador(client_id, nome) {
     if (!sou_master || !client_id) {
@@ -4369,6 +4376,52 @@ function tocar_estouro() {
     fonte.start(agora);
 }
 
+// Bip de bot entrando na mesa, sintetizado (não precisa de arquivo em
+// static/sons/): dois quadradinhos curtos com a voz subindo, bem distinto dos
+// sons de dado. É o "confirm" do master — só toca quando o servidor confirma
+// que o bot entrou (`bot_adicionado`), nunca no clique, para não mentir quando
+// a sala já está lotada. Vários bots de uma vez viram vários bipes encadeados.
+function tocar_som_bot(quantidade) {
+    if (!som_ativado || reconstruindo_snapshot || !garantir_contexto_audio()) {
+        return;
+    }
+    const total = Math.max(1, Math.min(4, Math.floor(Number(quantidade)) || 1));
+    const ganho_relativo = volume_som / 100;
+    // Lowpass compartilhado: tira o serrilhado do quadrado sem tirar o
+    // "robô" (é a mesma voz em cada bip, então um filtro só para a sequência).
+    const filtro = contexto_audio.createBiquadFilter();
+    filtro.type = 'lowpass';
+    filtro.frequency.value = 2400;
+    filtro.connect(contexto_audio.destination);
+    const primeiro = contexto_audio.currentTime + 0.01;
+    let ultimo = null;
+    for (let i = 0; i < total; i++) {
+        const inicio = primeiro + i * 0.14;
+        const osc = contexto_audio.createOscillator();
+        const ganho = contexto_audio.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(440, inicio);
+        osc.frequency.exponentialRampToValueAtTime(700, inicio + 0.07);
+        ganho.gain.setValueAtTime(0.0001, inicio);
+        ganho.gain.exponentialRampToValueAtTime(0.14 * ganho_relativo, inicio + 0.02);
+        ganho.gain.setValueAtTime(0.14 * ganho_relativo, inicio + 0.06);
+        ganho.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.11);
+        osc.connect(ganho).connect(filtro);
+        osc.start(inicio);
+        osc.stop(inicio + 0.13);
+        ultimo = osc;
+    }
+    // O `onended` desconecta o filtro compartilhado: sem referência e sem
+    // fonte ativa ele já seria coletado, mas deixar nó pendurado no
+    // `destination` é exatamente o esquecido que o motor de música não deixa
+    // acontecer (ver AGENTS.md, Fase 70).
+    if (ultimo) {
+        ultimo.onended = function () {
+            filtro.disconnect();
+        };
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Música de fundo oficial: tema orquestral/ambiental em MIDI (rota /tema.mid,
 // que troca a composição a cada 12h — ver tema.py). O navegador não toca MIDI
@@ -5937,11 +5990,14 @@ socket.on('auditoria_partida', function (data) {
 // cai no mesmo gap de broadcast entre instâncias já documentado.
 // ===========================================================================
 
-// Espelha do servidor (app.py): lista canônica de emojis por categoria.
+// Espelha do servidor (funcoes_gerais.py, EMOJIS_POR_CATEGORIA): lista canônica
+// de emojis por categoria. O servidor NÃO manda o catálogo — esta cópia é a
+// única fonte do picker, então qualquer emoji novo precisa entrar aqui E em
+// funcoes_gerais.py (a paridade é checada por verificar.py).
 const EMOJIS_POR_CATEGORIA = {
-    geral: ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '😭', '😵‍💫', '😴', '💤', '⚡', '⭐', '❓'],
-    amigavel: ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌'],
-    provocativo: ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎'],
+    geral: ['🤔', '🤷‍♂️', '🤦‍♂️', '🙄', '😂', '🍀', '😴', '💤', '⚡', '⭐', '❓', '🎲'],
+    amigavel: ['😊', '😄', '😁', '👍', '👋', '✌️', '❤️', '🎉', '🥳', '🙌', '😭', '😵‍💫'],
+    provocativo: ['😎', '😏', '😈', '👑', '🔥', '💪', '😤', '😠', '😡', '👎', '🤫', '🖕'],
 };
 
 // Estado do picker: categoria aberta e se está visível. Persistido em

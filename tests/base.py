@@ -19,6 +19,19 @@ import subprocess
 import sys
 import time
 
+# O console do Windows é cp1252 e não sabe imprimir emoji — e o runner imprime
+# dado que vem do jogo (apelido de IA é "🤖 ..."). Um único `print` com emoji
+# estourava UnicodeEncodeError e MATAVA a verificação no meio (não era um item
+# vermelho, era o processo inteiro caindo). Forçar UTF-8 no stream resolve de
+# uma vez: mensagem de falha/lista de bots com emoji passa a sair em vez de
+# derrubar o run. No CI (UTF-8) é no-op.
+for _fluxo in (sys.stdout, sys.stderr):
+    try:
+        _fluxo.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass  # stdout não é TextIOWrapper (capturado por pytest, pipe exótico)
+del _fluxo
+
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODULOS = [
     "app.py", "modelos/__init__.py", "modelos/comum.py", "modelos/migracao.py",

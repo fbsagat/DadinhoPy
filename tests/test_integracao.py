@@ -3392,6 +3392,69 @@ def teste_lobby_lotado_so_quando_lotar():
     _ok("lobby_lotado só é emitido quando as vagas acabam (Fase 57)")
 
 
+def teste_bot_adicionado_confirma_master():
+    """
+    Fase 79: `bot_adicionado` é o "confirm" do som de entrada do bot. Vai só
+    para o master que pediu (emit individual) e só quando o bot entrou mesmo —
+    com a sala cheia, `quantidade` é quantos couberam, nunca os pedidos. Chega
+    DEPOIS do `update_user_list` do próprio master: a lista remonta antes do
+    bip, para o som confirmar o que já apareceu na tela.
+    """
+    _limpar()
+
+    # Master + um não-master na mesma sala: só o master ouve o bip.
+    c1, cs1, _ = _conectar()
+    c1.emit("apelido", {"apelido_msg": "Ana"})
+    c2, cs2, _ = _conectar()
+    c2.emit("apelido", {"apelido_msg": "Bia"})
+    c1.get_received()
+    c2.get_received()
+
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 2})
+    eventos = c1.get_received()
+    payload = _achar_evento(eventos, "bot_adicionado")
+    assert payload == {"quantidade": 2}, f"master ouve 2 bipes: {payload!r}"
+    assert "bot_adicionado" not in [e["name"] for e in c2.get_received()], \
+        "quem não é master não recebe a confirmação do bot"
+    nomes = [e["name"] for e in eventos]
+    assert nomes.index("bot_adicionado") > nomes.index("update_user_list"), \
+        "a lista tem de chegar antes do som"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert len([j for j in lobby.jogadores if j.is_ia]) == 2, "pré-condição: 2 bots"
+
+    # Pedir mais do que cabe: confirma só o que entrou (2 humanas + 4 bots = 6).
+    c1.get_received()
+    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 4})
+    payload = _achar_evento(c1.get_received(), "bot_adicionado")
+    assert payload == {"quantidade": 2}, \
+        f"sala lotada confirma só os 2 que couberam: {payload!r}"
+    assert len(modulo_store.carregar_sala(SALA).jogadores) == 6, "sala no limite"
+    c1.disconnect()
+    c2.disconnect()
+    _limpar()
+
+    # "Completar vagas" também confirma, com as vagas que restavam.
+    c3, cs3, _ = _conectar()
+    c3.emit("apelido", {"apelido_msg": "Caio"})
+    c3.get_received()
+    c3.emit("completar_com_ias", {"chave": cs3["chave_secreta"], "nivel": 2})
+    payload = _achar_evento(c3.get_received(), "bot_adicionado")
+    assert payload == {"quantidade": 5}, f"completar preenche as 5 vagas: {payload!r}"
+    c3.disconnect()
+    _limpar()
+
+    # Payload malformado no comando: nenhum bot, nenhuma confirmação (invariante #4).
+    c4, cs4, _ = _conectar()
+    c4.emit("apelido", {"apelido_msg": "Dani"})
+    c4.get_received()
+    c4.emit("adicionar_ia", {"chave": cs4["chave_secreta"], "nivel": 2, "quantidade": 0})
+    assert "bot_adicionado" not in [e["name"] for e in c4.get_received()], \
+        "pedido sem bots não pode tocar o som de confirmação"
+    c4.disconnect()
+    _limpar()
+    _ok("bot_adicionado confirma ao master só os bots que entraram (Fase 79)")
+
+
 def teste_master_renomeia_ia():
     """
     Fase 75: o master renomeia o bot direto na lista. O `renomear_ia` recoloca
@@ -3849,13 +3912,16 @@ def verificar_integracao():
         ("varredura-rate-limit", teste_varredura_respeita_rate_limit),
         ("ttl-curto", teste_sala_sem_humano_tem_ttl_curto),
     ]
+    testes_fase79 = [
+        ("bot-adicionado", teste_bot_adicionado_confirma_master),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
                            + testes_fase23 + testes_fase25 + testes_fase46
                            + testes_fase29 + testes_fase30 + testes_fase69
-                           + testes_fase76 + testes_fase77):
+                           + testes_fase76 + testes_fase77 + testes_fase79):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

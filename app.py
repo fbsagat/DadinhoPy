@@ -1391,9 +1391,11 @@ def adicionar_ia(dados, lobby, jogador):
     """O master adiciona bots à sala de espera (níveis 1-4, Fase 11)."""
     if lobby.status != 'espera':
         return
-    if ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1)):
+    criados = ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1))
+    if criados:
         atualizar_lista_usuarios(lobby)
         _avisar_lobby_lotado(lobby, jogador)
+        _confirmar_bots_ao_master(jogador, criados)
 
 
 @socketio.on('completar_com_ias')
@@ -1403,9 +1405,11 @@ def completar_com_ias(dados, lobby, jogador):
     """O master preenche as vagas restantes da sala com bots (Fase 11)."""
     if lobby.status != 'espera':
         return
-    if ia.completar_bots(lobby, dados.get('nivel', 2)):
+    criados = ia.completar_bots(lobby, dados.get('nivel', 2))
+    if criados:
         atualizar_lista_usuarios(lobby)
         _avisar_lobby_lotado(lobby, jogador)
+        _confirmar_bots_ao_master(jogador, criados)
 
 
 @socketio.on('remover_ia')
@@ -1454,6 +1458,22 @@ def _avisar_lobby_lotado(lobby, jogador):
     limite = int(lobby.config.get('max_jogadores', 6))
     if len(lobby.jogadores) >= limite:
         emit('lobby_lotado', {}, to=jogador.client_id, ignore_queue=True)
+
+
+def _confirmar_bots_ao_master(jogador, criados):
+    """
+    Fase 79: confirma ao master que o(s) bot(s) entraram MESMO na mesa — o
+    cliente toca o som de entrada a partir daqui. Importa o emit ser
+    individual e vir DEPOIS do `atualizar_lista_usuarios`: quem pede é sempre o
+    master (a sala dele está na instância que tratou o comando, então o
+    `ignore_queue` não perde nada), e a ordem de chegada faz a lista remontar
+    antes do som, para o "bip" soar como confirmação do que apareceu na tela.
+    `criados` é a lista devolvida por `ia.adicionar_bots`/`ia.completar_bots`:
+    o que não coube em `max_jogadores` não vem nela, então sala lotada não
+    confirma bots que não existem.
+    """
+    emit('bot_adicionado', {'quantidade': len(criados)},
+         to=jogador.client_id, ignore_queue=True)
 
 
 @socketio.on('expulsar_jogador')

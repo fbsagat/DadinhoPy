@@ -6,6 +6,8 @@ integração em `tests/test_integracao.py`; este arquivo só orquestra:
 """
 from tests.base import *  # noqa: F401,F403
 
+import re
+
 
 def verificar_py_compile():
     print("1) py_compile")
@@ -158,6 +160,87 @@ def verificar_musica(node):
     )
     _checar("motor da musica (tempo real)", resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
+
+
+# ---------------------------------------------------------------------------
+# 2a) paridade das listas de emojis entre o servidor e o cliente
+# ---------------------------------------------------------------------------
+# O picker é renderizado a partir de uma CÓPIA hard-coded em `static/script.js`
+# (o servidor nunca emite o catálogo), então adicionar emoji só em
+# `funcoes_gerais.py` não faz nada no frontend — e o caminho inverso é pior: o
+# servidor descarta o emoji com `return` silencioso. As duas listas já divergiram
+# uma vez (🤫/🖕/🍀/🎲 existiam no servidor e eram invisíveis no picker). Este
+# guard fecha a classe de bug comparando as duas fontes.
+_RE_LISTA_JS = re.compile(r"const\s+EMOJIS_POR_CATEGORIA\s*=\s*\{(.*?)\};", re.S)
+_RE_CATEGORIA_JS = re.compile(r"(\w+)\s*:\s*\[(.*?)\]", re.S)
+_RE_LISTA_PY = re.compile(r"^EMOJIS_(PROVOCATIVOS|AMIGAVEIS|GERAIS)\s*=\s*\[(.*?)\]", re.M)
+_RE_POOL_IA = re.compile(r"^_EMOJI_\w+\s*=\s*\[(.*?)\]", re.M)
+
+
+def _emojis_de(bruto):
+    """Emojis de uma lista literal (`['a', 'b']` ou `["a", "b"]`)."""
+    return [v.strip().strip("\"'") for v in bruto.split(",") if v.strip().strip("\"'")]
+
+
+def _texto(rel):
+    with open(os.path.join(RAIZ, rel), encoding="utf-8") as arquivo:
+        return arquivo.read()
+
+
+def _esc(emojis):
+    """Emojis como `\\U0001f92b`. Segunda camada: `tests.base` já força UTF-8 no
+    stream, mas se o `reconfigure` não puder ser aplicado (stdout capturado por
+    um harness), o `_falhou` estoura UnicodeEncodeError em vez de reportar a
+    falha — e uma verificação que MORRE é pior que uma que falha."""
+    return ", ".join("".join(f"\\U{ord(c):08X}" for c in e) for e in emojis) or "(nenhum)"
+
+
+def verificar_paridade_emojis():
+    print("2a) paridade das listas de emojis (funcoes_gerais.py <-> static/script.js)")
+    achados = {m.group(1): _emojis_de(m.group(2))
+               for m in _RE_LISTA_PY.finditer(_texto("funcoes_gerais.py"))}
+    servidor = {}
+    for chave, categoria in (("PROVOCATIVOS", "provocativo"),
+                             ("AMIGAVEIS", "amigavel"),
+                             ("GERAIS", "geral")):
+        if chave not in achados:
+            _falhou("paridade emojis", f"funcoes_gerais.py sem EMOJIS_{chave}")
+        else:
+            servidor[categoria] = achados[chave]
+
+    bloco = _RE_LISTA_JS.search(_texto(os.path.join("static", "script.js")))
+    if bloco is None:
+        _falhou("paridade emojis", "script.js sem `const EMOJIS_POR_CATEGORIA`")
+        return
+    cliente = {m.group(1): _emojis_de(m.group(2))
+               for m in _RE_CATEGORIA_JS.finditer(bloco.group(1))}
+
+    problemas = []
+    if set(cliente) != set(servidor):
+        problemas.append(f"categorias servidor={sorted(servidor)} cliente={sorted(cliente)}")
+    for categoria in sorted(set(servidor) & set(cliente)):
+        if servidor[categoria] != cliente[categoria]:
+            problemas.append(
+                f"{categoria}: so no servidor (invisivel no picker) "
+                f"{_esc(sorted(set(servidor[categoria]) - set(cliente[categoria])))}; "
+                f"so no cliente (rejeitado pelo servidor) "
+                f"{_esc(sorted(set(cliente[categoria]) - set(servidor[categoria])))}")
+
+    # Os pools de reação dos bots são uma lista independente e um emoji fora da
+    # whitelist é descartado em silêncio por `bot_enviar_emoji` (a reação nunca
+    # aparece) — sem erro, sem log.
+    permitidos = {e for lista in servidor.values() for e in lista}
+    for linha in _RE_POOL_IA.finditer(_texto("ia.py")):
+        fora = sorted(set(_emojis_de(linha.group(1))) - permitidos)
+        if fora:
+            problemas.append(f"ia.py pool {linha.group(0).split('=')[0].strip()}: "
+                             f"fora da whitelist {_esc(fora)}")
+
+    if problemas:
+        _falhou("paridade emojis", "; ".join(problemas))
+    else:
+        total = sum(len(v) for v in servidor.values())
+        _ok(f"emojis: {total} em {len(servidor)} categorias, cliente identico e pools da IA na whitelist")
 
 
 # ---------------------------------------------------------------------------
@@ -856,6 +939,7 @@ def main():
     inicio = time.time()
     verificar_py_compile()
     verificar_node()
+    verificar_paridade_emojis()
     verificar_boot()
     verificar_store_producao()
     verificar_gevent()
