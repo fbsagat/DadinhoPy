@@ -1207,19 +1207,20 @@ h5,
     margin-left: 26px;
 }
 
-/* Grid no desktop: cards com largura FIXA e igual (198px), grupo SEMPRE
+/* Grid no desktop: cards com largura FIXA e igual (216px), grupo SEMPRE
    centralizado em qualquer quantidade de jogadores. Fase 32 (P2) usava
    `auto-fit` com `1fr`, que esticava os cards da última linha; a troca para
    `auto-fill` (P2) deixava os cards espalhados (trilhos vazios ocupavam
-   espaço). Agora as trilhas são fixas (`repeat(auto-fit, 198px)`): nenhum
-   nome de jogador muda o tamanho do card. */
+   espaço). Agora as trilhas são fixas (`repeat(auto-fit, 216px)`): nenhum
+   nome de jogador muda o tamanho do card. Fase nova: 198px → 216px dá +18px
+   para o apelido (ver `.nome-jogador` multi-line abaixo). */
 @media (min-width: 992px) {
     #cards {
         /* `!important` vence o `display: flex !important` do `.d-flex` do
            Bootstrap (o `#cards` usa a classe no HTML) — sem isto o desktop
            continuava em flex e as colunas `col-*` alargavam conforme o nome. */
         display: grid !important;
-        grid-template-columns: repeat(auto-fit, 198px);
+        grid-template-columns: repeat(auto-fit, 216px);
         gap: 0.6rem;
         justify-content: center;
         width: 100%;
@@ -1235,7 +1236,7 @@ h5,
 /* Fase 32 (P3): cards de jogadores com altura FIXA e compactos — o histórico
    de até 3 jogadas cabe sem crescer; se passar, rola dentro do corpo. */
 #cards .card {
-    height: 163px;
+    height: 166px;
     min-width: 0;
 }
 
@@ -1267,15 +1268,33 @@ h5,
     white-space: nowrap;
 }
 
-/* Cards com largura FIXA e igual (198px) em QUALQUER breakpoint: a regra tem
+/* Desktop (992px+): 198px → 216px (Fase nova) dá mais largura para o nome.
+   O nome passa a ocupar 2 linhas (line-clamp) e o badge fica em 0.75rem — a
+   combinação rende ~35% mais caracteres visíveis antes do truncate. */
+@media (min-width: 992px) {
+    #cards .card-header .nome-jogador {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal;
+        text-overflow: clip;
+        font-size: 0.9rem;
+    }
+
+    #cards .card-header .badge-dados {
+        font-size: 0.75rem;
+    }
+}
+
+/* Cards com largura FIXA e igual (216px) em QUALQUER breakpoint: a regra tem
    mais especificidade que as classes `col-*` do Bootstrap, então o nome do
    jogador nunca altera o tamanho — no desktop o grid usa trilhas fixas de
    iguais; no mobile/tablet o flex `justify-content-center` centraliza. */
 #cards > div {
     min-width: 0;
-    flex: 0 0 198px !important;
-    width: 198px !important;
-    max-width: 198px !important;
+    flex: 0 0 216px !important;
+    width: 216px !important;
+    max-width: 216px !important;
 }
 
 #cards .card-body {
