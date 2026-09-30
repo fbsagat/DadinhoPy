@@ -1191,13 +1191,13 @@ h5,
     content: '▲';
     background-color: rgba(13, 202, 240, 0.30);
     color: #0dcaf0;
-    border: 3px solid rgba(13, 202, 240, 0.65);
+    border: 1px solid rgba(13, 202, 240, 0.65);
 }
 #cards .card-header.card-menos-dados::before {
     content: '▼';
     background-color: rgba(253, 126, 20, 0.30);
     color: #fd7e14;
-    border: 3px solid rgba(253, 126, 20, 0.65);
+    border: 1px solid rgba(253, 126, 20, 0.65);
 }
 /* Recuo no nome e no badge para não sobrepor o ícone do indicador */
 #cards .card-header.card-mais-dados .nome-jogador,
