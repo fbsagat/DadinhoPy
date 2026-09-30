@@ -13,15 +13,18 @@
 - **`python simular_ia.py --partidas 20 --dados 3`** — simulação headless dos bots (hierarquia 4>3>2>1 preservada, sem travamentos). Uso de balanceamento/verificação, não roda dentro do app.
 - **Sempre complementar com o teste manual em dois browser tabs**: criar sala, rodar partida completa até vitória. Único meio de verificação real do comportamento em produção.
 
-## Publicar na Vercel (fluxo real, Fase 3 do `todo.md`)
+## Publicar o frontend na Vercel (todo push de código)
+
+> **Produção é híbrida:** a Vercel serve **só a página** (`/`, estáticos, `/tema.mid`, robots/sitemap) e o Socket.IO vai para a API na **VPS** (`DADINHO_API_URL`, ver §Publicar na VPS). As envs de Upstash continuam exigidas na função da Vercel porque ela sobe o mesmo `app.py` — sem store, o boot com `VERCEL=1` **falha de propósito** (`store.py:1106-1127`) — mas **não** é onde o estado de jogo vive em produção. As duas seções descrevem o mesmo push: a §Vercel publica a página, a §VPS publica a API. O caminho **100% Vercel** (API serverless + estado no Upstash) continua suportado como alternativa sem operação de servidor.
 
 0. **Produção atual:** https://dadinho.memetrigger.com (domínio custom do projeto `dadinho` da Vercel, scope `fbsagats-projects`; alias de projeto também em https://dadinho-hazel.vercel.app). Git integration conectado ao `fbsagat/DadinhoPy` com **Production Branch = `master`**.
 
-1. **Pré-requisitos:** conta Vercel + CLI logado (`vercel whoami`), e um banco Redis REST da Upstash (node → panel → create database; copiar URL REST e token REST). Sem Upstash o código cai silenciosamente em `ArmazenamentoMemoria` (`store.py:257-266`), quebra o estado entre instâncias serverless — só serve para validar na hora.
+1. **Pré-requisitos:** conta Vercel + CLI logado (`vercel whoami`) e um banco Redis REST da Upstash (node → panel → create database; copiar URL REST e token REST) — obrigatório para a função subir (ver aviso acima), mesmo com a API na VPS.
 
 2. **Env vars na Vercel** (dashboard → Settings → Environment Variables, ou `vercel env add <NOME> production`):
    - `DADINHO_SECRET_KEY` — string longa aleatória (`secrets.token_hex(32)`).
-   - `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` — o par REST do banco Upstash.
+   - `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` — o par REST do banco Upstash (store da função; no deploy atual o estado de jogo fica no Redis da VPS).
+   - `DADINHO_API_URL` — URL pública da API na VPS (`https://dadinho-api.memetrigger.com`); é o que faz o `io()` do cliente sair da Vercel. **Vazio = tudo na Vercel** (caminho serverless, estado no Upstash).
    - `VERCEL=1` é setado automaticamente pela plataforma (muda transportes/`socketio.run`); `DADINHO_PERMITIR_WEBSOCKET` e `DADINHO_ASYNC_MODE` não precisam de valor (padrão já é o correto em produção).
 
 3. **Publicar:** `git push origin master` — a git integration deploya e promove para produção automaticamente (Production Branch = `master`), e `dadinho.memetrigger.com` acompanha na hora. Não é preciso `vercel --prod` manual; use apenas pontualmente se quiser publicar um estado local sem push (`.vercelignore` exclui `.venv`/`.idea`/`__pycache__`).
@@ -31,18 +34,19 @@
 ## Notas operacionais (validadas na Fase 3)
 
 - **Hobby (free):** função serverless até 300s (5 min); 2 GB memória; concorrência ~30k; região única (`iad1`, Virgínia); ~100 deploys/dia. WebSocket é o transporte padrão (beta na Vercel, jun/2026): a conexão fica presa a uma instância e só cai ao atingir a duração máxima da função (cliente reconecta), evitando o loop de reconexão do long-polling.
-- **Upstash free:** 256 MB, 500 mil comandos/mês, 10 GB banda. Detalhes do layout das chaves em `docs/arquitetura.md`. `salvar_resumo` é deduplicado por conteúdo em processo (não reescreve resumo idêntico). TTL resolve salas órfãs (função morreu sem disconnect → a sala expira sozinha).
+- **Upstash free (store da função da Vercel):** 256 MB, 500 mil comandos/mês, 10 GB banda. No deploy atual o tráfego de jogo **não** passa por lá (a API está na VPS, com o estado no `dadinho-redis` local), então o consumo é residual — mas os limites continuam valendo para a função. Detalhes do layout das chaves (idêntico nas duas implementações) em `docs/arquitetura.md`. `salvar_resumo` é deduplicado por conteúdo em processo (não reescreve resumo idêntico). TTL resolve salas órfãs (instância morreu sem disconnect → a sala expira sozinha).
 - **Custo do heartbeat (Fase C):** cadência da espera 5s → 20s; `heartbeat` não passa por `autenticar`; partida usa o cache tolerante `store.carregar_sala_leve` (TTL 25s) e só a espera recarrega fresco; piso do `visto_em` 30s → 60s. Estourava o free tier com poucos jogadores ociosos.
-- **Limitação conhecida:** rooms/emits do Socket.IO vivem por instância → dois jogadores podem cair em instâncias diferentes e não ver emits um do outro (estado persiste no Upstash e é reidratado no reconnect). Coberta na espera pelo re-sync do heartbeat; gap durante a partida é iteração futura (message queue). Detalhes em `docs/arquitetura.md`.
+- **Rooms/emits por instância:** mitigado em produção pelo nginx sticky (`hash $ip_real consistent;`) + message queue no Redis da VPS; no caminho 100% Vercel sem `DADINHO_MESSAGE_QUEUE` o gap em partida continua, coberto só na espera pelo re-sync do heartbeat. Detalhes em `docs/arquitetura.md`.
 - **Sem leaderboard/estado de longo prazo:** casual only; o store guarda só o lobby atual de cada sala.
 - **Proteção de deploy (Vercel Authentication):** o projeto tem `ssoProtection` = `all_except_custom_domains`. Os domínios registrados (`dadinho.memetrigger.com` e `dadinho-hazel.vercel.app`) são isentos e servem o jogo; os aliases `.vercel.app` não-registrados (ex.: `dadinho-git-master-fbsagats-projects.vercel.app`) caem na tela de login/proteção da Vercel — não é outra versão do deploy.
-- **Segredos:** `DADINHO_SECRET_KEY`/tokens Upstash vêm de env vars — não comitar. Não subir `.env*`/`.vercel` (OIDC token) para a Vercel.
+- **Segredos:** `DADINHO_SECRET_KEY`/tokens Upstash (Vercel) e o `.env` da VPS (`/opt/dadinho/.env`, 600) vêm de env vars — não comitar. Não subir `.env*`/`.vercel` (OIDC token) para a Vercel.
 
-## Publicar na VPS (Fase 46 — API própria em processo persistente)
+## Publicar na VPS (Fase 46 — **deploy de produção** da API)
 
 Cenário: a Vercel sozinha não garante a persistência dos processos (serverless recicla a
 função e derruba o socket). Com uma VPS, a **API** (Socket.IO) roda como processo
-persistente em Docker; o **frontend continua na Vercel** (só a API na VPS).
+persistente em Docker; o **frontend continua na Vercel** (só a API na VPS). É o deploy
+**em uso hoje** — a §Vercel acima publica a página, esta publica o jogo.
 
 **Estado real (2026-09-15):** deploy feito na VPS de produção do MemeTrigger
 (`167.126.27.4` público / tailscale `100.70.126.50` primário, Oracle Ampere A1 /
@@ -68,7 +72,7 @@ a VPS vivo e o deploy prosseguiu via `100.70.126.50`).
      (`DADINHO_REDIS_URL`).
 
 2. **Variáveis de ambiente no `/opt/dadinho/.env`** (600, gitignored):
-   - `DADINHO_REDIS_URL=redis://redis:6379/0` — estado do jogo (`store.ArmazenamentoRedis`).
+   - `DADINHO_REDIS_URL=redis://redis:6379/0` — estado do jogo (`store.ArmazenamentoRedis`); é onde o estado de produção vive.
    - `DADINHO_MESSAGE_QUEUE=redis://redis:6379/0` — emits entre instâncias no mesmo Redis.
    - `DADINHO_SECRET_KEY` — string longa aleatória (`secrets.token_hex(32)`).
    - `DADINHO_CORS_ORIGINS` — origens do frontend (Vercel). Deploy atual: `*` (casual).
@@ -111,7 +115,7 @@ a VPS vivo e o deploy prosseguiu via `100.70.126.50`).
 
 6. **Observações de operação:**
    - `DADINHO_REDIS_URL`/`DADINHO_MESSAGE_QUEUE` são para a VPS — a Vercel não alcança um
-     Redis local (o boot com `VERCEL=1` segue exigindo o Upstash).
+     Redis local. O boot da função na Vercel segue exigindo o par Upstash (§Vercel acima).
    - Logs/estado: `docker compose logs -f api` (e `-f nginx`, Fase 59 — o nginx loga
      JSON no stdout com o IP real e o status de cada request), `docker compose ps`
      (em `/opt/dadinho`). Eventos suspeitos do anti-fraude/captcha/limite saem no
@@ -226,5 +230,7 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
 - **Alerta Upstash (manual, pendente):** no console da Upstash → database → **Alerts**, criar alertas de
   **comandos/mês** (free tier = 500 mil — sugestão: alertar a ~400 mil, 80%) e de **banda** (10 GB —
   sugestão: ~8 GB). Não há CLI para isso; conferir no painel antes de um pico de abuso pegar de surpresa.
+  Relevância atual: baixa — a função da Vercel só serve a página; o tráfego de jogo está no Redis da VPS
+  (o alerta que importa hoje é de saúde do `dadinho-redis`, ver `docs/runbook.md` §6).
 - **Funil sem PII (Fase 42):** Vercel Web Analytics com eventos `sala_criada`/`partida_iniciada`/
   `partida_concluida`/`jogador_saiu_antes` — sem `client_id`/`chave_secreta` (habilitar no dashboard).

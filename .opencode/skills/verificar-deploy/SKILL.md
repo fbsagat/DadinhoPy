@@ -1,11 +1,11 @@
 ---
 name: verificar-deploy
-description: Use ao verificar, testar ou publicar o Dadinho — "verificar", "verificar.py", "rodar testes", "simular_ia", "deploy", "publicar", "Vercel", "Upstash". Cobre o pipeline local, o boot e o fluxo de deploy com validação.
+description: Use ao verificar, testar ou publicar o Dadinho — "verificar", "verificar.py", "rodar testes", "simular_ia", "deploy", "publicar", "Vercel", "VPS", "atualizar_vps", "Upstash". Cobre o pipeline local, o boot e o fluxo de deploy com validação.
 ---
 
 # Verificação e deploy — Dadinho
 
-Pipeline completo de verificação local e publicação na Vercel. Referência estendida em `docs/verificacao.md`.
+Pipeline completo de verificação local e publicação. Referência estendida em `docs/verificacao.md`. **Produção = frontend na Vercel + API em Docker na VPS** (estado no `dadinho-redis`); o caminho 100% Vercel (Upstash) segue suportado como alternativa.
 
 ## 1. Verificação local (repo root, usar `.venv`)
 
@@ -16,20 +16,21 @@ Pipeline completo de verificação local e publicação na Vercel. Referência e
 
 ## 2. Boot / produção
 
-- Produção: https://dadinho-hazel.vercel.app (projeto `dadinho`, scope `fbsagats-projects`, GitHub `fbsagat/DadinhoPy`).
-- Sem Upstash configurado o código cai em memória (`store.py:257-266`) — só serve para validar local.
+- Produção: frontend em https://dadinho.memetrigger.com (projeto `dadinho`, scope `fbsagats-projects`, GitHub `fbsagat/DadinhoPy`); API/socket em https://dadinho-api.memetrigger.com (VPS).
+- Sem store configurado o código cai em memória em dev — só serve para validar local. Com `VERCEL=1` o boot **falha de propósito** (`store.py:1106-1127`): é por isso que a função da Vercel exige as envs do Upstash mesmo com a API na VPS.
 
-## 3. Deploy (Vercel)
+## 3. Deploy (Vercel — frontend)
 
-1. Pré-requisitos: `vercel whoami` logado; banco Redis REST da Upstash (URL REST + token REST).
+1. Pré-requisitos: `vercel whoami` logado; banco Redis REST da Upstash (URL REST + token REST) para a função subir.
 2. Env vars em produção:
    - `DADINHO_SECRET_KEY` (`secrets.token_hex(32)`);
    - `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`;
+   - `DADINHO_API_URL` = URL da API na VPS (vazio = tudo na Vercel, estado no Upstash);
    - `VERCEL=1` automático; `DADINHO_PERMITIR_WEBSOCKET`/`DADINHO_ASYNC_MODE` deixam o default.
-3. **`vercel --prod`** (ou git integration / push). `.vercelignore` exclui `.venv`/`.idea`/`__pycache__`/`.env*`/`.vercel`.
-4. Validar em 2+ abas/navegadores, partida completa. Checar `API commands` no painel da Upstash se algo parar (orçamento de 500k comandos/mês).
+3. **`git push origin master`** (git integration; `vercel --prod` só pontualmente). `.vercelignore` exclui `.venv`/`.idea`/`__pycache__`/`.env*`/`.vercel`.
+4. Validar em 2+ abas/navegadores, partida completa. Estado de jogo **não** está no Upstash no deploy atual (está no Redis da VPS) — o painel da Upstash só serve para o caminho 100% Vercel.
 
-## 3.1 Deploy (VPS — Fases 46/77)
+## 3.1 Deploy (VPS — **produção da API**; Fases 46/77)
 
 Sem auto-deploy e sem git em `/opt/dadinho`: **`.\atualizar_vps.ps1 -Chave <caminho>`**
 (copia com tar preservando `.env`/`cloudflared/config.yml`, `--build` de `api api2 api3 api4 nginx gc`,

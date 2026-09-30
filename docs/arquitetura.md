@@ -5,7 +5,7 @@ Referência de arquitetura. Regras operacionais (comandos, convenções, invaria
 ## Visão geral
 
 - **Socket.IO only, sem REST** além de `/` (serve `templates/jogo.html`) e `/tema.mid` (asset gerado, Fase 12). Todo o fluxo do jogo é orientado a eventos (`flask_socketio.emit`).
-- **Alvo: Vercel** (serverless/edge). Premissa de **infraestrutura sem estado**: nada de pressupostos de servidor único, nada de estado em memória persistente entre requests. O estado de jogo vive no store distribuído (`store.py`).
+- **Alvo: código serverless-safe**, deploy em duas topologias (ADR-001): a **Vercel** (serverless/edge, frontend + caminho completo) e a **API em processo persistente na VPS** (que é o deploy de produção: frontend na Vercel + API/Redis na VPS). Premissa de **infraestrutura sem estado** nas duas: nada de pressupostos de servidor único, nada de estado em memória persistente entre requests. O estado de jogo vive no store distribuído (`store.py`).
 - **Casual only**: sem contas, sem ranking, sem leaderboard. O estado do jogador reseta por partida; identidade = Socket.IO `request.sid`.
 
 ## Camada de estado (`store.py`)
@@ -14,9 +14,13 @@ Interface distribuída (não em processo):
 
 - `carregar_sala` / `salvar_sala` / `remover_sala` / `listar_lobbys`
 - Índices (Fase 8): `salvar_resumo` / `listar_resumos` e `registrar_sid` / `sala_do_sid` / `desregistrar_sid`
-- Implementações: `ArmazenamentoMemoria` (dev, `DADINHO_STORE=memoria`) e `ArmazenamentoUpstash` (Redis REST via `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`). Sem Upstash configurado, cai **silenciosamente** em memória (`store.py:257-266`) — quebra o estado entre instâncias serverless, só serve para validar na hora.
+- Implementações, escolhidas por env var em `store._selecionar_armazenamento` (`store.py:1106-1127`), **nesta ordem**:
+  1. `ArmazenamentoMemoria` — `DADINHO_STORE=memoria` (dev/testes).
+  2. `ArmazenamentoUpstash` — Redis REST, com `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`. É o store do **caminho 100% Vercel** e o que a função da Vercel usa para subir (o estado de jogo em produção **não** está aqui — está no Redis da VPS).
+  3. `ArmazenamentoRedis` — Redis **TCP** via redis-py, com `DADINHO_REDIS_URL`. É o store **de produção** (API na VPS, mesmo layout/TTL da Upstash).
+- Sem nenhum dos dois configurados, em dev o app cai silenciosamente em memória; com `VERCEL=1` o boot **falha de propósito** (Fase 27 I2) — em serverless cada cold start em memória zeria todo o estado sem sinal.
 
-Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash único:
+Layout do store (chaves Redis, Fase 8 — **idêntico** nas duas implementações) — chaves próprias com TTL, nada de hash único:
 
 | Chave | Conteúdo | TTL |
 |---|---|---|
@@ -29,7 +33,7 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 
 - `store.salvar_resumo` é deduplicado por conteúdo (cache em processo) para não reescrever resumo idêntico.
 - TTL resolve salas órfãs: função morre sem disconnect → sala expira sozinha. É também a **barreira final** do cancelamento por abandono: com a sala sem humano, o TTL cai para 120s mesmo que nenhum dos caminhos de limpeza rode (ADR-011).
-- Escritas complexas usam `_comando` (body-style POST com array JSON); leituras usam path-style (`GET`/`INCR`/`SCAN`).
+- Escritas complexas usam `_comando` (body-style POST com array JSON na REST da Upstash; `redis.pipeline()` no TCP); leituras usam path-style (`GET`/`INCR`/`SCAN`).
 
 ## Isolamento por sala e modelagem
 
@@ -109,24 +113,24 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 - `api/index.py` exporta `application = app.wsgi_app` (middleware Socket.IO); `vercel.json` usa builder `@vercel/python` com rota catch-all. `app.secret_key` vem de `DADINHO_SECRET_KEY` (fallback dev `supersecretkey`).
 - Transporte: `DADINHO_ASYNC_MODE`, `DADINHO_PERMITIR_WEBSOCKET` (default `true`; `=0` desliga o upgrade). O cliente pede `['websocket']` (transporte **único**, `static/script.js`; Fase 66/ADR-008) — Vercel suporta WebSocket nativamente desde jun/2026; o WS prende a conexão numa instância; o long-polling quebrava porque cada request de poll caía numa instância sem a sessão Engine.IO (`Invalid session`), e na VPS multi-réplica o polling fragmentava quando o IP real mudava no meio da conexão (rede móvel). O erro de WS agora é sinalizado ao usuário (Fase 65/M1).
 
-## Deploy na VPS (Fase 46)
+## Deploy na VPS (Fase 46) — **topologia de produção**
 
-**Cenário:** a Vercel não garante a persistência dos processos (serverless recicla a função e derruba o socket). Com uma VPS, a API vira um **processo persistente** (Docker + gunicorn) e o frontend continua na Vercel. Detalhes operacionais em `docs/verificacao.md`.
+**Cenário:** a Vercel não garante a persistência dos processos (serverless recicla a função e derruba o socket). Com uma VPS, a API vira um **processo persistente** (Docker + gunicorn) e o frontend continua na Vercel. É o deploy **em uso hoje** (4 réplicas, nginx de borda e Redis local — Fase 59/61/77); o caminho 100% Vercel continua suportado e é o que a seção acima descreve. Detalhes operacionais em `docs/verificacao.md` e topologia/incidente em `docs/runbook.md`.
 
 - **Topologia:** "só a API na VPS" — a Vercel continua servindo a página (`/`, estáticos, `/tema.mid`, robots/sitemap); o `io()` do cliente conecta **cross-origin** na VPS. A URL da API é injetada no template pelo servidor: `DADINHO_API_URL` → `<meta name="dadinho-api-url">` → `static/script.js` (`io(api_url || undefined, {...})`). Vazio = mesmo host (regressão zero no deploy 100% Vercel).
 - **CORS:** `DADINHO_CORS_ORIGINS` (lista separada por vírgula ou `*`) no `SocketIO(...)`; vazio = same-origin (comportamento atual). O CSP `connect-src` inclui a origem da API quando `DADINHO_API_URL` está definida.
-- **Estado:** `store.py` ganhou `ArmazenamentoRedis` (Redis TCP local via redis-py, mesmo layout/TTL do Upstash) selecionado por `DADINHO_REDIS_URL` (ex.: `redis://redis:6379/0` no docker-compose). O lock distribuído (`trancar_sala_distribuida`) também funciona sobre ele (SET NX/EX + DELEX IFEQ via script Lua). A message queue (`DADINHO_MESSAGE_QUEUE`) usa o MESMO Redis local (`redis://`) para emits entre instâncias.
+- **Estado (produção):** `store.py` ganhou `ArmazenamentoRedis` (Redis TCP local via redis-py, mesmo layout/TTL do Upstash) selecionado por `DADINHO_REDIS_URL` (ex.: `redis://redis:6379/0` no docker-compose) — é onde o estado de jogo de verdade vive. O lock distribuído (`trancar_sala_distribuida`) também funciona sobre ele (SET NX/EX + DELEX IFEQ via script Lua). A message queue (`DADINHO_MESSAGE_QUEUE`) usa o MESMO Redis local (`redis://`) para emits entre instâncias.
 - **Execução:** `Dockerfile` + `docker-compose.yml` sobem `api` (gunicorn `-w 1 --threads 100`, async_mode `threading` + simple-websocket = WebSocket OK) e `redis:7-alpine` com AOF. `-w 1` é obrigatório: o load balancer do gunicorn não faz sticky session (escala = múltiplas instâncias atrás de um LB + message queue).
 - **Exposição (Cloudflare Tunnel):** a porta 8000 da API fica **em loopback** (`127.0.0.1:8000`); o container `dadinho-tunnel` (`cloudflare/cloudflared`, `network_mode: host`) expõe `dadinho-api.memetrigger.com → http://localhost:8000` via ingress local em `cloudflared/config.yml` (exemplo versionado). No DNS da zona é preciso um **CNAME manual** `dadinho-api → <tunnel-id>.cfargotunnel.com` (a "hostname route" do painel não cria o CNAME). O UFW da VPS não abre porta nova.
 - **Diferença vs. serverless:** na VPS o heartbeat/re-sync entre instâncias continua funcionando (harmless), mas a instância única + message queue local eliminam o gap de tempo real da partida que existia entre instâncias da Vercel.
 
-## Limitação conhecida (parcialmente mitigada)
+## Limitação cross-instance (residual: só no caminho 100% Vercel)
 
-Rooms/emits do Socket.IO vivem em memória **por instância**; dois jogadores podem cair em instâncias diferentes e não ver os emits um do outro (o estado persiste no Upstash e é reidratado no reconnect).
+Rooms/emits do Socket.IO vivem em memória **por instância**; dois jogadores em instâncias diferentes não veem os emits um do outro (o estado persiste no store e é reidratado no reconnect). **Em produção (API na VPS) o gap está fechado** — nginx com sticky por IP real + `DADINHO_MESSAGE_QUEUE` (pub/sub no Redis) — e o que resta abaixo é o que ainda importa no caminho serverless sem message queue.
 
 - **Sala de espera:** gap coberto pelo re-sync do heartbeat (Fases 18/19): o cliente bate a cada 20s e o servidor responde `update_user_list` direcionado ao cliente que bateu, lido do store compartilhado (`montar_payload_lista_usuarios`). **Fase E2:** a espera SEMPRE recarrega o estado **fresco do store em toda batida** (não o cache) — antes, o não-master recebia lista defasada e o início da partida só era detectado quando o cache expirava (regressão guardada em `verificar.py` como `heartbeat-espera-fresco`). **Fase E:** o heartbeat também re-sincroniza página — se `pagina` do cliente divergir da autoritativa, devolve `enviar_snapshot_sala`; o botão de iniciar do master fica sempre ativo (servidor valida `pode_iniciar` fresco e devolve `iniciar_negado` com motivo).
-- **Heartbeat da partida:** cadência 60s; `heartbeat` **não passa por `autenticar`** (um GET + deserialização na Upstash por batida estourava o free tier), usa índice em processo + cache tolerante a defasagem `store.carregar_sala_leve` (TTL 25s, por sala, atualizado a cada `salvar_sala`). Com estado do cache ele **não roda `ia.processar`** (mutação só com leitura fresca). Piso do `visto_em` de 60s para não reescrever o resumo a cada batida curta.
+- **Heartbeat da partida:** cadência 60s; `heartbeat` **não passa por `autenticar`** (um GET + deserialização no store por batida), usa índice em processo + cache tolerante a defasagem `store.carregar_sala_leve` (TTL 25s, por sala, atualizado a cada `salvar_sala`). Com estado do cache ele **não roda `ia.processar`** (mutação só com leitura fresca). Piso do `visto_em` de 60s para não reescrever o resumo a cada batida curta.
 - **Fase 75 — heartbeat também é a rede de segurança da jogada automática:** o `autojogar` é emitido pelo contador do cliente, então é apenas *best effort*. `_tem_prazo_vencido(lobby)` (avaliado no cache — só decide se vale a entrada no lock) faz o heartbeat entrar no caminho lockado quando algum humano venceu o prazo; lá dentro, com leitura fresca, `_autojogar_vencidos` age por todos eles com o motor da IA e o `salvar_sala_com_resumo` persiste. Sem isso, uma aba em segundo plano ou um evento perdido travava a sala em silêncio. `ia.processar` ao lado **não** cobre o caso — ele só age por IAs. `tempo_max_jogada=0` desliga o comportamento.
 
-- **Gap durante a partida** (apostas/turnos em tempo real entre instâncias) continua; se quebrar partidas de verdade, a saída é um message queue (`socketio.RedisManager` via Upstash/Redis TCP) — iteração futura.
+- **Gap durante a partida** (apostas/turnos em tempo real entre instâncias) foi fechado pela message queue (`DADINHO_MESSAGE_QUEUE` → `socketio.RedisManager`/`GerenciadorRedisSeguro`, Fase 25): na VPS ela é o mesmo Redis do estado; no caminho 100% Vercel seria uma URL `rediss://` (Upstash ou outro Redis gerenciado) — **sem ela, o gap volta** e o re-sync do heartbeat é a única rede.
 - **Refresh/reconnect (Fase 73):** o rejoin é o caminho mais pesado (dois round-trips: `handle_connect` placeholder + `retomar_identidade`). Como os abortos de lock/stale são silenciosos, o cliente ganhou um **watchdog de `connect_start`** (derruba/reabre a conexão se o handshake não completar em ~9s) e o servidor passou a **logar os abortos** (`connect_abortado` em `handle_connect`, `handler_abortado` em `evento_mutavel`) — antes, a recuperação dependia do ping timeout do socket.io (~20s+). Não substitui o snapshot; só encurta a janela até a próxima tentativa.

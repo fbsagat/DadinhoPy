@@ -3,14 +3,17 @@
 Camada de armazenamento distribuído do estado das salas.
 
 Abstrai o estado do jogo (Lobby e toda a árvore Partida/Rodada/Turno/Jogador)
-atrás de uma interface comum, com duas implementações:
+atrás de uma interface comum, com três implementações:
 
 - ArmazenamentoMemoria: dicionário em processo (dev local / comportamento anterior);
-- ArmazenamentoUpstash: Redis REST da Upstash, recomendado para a Vercel.
+- ArmazenamentoRedis: Redis TCP via redis-py — o store de produção (API na VPS);
+- ArmazenamentoUpstash: Redis REST da Upstash (caminho 100% Vercel).
 
-A implementação é escolhida na importação pelas variáveis de ambiente
-UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (se presentes) ou
-DADINHO_STORE=memoria para forçar o modo local.
+A implementação é escolhida na importação, nesta ordem, pelas variáveis de ambiente:
+DADINHO_STORE=memoria (força o modo local) → UPSTASH_REDIS_REST_URL /
+UPSTASH_REDIS_REST_TOKEN (REST) → DADINHO_REDIS_URL (TCP). Sem nenhuma delas, cai
+em memória em dev; com VERCEL=1 o boot falha de propósito (sem store, todo cold
+start zeraria o estado sem sinal).
 
 Layout no Redis (Fase 8): cada dado é uma chave própria com TTL (expira sozinha
 se a função serverless morrer sem disparar o GC do disconnect — antes a sala

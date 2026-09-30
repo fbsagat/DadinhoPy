@@ -23,7 +23,7 @@
 
 - Comentários, docstrings, nomes de variáveis/eventos Socket.IO e mensagens de commit em **pt-BR** (`app.py:20-23` é o estilo).
 - `requirements.txt` é totalmente pinado — adicione deps pinadas igual.
-- `app.secret_key` vem de `DADINHO_SECRET_KEY`; tokens Upstash via env vars — não comitar segredos.
+- `app.secret_key` vem de `DADINHO_SECRET_KEY`; todo segredo (tokens Upstash, `.env` da VPS, `TURNSTILE_SECRET`) via env vars — não comitar segredos.
 
 ## Invariantes (toda mudança que toca o jogo)
 

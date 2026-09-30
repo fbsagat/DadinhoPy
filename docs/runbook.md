@@ -22,7 +22,9 @@ invariantes garantem que ninguém corrompe o jogo.
 No caminho Vercel puro (sem `DADINHO_API_URL`), o estado vive no **Upstash REST** e
 o rate limit é a **regra de firewall da Vercel** `rate-limit-socketio` (120 req/60s
 por IP em `/socket.io/`). As duas topologias compartilham o mesmo código
-(ADR-001).
+(ADR-001). Nota: no deploy híbrido a função da Vercel **também** precisa das envs
+do Upstash para subir (mesmo `app.py`; sem store o boot com `VERCEL=1` falha) —
+mas o estado de jogo está no `dadinho-redis` da VPS.
 
 ## 2. Acesso e comandos básicos
 
@@ -362,12 +364,19 @@ da correção deve reproduzir o hang; depois não pode mais.
 
 ## 10. Custo / alertas disparando
 
-- **Upstash (Vercel):** console → database → **Alerts** (comandos/mês ~80% de 500
-  mil; banda ~80% de 10 GB). Não há CLI — conferir no painel antes de um pico.
+- **Redis da VPS (produção):** o custo relevante é o da própria VPS (CPU/RAM do
+  compose), não um free tier de comandos. Alarme prático: `docker stats` /
+  `docker compose ps` com o `dadinho-redis` consumindo CPU alta de forma sustentada
+  (aí é banda/lock/vendor, §6) — o painel do Upstash não mostra esse tráfego.
+- **Upstash (função da Vercel, caminho serverless):** console → database →
+  **Alerts** (comandos/mês ~80% de 500 mil; banda ~80% de 10 GB). Não há CLI —
+  conferir no painel antes de um pico. No deploy atual o consumo é residual (a
+  função só serve a página; o jogo está na VPS).
 - **Vercel:** regra `dadinho - anomalia de uso (invocacoes/duration)` (project
   `dadinho`) já criada; gerenciar com `vercel alerts rules ls/add/rm`. Boot com
-  `VERCEL=1` **exige** Upstash — sem ele o código cai em memória e o estado quebra
-  entre instâncias (não é um deploy válido).
+  `VERCEL=1` **exige** store configurado (Upstash) — sem ele o boot **falha**
+  ("Store não configurado"), em vez de cair em memória e quebrar o estado entre
+  instâncias. Erro de boot da função = quase sempre env do Upstash faltando.
 - **Sintoma de regressão de custo:** o heartbeat (cadência 20s na espera) e o fast
   path da Fase 60 existem justamente para isso; se os comandos subirem de novo,
   suspeite de handler novo adquirindo lock/Redis desnecessariamente (ADR-005).
