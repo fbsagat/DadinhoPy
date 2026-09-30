@@ -247,6 +247,58 @@ novo aborta e **fica conectado sem `connect_start`**.
 - **Não** aumentar `TRAVA_TENTATIVAS` às cegas: contenda alta indica que o
   `ia.processar`/save está segurando o lock por muito tempo (ver ADR-005).
 
+### 8.2. Salas abandonadas acumulando / serviço `gc` parado (Fase 77)
+
+Sintoma: a busca (`listar_partidas`) mostra salas velhas que ninguém está
+jogando; ou `docker compose ps` mostra `dadinho-gc` como `Exited`/`restarting`.
+
+A sala sem humano conectado deve morrer **60s** depois da saída do último
+humano (`TEMPO_SEM_HUMANO_SEGUNDOS`, override por
+`DADINHO_TEMPO_SEM_HUMANO_SEGUNDOS`). Há quatro camadas de defesa; quando a
+sala não some, quase sempre é uma delas:
+
+1. **`_gc_sala`** — só roda quando alguém toca a sala. Sala que ninguém mais
+   toca **não passa por aqui** (é o caso normal de um abandonamento).
+2. **Varredura oportunista** — `listar_partidas` chama
+   `funcoes_gerais.varrer_salas_abandonadas`, auto-limitada a **30s por
+   instância**. Se ninguém está na home, ela não roda: é por isso que existe a
+   camada 3.
+3. **Serviço `gc` (VPS)** — o garantido:
+   ```bash
+   sudo docker compose ps gc                       # deve estar Up (running)
+   sudo docker compose logs --tail=50 gc            # "canceladas por abandono: ABCD"
+   sudo docker exec -it dadinho-gc python gc_salas.py --uma-vez   # uma passada, saindo
+   ```
+   O `gc` roda com `restart: unless-stopped` e **não tem healthcheck** (não é
+   HTTP). Se reinicia em loop, o erro está no log; o mais comum é
+   `DADINHO_REDIS_URL` ausente (o script **falha de propósito**, em vez de
+   varrer memória vazia).
+4. **TTL curto** — barreira final: `dadinho:sala:<id>` (e `dadinho:resumo:<id>`)
+   expira em **120s** sem humano. Ou seja: **se uma sala sem humano continuar
+   viva por muito mais de 2 minutos, algo está errado com o carimbo, não com o
+   gc.** Inspecione:
+   ```bash
+   sudo docker exec -it dadinho-redis redis-cli get dadinho:resumo:<id>   # sem_humano_em, humanos
+   sudo docker exec -it dadinho-redis redis-cli ttl dadinho:sala:<id>      # 120 = sem humano
+   sudo docker exec -it dadinho-redis redis-cli ttl dadinho:lapide:<id>   # 300, some no 1º consumo
+   ```
+   `humanos: 0` sem `sem_humano_em` = sala gravada por um caminho que não
+   passou por `reavaliar_vida` (bug de persistência, não de limpeza).
+- **Sala cancelada que não sai da busca:** o resumo também tem TTL curto, então
+   sobra só o índice. Confira
+   `smembers dadinho:resumos` e confirme que o id sumiu; se sobrou, é
+   `srem` faltando no `remover_resumo`.
+- **Ajustar a janela** (ex.: partida longa que ninguém deve perder):
+  `DADINHO_TEMPO_SEM_HUMANO_SEGUNDOS=180` no `.env` da VPS e restart das réplicas
+  + do `gc` (a constante é lida no import). A lápide (300s) e o TTL curto
+  (120s) são fixos no código — para janelas maiores que 120s, mudar também
+  `store.TTL_SALA_SEM_HUMANO` ou o TTL vira a barreira antes da janela.
+- **Após cancelar uma sala à mão** (`del` das chaves), grave a lápide para o
+  usuário ter o motivo certo ao voltar:
+  ```bash
+  sudo docker exec -it dadinho-redis redis-cli setex dadinho:lapide:<id> 300 1
+  ```
+
 ## 9. Abuso / bot / rate limit
 
 Sintoma: usuários legítimos com erro 5xx ao conectar; pico de conexões; logs de

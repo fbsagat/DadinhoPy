@@ -330,18 +330,30 @@ def _armazenar_cache_resumo(sala_id, resumo):
 class ArmazenamentoMemoria:
     """Mantém os Lobby em memória no processo (mesmo comportamento de antes)."""
 
+    # Fase 77: a fachada `store.salvar_sala` lê estes valores. Aqui são inertes
+    # (memória não expira nada), mas precisam existir para a interface ser igual
+    # nos três backends. `TTL_SALA` é a referência do TTL longo dos outros dois
+    # (7 dias) — usada só por testes/observabilidade.
+    TTL_SALA = 604800
+    TTL_SALA_SEM_HUMANO = 120
+    TTL_LAPIDE = 300
+
     def __init__(self):
         self._salas = {}
         self._resumos = {}
         self._sids = {}
         self._ips = {}
+        self._lapides = {}
         self._contador = 0
         self._contador_trava = threading.Lock()
 
     def carregar_sala(self, sala_id):
         return self._salas.get(sala_id)
 
-    def salvar_sala(self, lobby):
+    def salvar_sala(self, lobby, ttl=None):
+        # `ttl` é no-op aqui: o backend em memória não expira nada (mesmo
+        # comportamento de sempre — a expiração é do Redis/Upstash). A assinatura
+        # aceita o parametro para os três backends terem a mesma interface.
         self._salas[lobby.sala_id] = lobby
 
     def remover_sala(self, sala_id):
@@ -357,10 +369,10 @@ class ArmazenamentoMemoria:
             self._contador += 1
             return self._contador
 
-    def salvar_resumo(self, sala_id, resumo):
+    def salvar_resumo(self, sala_id, resumo, ttl=None):
         self._resumos[sala_id] = resumo
 
-    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True, ttl=None):
         """Fase 60: grava Lobby + resumo numa chamada (interface comum; memória é trivial)."""
         self._salas[lobby.sala_id] = lobby
         if resumo_mudou:
@@ -398,6 +410,13 @@ class ArmazenamentoMemoria:
 
     def sids_do_ip(self, ip):
         return list(self._ips.get(ip, set()))
+
+    def marcar_sala_cancelada(self, sala_id):
+        """Fase 77: lápide de sala cancelada por abandono (one-shot, sem TTL aqui)."""
+        self._lapides[sala_id] = True
+
+    def consumir_sala_cancelada(self, sala_id):
+        return self._lapides.pop(sala_id, False) is True
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +477,7 @@ class ArmazenamentoUpstash:
     PREFIXO_RESUMO = "dadinho:resumo:"
     PREFIXO_SID = "dadinho:sid:"
     PREFIXO_IP = "dadinho:ip:"
+    PREFIXO_LAPIDE = "dadinho:lapide:"
     CHAVE_SEQUENCIA = "dadinho:lobby_seq"
     # Índice (SET) com os ids das salas que têm resumo, para a busca não varrer
     # o keyspace com SCAN a cada listagem.
@@ -467,6 +487,16 @@ class ArmazenamentoUpstash:
     TTL_SALA = 7 * 24 * 3600
     TTL_RESUMO = 7 * 24 * 3600
     TTL_SID = 24 * 3600
+    # Fase 77: sala SEM humano conectado é gravada com TTL curto
+    # (janela de retorno de 60s + folga), para que uma sala abandonada suma do
+    # store sozinha mesmo se ninguém nunca mais tocar nela. A escolha do TTL fica
+    # na fachada `store.salvar_sala` (que tem o Lobby); aqui é só o valor.
+    TTL_SALA_SEM_HUMANO = 120
+    # Fase 77: lápide da sala cancelada por abandono (ver
+    # `funcoes_gerais.cancelar_sala_por_abandono`) — sobrevive à deleção da sala
+    # para o `retomar_identidade` distinguir "partida cancelada" de "chave de
+    # outra sala". One-shot: o consumo apaga a chave.
+    TTL_LAPIDE = 300
     # Renovado a cada connect: o SET de um IP que parou de conectar some depois
     # de TTL_IP (evita bloquear um IP por uma instância que morreu sem disconnect).
     TTL_IP = 6 * 3600
@@ -553,6 +583,10 @@ class ArmazenamentoUpstash:
     def _chave_ip(cls, ip):
         return f"{cls.PREFIXO_IP}{ip}"
 
+    @classmethod
+    def _chave_lapide(cls, sala_id):
+        return f"{cls.PREFIXO_LAPIDE}{sala_id}"
+
     def carregar_sala(self, sala_id):
         resposta = self._pedido(
             "GET", f"get/{urllib.parse.quote(self._chave_sala(sala_id))}"
@@ -568,9 +602,10 @@ class ArmazenamentoUpstash:
             # próxima escrita (fluxo do GC).
             return None
 
-    def salvar_sala(self, lobby):
+    def salvar_sala(self, lobby, ttl=None):
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
-        self._comando("SET", self._chave_sala(lobby.sala_id), bloco, "EX", self.TTL_SALA)
+        self._comando("SET", self._chave_sala(lobby.sala_id), bloco,
+                      "EX", ttl if ttl else self.TTL_SALA)
 
     def remover_sala(self, sala_id):
         self._comando("DEL", self._chave_sala(sala_id))
@@ -613,27 +648,34 @@ class ArmazenamentoUpstash:
         resposta = self._pedido("GET", f"incr/{self.CHAVE_SEQUENCIA}")
         return (resposta or {}).get("result") or 1
 
-    def salvar_resumo(self, sala_id, resumo):
+    def salvar_resumo(self, sala_id, resumo, ttl=None):
         bloco = json.dumps(resumo, ensure_ascii=False)
         # Grava o resumo e inscreve a sala no índice de busca num só request.
         self._pipeline([
-            ["SET", self._chave_resumo(sala_id), bloco, "EX", self.TTL_RESUMO],
+            ["SET", self._chave_resumo(sala_id), bloco, "EX",
+             ttl if ttl else self.TTL_RESUMO],
             ["SADD", self.CHAVE_RESUMOS, sala_id],
         ])
 
-    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True, ttl=None):
         """
         Fase 60: persistir o Lobby e o resumo da busca num único request
         (pipeline) no caminho quente do `atualizar_lista_usuarios` — a chamada
         separada fazia 2 requests (SET do Lobby + pipeline do resumo). Com o
         resumo inalterado (dedup da assinatura), cai no SET único do Lobby,
         como a `salvar_sala`.
+
+        Fase 77: `ttl` curto (sala sem humano) vale para o RESUMO também — senão
+        a chave `dadinho:resumo:<id>` viveria 7 dias e o id só sairia do índice
+        `dadinho:resumos` na poda de `listar_resumos` (muito depois da sala).
         """
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
-        comandos = [["SET", self._chave_sala(lobby.sala_id), bloco, "EX", self.TTL_SALA]]
+        expira = ttl if ttl else self.TTL_SALA
+        comandos = [["SET", self._chave_sala(lobby.sala_id), bloco, "EX", expira]]
         if resumo_mudou:
             rbloco = json.dumps(resumo, ensure_ascii=False)
-            comandos.append(["SET", self._chave_resumo(lobby.sala_id), rbloco, "EX", self.TTL_RESUMO])
+            comandos.append(["SET", self._chave_resumo(lobby.sala_id), rbloco, "EX",
+                             ttl if ttl else self.TTL_RESUMO])
             comandos.append(["SADD", self.CHAVE_RESUMOS, lobby.sala_id])
         if len(comandos) == 1:
             self._comando(*comandos[0])
@@ -723,6 +765,23 @@ class ArmazenamentoUpstash:
         resposta = self._comando("SMEMBERS", self._chave_ip(ip))
         return list((resposta or {}).get("result") or [])
 
+    def marcar_sala_cancelada(self, sala_id):
+        """Fase 77: lápide de sala cancelada por abandono (TTL curto, one-shot)."""
+        self._comando("SET", self._chave_lapide(sala_id), "1", "EX", self.TTL_LAPIDE)
+
+    def consumir_sala_cancelada(self, sala_id):
+        """
+        Fase 77: True se a sala foi cancelada por abandono (e apaga a lápide, para
+        a mesma chave não virar "cancelada" numa segunda tentativa de retorno).
+        GET + DEL num pipeline: o consumo é one-shot por definição.
+        """
+        resposta = self._pipeline([
+            ["GET", self._chave_lapide(sala_id)],
+            ["DEL", self._chave_lapide(sala_id)],
+        ])
+        resultados = (resposta or {}).get("result") or []
+        return bool(resultados and resultados[0])
+
 
 class ArmazenamentoRedis:
     """
@@ -742,11 +801,16 @@ class ArmazenamentoRedis:
     PREFIXO_RESUMO = "dadinho:resumo:"
     PREFIXO_SID = "dadinho:sid:"
     PREFIXO_IP = "dadinho:ip:"
+    PREFIXO_LAPIDE = "dadinho:lapide:"
     CHAVE_SEQUENCIA = "dadinho:lobby_seq"
     CHAVE_RESUMOS = "dadinho:resumos"
     TTL_SALA = 7 * 24 * 3600
     TTL_RESUMO = 7 * 24 * 3600
     TTL_SID = 24 * 3600
+    # Fase 77 (mesmos valores do Upstash): TTL curto para sala sem humano e a
+    # lápide da sala cancelada. A escolha fica na fachada `store.salvar_sala`.
+    TTL_SALA_SEM_HUMANO = 120
+    TTL_LAPIDE = 300
     TTL_IP = 6 * 3600
 
     # Fase 60: compressão dos blobs do Lobby no Redis TCP da VPS. O JSON de uma
@@ -787,6 +851,10 @@ class ArmazenamentoRedis:
     @classmethod
     def _chave_ip(cls, ip):
         return f"{cls.PREFIXO_IP}{ip}"
+
+    @classmethod
+    def _chave_lapide(cls, sala_id):
+        return f"{cls.PREFIXO_LAPIDE}{sala_id}"
 
     @classmethod
     def _comprimir(cls, texto):
@@ -830,24 +898,28 @@ class ArmazenamentoRedis:
             # handler — a sala é tratada como inexistente e recriada no GC.
             return None
 
-    def salvar_sala(self, lobby):
+    def salvar_sala(self, lobby, ttl=None):
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
-        self._redis.set(self._chave_sala(lobby.sala_id),
-                        self._comprimir(bloco), ex=self.TTL_SALA)
+        self._redis.set(self._chave_sala(lobby.sala_id), self._comprimir(bloco),
+                        ex=ttl if ttl else self.TTL_SALA)
 
-    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+    def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True, ttl=None):
         """
         Fase 60: Lobby (comprimido) + resumo da busca num único pipeline —
         `atualizar_lista_usuarios` fazia 1 SET + 1 pipeline (resumo) separados.
         Com o resumo inalterado (dedup), grava só o Lobby.
+
+        Fase 77: `ttl` curto (sala sem humano) vale também para o resumo, senão a
+        chave dele sobreviveria 7 dias e o id ficaria no índice `dadinho:resumos`.
         """
         bloco = json.dumps(lobby.para_dict(), ensure_ascii=False)
         with self._redis.pipeline() as pipe:
-            pipe.set(self._chave_sala(lobby.sala_id),
-                     self._comprimir(bloco), ex=self.TTL_SALA)
+            pipe.set(self._chave_sala(lobby.sala_id), self._comprimir(bloco),
+                     ex=ttl if ttl else self.TTL_SALA)
             if resumo_mudou:
                 rbloco = json.dumps(resumo, ensure_ascii=False)
-                pipe.set(self._chave_resumo(lobby.sala_id), rbloco, ex=self.TTL_RESUMO)
+                pipe.set(self._chave_resumo(lobby.sala_id), rbloco,
+                         ex=ttl if ttl else self.TTL_RESUMO)
                 pipe.sadd(self.CHAVE_RESUMOS, lobby.sala_id)
             pipe.execute()
 
@@ -872,11 +944,11 @@ class ArmazenamentoRedis:
     def proximo_numero(self):
         return self._redis.incr(self.CHAVE_SEQUENCIA)
 
-    def salvar_resumo(self, sala_id, resumo):
+    def salvar_resumo(self, sala_id, resumo, ttl=None):
         bloco = json.dumps(resumo, ensure_ascii=False)
         # Grava o resumo e inscreve a sala no índice num único pipeline.
         with self._redis.pipeline() as pipe:
-            pipe.set(self._chave_resumo(sala_id), bloco, ex=self.TTL_RESUMO)
+            pipe.set(self._chave_resumo(sala_id), bloco, ex=ttl if ttl else self.TTL_RESUMO)
             pipe.sadd(self.CHAVE_RESUMOS, sala_id)
             pipe.execute()
 
@@ -950,6 +1022,21 @@ class ArmazenamentoRedis:
 
     def sids_do_ip(self, ip):
         return list(self._redis.smembers(self._chave_ip(ip)))
+
+    def marcar_sala_cancelada(self, sala_id):
+        """Fase 77: lápide de sala cancelada por abandono (TTL curto, one-shot)."""
+        self._redis.set(self._chave_lapide(sala_id), "1", ex=self.TTL_LAPIDE)
+
+    def consumir_sala_cancelada(self, sala_id):
+        """
+        Fase 77: True se a sala foi cancelada por abandono. GET + DEL num pipeline
+        transacional (redis-py) — o consumo é one-shot por definição.
+        """
+        with self._redis.pipeline() as pipe:
+            pipe.get(self._chave_lapide(sala_id))
+            pipe.delete(self._chave_lapide(sala_id))
+            marcado, _ = pipe.execute()
+        return bool(marcado)
 
     def _comando(self, *args):
         """
@@ -1058,6 +1145,27 @@ _revisoes_salvas = {}
 _revisoes_guard = threading.Lock()
 
 
+def _ttl_da_sala(lobby):
+    """
+    Fase 77: sala SEM humano conectado é persistida com TTL curto
+    (janela de retorno de 60s + folga), em vez dos 7 dias. É a rede de segurança
+    que apaga a sala abandonada mesmo sem nenhum request para dispará-la — o
+    cancelamento em si é decidido pelo `prazo_abandono_vencido` (funcoes_gerais),
+    aqui só se escolhe quanto tempo o store guarda o blob.
+
+    Sala com humano (jogador conectado OU espectador) fica no TTL longo: é a
+    sala viva, e     60s de TTL a mataria no meio da partida.
+    """
+    if lobby is None:
+        return None
+    try:
+        if lobby.tem_humano_conectado():
+            return None
+    except AttributeError:
+        return None
+    return armazenamento.TTL_SALA_SEM_HUMANO
+
+
 def salvar_sala(lobby):
     if lobby is None:
         return
@@ -1072,7 +1180,7 @@ def salvar_sala(lobby):
             raise ConflitoDeEstado(lobby.sala_id)
         lobby.revisao = max(lobby.revisao, anterior) + 1
         _revisoes_salvas[lobby.sala_id] = lobby.revisao
-    armazenamento.salvar_sala(lobby)
+    armazenamento.salvar_sala(lobby, ttl=_ttl_da_sala(lobby))
     # Mantém o cache de re-sync do heartbeat com o objeto recém-persistido.
     _armazenar_cache_sala(lobby.sala_id, lobby)
 
@@ -1097,13 +1205,18 @@ _resumos_assinatura = {}
 _resumos_assinatura_guard = threading.Lock()
 
 
-def salvar_resumo(sala_id, resumo):
+def salvar_resumo(sala_id, resumo, ttl=None):
     """
     Evita reescrever o resumo da busca quando o conteúdo não mudou: muitos
     eventos chamam `atualizar_lista_usuarios` sem alterar os campos relevantes
     (ex.: revelação de seed, reconexões), e cada gravação custa comandos na
     Upstash. O cache é por instância; entre instâncias a próxima divergência
     corrige. Fase 60: mantém o cache de leitura do resumo em dia.
+
+    Fase 77: o dedup pula a escrita, e com ela o TTL NÃO é renovado. Inofensivo
+    aqui (o resumo de uma sala morta não muda, e o TTL curto é justamente o que
+    a apaga), mas é a razão de a transição sala-com-gente -> sala-sem-gente
+    carregar `sem_humano_em` no resumo: muda a assinatura e força a gravação.
     """
     assinatura = json.dumps(resumo, ensure_ascii=False, sort_keys=True)
     with _resumos_assinatura_guard:
@@ -1111,7 +1224,7 @@ def salvar_resumo(sala_id, resumo):
             return
         _resumos_assinatura[sala_id] = assinatura
     _armazenar_cache_resumo(sala_id, resumo)
-    armazenamento.salvar_resumo(sala_id, resumo)
+    armazenamento.salvar_resumo(sala_id, resumo, ttl=ttl)
 
 
 def remover_resumo(sala_id):
@@ -1172,10 +1285,34 @@ def salvar_sala_com_resumo(lobby, resumo):
             raise ConflitoDeEstado(lobby.sala_id)
         lobby.revisao = max(lobby.revisao, anterior) + 1
         _revisoes_salvas[lobby.sala_id] = lobby.revisao
-    armazenamento.salvar_sala_com_resumo(lobby, resumo, resumo_mudou)
+    armazenamento.salvar_sala_com_resumo(lobby, resumo, resumo_mudou,
+                                        ttl=_ttl_da_sala(lobby))
     _armazenar_cache_sala(lobby.sala_id, lobby)
     if resumo_mudou:
         _armazenar_cache_resumo(lobby.sala_id, resumo)
+
+
+def marcar_sala_cancelada(sala_id):
+    """
+    Fase 77: grava a lápide da sala cancelada por abandono. Vive no store (e não
+    em memória do processo) porque o cancelamento pode vir de uma instância
+    diferente da que vai atender o retorno.
+    """
+    if not sala_id:
+        return
+    _leitura_segura(lambda: armazenamento.marcar_sala_cancelada(sala_id), None)
+
+
+def consumir_sala_cancelada(sala_id):
+    """
+    Fase 77: True se a sala foi cancelada por abandono — e consome a lápide
+    (one-shot). Chamado pelo `retomar_identidade` para dizer "a partida acabou"
+    em vez do enganoso "chave de outra sala".
+    """
+    if not sala_id:
+        return False
+    return bool(_leitura_segura(
+        lambda: armazenamento.consumir_sala_cancelada(sala_id), False))
 
 
 def registrar_sid(client_id, sala_id):

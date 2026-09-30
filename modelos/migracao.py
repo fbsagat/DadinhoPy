@@ -3,7 +3,7 @@
 # Versão do formato serializado do Lobby (store distribuído). Sempre que a
 # serialização mudar de forma incompatível, incremente e registre a migração
 # correspondente em MIGRACOES (Fase 10, S3).
-VERSAO_ATUAL = 10
+VERSAO_ATUAL = 11
 
 # Janela (segundos) em que a vaga de um humano removido fica registrada no
 # lobby (Fase 30): permite o `retomar_identidade` dizer por que a retomada foi
@@ -92,6 +92,18 @@ def _migrar_v9_para_v10(dados):
     return dados
 
 
+def _migrar_v10_para_v11(dados):
+    """
+    v10 -> v11 (Fase 77): carimbo da última vez que a sala ficou sem nenhum humano
+    conectado (`sem_humano_em`), que arma a janela de retorno de 60s antes do
+    cancelamento por abandono. None = tem gente na sala. A leitura usa `get` com
+    default None, então o campo ausente já é tratado — a migração existe pra
+    registrar o formato (mesmo critério de v9->v10).
+    """
+    dados.setdefault('sem_humano_em', None)
+    return dados
+
+
 MIGRACOES = {
     1: _migrar_v1_para_v2,
     2: _migrar_v2_para_v3,
@@ -102,4 +114,5 @@ MIGRACOES = {
     7: _migrar_v7_para_v8,
     8: _migrar_v8_para_v9,
     9: _migrar_v9_para_v10,
+    10: _migrar_v10_para_v11,
 }

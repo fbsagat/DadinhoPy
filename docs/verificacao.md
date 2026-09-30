@@ -141,9 +141,9 @@ Na raiz do repo:
 ```
 
 O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API **e do
-`nginx`** (Fase 59), recreate do
-tunnel se `docker-compose.yml` mudou, smoke test local — api 8000 **e** nginx
-8090 — e público). O acesso SSH é **via Tailscale** (recomendado): o IP público
+`nginx`** (Fase 59) **e do `gc`** (Fase 77, salas abandonadas), recreate do
+tunnel se `docker-compose.yml` mudou, smoke test local — `gc --uma-vez`, api 8000
+**e** nginx 8090 — e público). O acesso SSH é **via Tailscale** (recomendado): o IP público
 da VPS pode ficar inacessível por mudança de IP ou firewall do provedor, mas o
 Tailscale mantém acesso estável. Params opcionais:
 `-HostVps` (padrão `100.70.126.50` — Tailscale IP; fallback `167.126.27.4`)
@@ -171,11 +171,13 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
    `cloudflared/config.yml` (ingress do tunnel) e o `.env` está oculto (glob `*` não
    pega dotfile, mas o `config.yml` é perdido). Tar com excludes preserva os dois.
 
-2. **Rebuild da API e do nginx** (Fase 61: `api` tem o `build: .`; `api2/3/4` usam
-   a MESMA image `dadinho-api` — um build sobe as 4; redis/tunnel ficam):
+2. **Rebuild da API, do nginx e do `gc`** (Fase 61: `api` tem o `build: .`;
+   `api2/3/4` usam a MESMA image `dadinho-api` — um build sobe as 4; redis/tunnel
+   ficam. Fase 77: `gc`, o serviço que varre salas abandonadas a cada 30s, também
+   usa essa image, então entra no mesmo `up`):
 
    ```bash
-   cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx
+   cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx gc
    ```
 
 3. **Tunnel** — recriar apenas se `docker-compose.yml` mudou (o ingress do
@@ -189,6 +191,9 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
 4. **Smoke test:**
 
    ```bash
+   # gc das salas abandonadas (Fase 77): uma passada solitária, sem deixar o
+   # loop de 30s para trás — imprime o que cancelou (ou "0 canceladas")
+   cd /opt/dadinho && sudo docker compose exec -T gc python gc_salas.py --uma-vez
    # local (loopback)
    curl -s -o /dev/null -w 'robots:%{http_code}\n' http://127.0.0.1:8000/robots.txt
    curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling'
@@ -203,6 +208,10 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
    O handshake deve responder `0{"sid":"...","upgrades":["websocket"],...}` (200,
    `robots:<200>`). Depois validar com 2+ abas/navegadores: página da Vercel, socket
    para a VPS.
+
+   Na verificação do dia seguinte, `docker compose ps gc` deve continuar `Up` —
+   serviço parado é quase sempre `DADINHO_REDIS_URL` ausente no `.env` da VPS
+   (diagnóstico em `docs/runbook.md` §8.2).
 
 ## Observabilidade e alertas (Fase 43)
 

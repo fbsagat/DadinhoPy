@@ -88,14 +88,16 @@ def teste_salvar_sala_com_resumo_dedup():
             self.chamadas = []
             self.salas = {}
             self.resumos = {}
+            self.ttls = []
 
-        def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True):
+        def salvar_sala_com_resumo(self, lobby, resumo, resumo_mudou=True, ttl=None):
             self.chamadas.append(resumo_mudou)
+            self.ttls.append(ttl)
             self.salas[lobby.sala_id] = lobby
             if resumo_mudou:
                 self.resumos[lobby.sala_id] = resumo
 
-        def salvar_resumo(self, sala_id, resumo):
+        def salvar_resumo(self, sala_id, resumo, ttl=None):
             self.resumos[sala_id] = resumo
 
         def remover_resumo(self, sala_id):

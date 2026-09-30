@@ -18,6 +18,8 @@ comandos destrutivos — leia o playbook.
 3. `curl -s -o /dev/null -w '%{http_code}\n' https://dadinho-api.memetrigger.com/robots.txt`
    — borda ok, público não → §4 (tunnel/DNS/Cloudflare).
 4. Tudo responde mas o jogo trava → §6/§8 (Redis/lock/estado).
+5. Tudo responde, mas a busca mostra salas abandonadas(old) → §8.2 (janela de 60s,
+   serviço `gc` parado, TTL curto).
 
 ## Comandos básicos (na VPS, `cd /opt/dadinho`)
 
@@ -27,11 +29,14 @@ sudo docker compose logs -f --tail=200 api     # as 4 réplicas
 sudo docker compose logs -f --tail=200 nginx   # JSON: ip_real + status
 sudo docker inspect --format '{{.Name}} {{.State.Health.Status}}' dadinho-api dadinho-api-2 dadinho-api-3 dadinho-api-4
 sudo docker exec -it dadinho-redis redis-cli ping
+sudo docker compose logs -f --tail=50 gc       # varredura de salas abandonadas (Fase 77)
 ```
 
 Componentes: `dadinho-api`/`-2`/`-3`/`-4` (gevent, 8000–8003), `dadinho-nginx`
-(loopback 8090), `dadinho-redis` (AOF + message queue), `dadinho-tunnel`. As 4
-réplicas sobem juntas: `up -d --build api api2 api3 api4 nginx`.
+(loopback 8090), `dadinho-redis` (AOF + message queue), `dadinho-tunnel`, `dadinho-gc`
+(mesma image da api, `python gc_salas.py`, sem healthcheck — checar com
+`docker compose ps gc`/`logs gc`, não com `inspect Health`). As 4
+réplicas sobem juntas: `up -d --build api api2 api3 api4 nginx gc`.
 
 ## Regras de ouro (violá-las causa perda de estado)
 
@@ -42,6 +47,10 @@ réplicas sobem juntas: `up -d --build api api2 api3 api4 nginx`.
   com `gz1:`); descarte/recrie a sala.
 - **Não** aponte o tunnel para `:8000` — a borda é o nginx em `:8090` (ADR-003).
 - Lock distribuído tem TTL 120s: **não** "destrave à mão", ele expira sozinho.
+- Cancelar sala abandonada **sempre** por `funcoes_gerais.cancelar_sala_por_abandono`
+  (lock + releitura fresca + lápide). `del` manual das chaves deixa o usuário
+  voltar sem motivo e ressuscita o resumo no índice — se não der para usar o
+  código, grave a lápide junto (`dadinho:lapide:<id>`, 300s).
 - Redis é SPOF conhecido e aceito (ADR-007): perda de volume = perda das salas
   ativas; recuperação é subir o Redis e deixar regenerar, não "consertar".
 

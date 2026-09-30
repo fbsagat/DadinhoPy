@@ -88,6 +88,30 @@ services:
     ports:
       - "127.0.0.1:8003:8000"
 
+  # Fase 77: varredura de salas abandonadas (cancelamento após 60s sem nenhum
+  # humano conectado). Processo de fundo que acorda a cada 30s, lê o índice de
+  # resumos no MESMO Redis das réplicas e cancela o que venceu a janela — o
+  # `_gc_sala` só roda quando alguém toca a sala, e ninguém mais toca depois que o
+  # último humano sai. Usa a MESMA image das réplicas (sem build novo) e a MESMA
+  # função (`funcoes_gerais.varrer_salas_abandonadas`) que a varredura oportunista
+  # do `listar_partidas` chama. O lock distribuído serializa contra os handlers.
+  gc:
+    image: dadinho-api
+    container_name: dadinho-gc
+    restart: unless-stopped
+    command: ["python", "gc_salas.py"]
+    environment:
+      DADINHO_REDIS_URL: redis://redis:6379/0
+      DADINHO_ENV: "production"
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   redis:
     image: redis:7-alpine
     container_name: dadinho-redis

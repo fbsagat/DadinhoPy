@@ -5,6 +5,7 @@ globals em `tests.base` — o `from tests.base import *` abaixo captura os
 valores já prontos.
 """
 from tests.base import *  # noqa: F401,F403
+from datetime import datetime, timedelta  # Fase 77: relógio da janela sem humano
 
 
 def teste_b3_aposta_invalida():
@@ -614,48 +615,67 @@ def teste_espectador_nao_e_jogador():
     _ok("espectador não é jogador (B2)")
 
 
-def teste_sala_so_com_bot_e_removida():
+def teste_sala_so_com_bot_sobrevive_ate_o_prazo():
+    """
+    Fase 77: um bot NÃO conta como humano, então a sala fica sem ninguém
+    conectado — mas ela NÃO morre na hora: abre a janela de 60s para o humano
+    voltar com `retomar_identidade`. Só depois de vencida ela é cancelada. Antes
+    (Fase 15) o disconnect apagava a sala e a partida ia com ela.
+    """
     _limpar()
-    c1, cs1, _ = _conectar()
-    c1.emit("apelido", {"apelido_msg": "Ana"})
-    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
-    c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
-    lobby = modulo_store.carregar_sala(SALA)
-    assert any(j.is_ia for j in lobby.jogadores)
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert any(j.is_ia for j in lobby.jogadores)
 
-    # Fase 15: um bot não conta como "outro ativo" — o humano sai na hora e a
-    # sala (só com bots) é removida em vez de ficar órfã na janela de graça.
-    c1.disconnect()
-    assert modulo_store.carregar_sala(SALA) is None, "sala só com bots deve ser removida (B3)"
-    _limpar()
-    _ok("sala só com bot é removida (B3)")
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby is not None, "a sala só com bots entra na janela de retorno"
+        assert lobby.sem_humano_em is not None, "sem humano conectado, o carimbo é gravado"
+        assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [], \
+            "dentro da janela ninguém cancela"
+
+        _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+        assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [SALA]
+        assert modulo_store.carregar_sala(SALA) is None, "vencido o prazo, a sala morre"
+    finally:
+        _limpar()
+    _ok("sala só com bot sobrevive à janela e morre vencida (Fase 77)")
 
 
 def teste_gc_unificado_sala_bot_sem_humano():
     _limpar()
-    c1, cs1, _ = _conectar()
-    c1.emit("apelido", {"apelido_msg": "Ana"})
-    c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
-    lobby = modulo_store.carregar_sala(SALA)
-    assert lobby.resumo_partida()["humanos"] == 1, "resumo deve contar o humano conectado"
-    # Simula uma instância serverless que morreu sem disconnect: o humano some
-    # da sala e sobra só o bot persistido (nenhum humano conectado).
-    lobby.jogadores = [j for j in lobby.jogadores if j.is_ia]
-    modulo_store.salvar_sala(lobby)
-    c1.disconnect()
-    assert modulo_store.carregar_sala(SALA) is not None, "pré-condição: sala só com bot persistida"
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.resumo_partida()["humanos"] == 1, "resumo deve contar o humano conectado"
+        # Simula uma instância serverless que morreu sem disconnect: o humano some
+        # da sala e sobra só o bot persistido (nenhum humano conectado).
+        lobby.jogadores = [j for j in lobby.jogadores if j.is_ia]
+        modulo_store.salvar_sala(lobby)
+        c1.disconnect()
+        assert modulo_store.carregar_sala(SALA) is not None, "pré-condição: sala só com bot persistida"
 
-    # O próximo connect no mesmo código passa pelo GC unificado: fecha o fantasma
-    # e recria a sala do zero, com o novo humano como master (sem bots antigos).
-    c2, cs2, _ = _conectar()
-    novo = modulo_store.carregar_sala(SALA)
-    assert novo is not None
-    assert len(novo.jogadores) == 1 and not novo.jogadores[0].is_ia, \
-        "GC deve recriar a sala sem os bots antigos"
-    assert novo.jogadores[0].master, "o novo humano vira master da sala recriada"
-    c2.disconnect()
-    _limpar()
-    _ok("GC unificado fecha/reabre sala só com bot (sem humano conectado)")
+        # Fase 77: dentro da janela de 60s a sala NÃO é fechada/recriada — quem
+        # chega no mesmo código entra na sala como está (a partida do bot segue
+        # na mesa), em vez de a mesa ser zerada por um fantasma.
+        c2, cs2, _ = _conectar()
+        novo = modulo_store.carregar_sala(SALA)
+        assert novo is not None
+        assert any(j.is_ia for j in novo.jogadores), \
+            "o bot continua na mesa (a sala não foi recriada)"
+        assert any(not j.is_ia for j in novo.jogadores), \
+            "quem chega na janela entra na sala de espera existente"
+        assert novo.sem_humano_em is None, "com gente de volta o carimbo é limpo"
+        c2.disconnect()
+    finally:
+        _limpar()
+    _ok("GC não fecha sala só com bot dentro da janela de 60s (Fase 77)")
 
 
 def teste_busca_esconde_sala_sem_humano():
@@ -827,10 +847,15 @@ def teste_sala_orfa_e_fechada():
     assert lobby is not None
     assert any(j.desconectado_em is not None for j in lobby.jogadores)
 
-    # Bia cai: não resta humano ATIVO (Ana é fantasma na graça), então a sala
-    # precisa fechar em vez de ficar persistida sem ninguém conectado.
+    # Bia cai: não resta nenhum humano conectado (Ana é fantasma na graça), então
+    # a sala abre a janela de retorno de 60s em vez de ficar persistida à toa.
     c2.disconnect()
-    assert modulo_store.carregar_sala(SALA) is None, "sala sem humano ativo deve fechar"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby is not None, "a sala sem humano não pode sumir antes do prazo"
+    assert lobby.sem_humano_em is not None
+    _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+    assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [SALA]
+    assert modulo_store.carregar_sala(SALA) is None, "sala sem humano deve fechar vencida"
 
     # Resumo de sala vazia não pode aparecer na busca.
     modulo_store.salvar_resumo("orfa", {"sala": "orfa", "publica": True, "jogadores": 0})
@@ -1737,7 +1762,7 @@ def teste_resumo_dedup():
         def __init__(self):
             self.chamadas = 0
 
-        def salvar_resumo(self, sala_id, resumo):
+        def salvar_resumo(self, sala_id, resumo, ttl=None):
             self.chamadas += 1
 
         def remover_resumo(self, sala_id):
@@ -3268,9 +3293,14 @@ def teste_sair_da_sala_lobby():
     assert funcoes_gerais.sala_do_cliente(sid2) == SALA, \
         "índice sid de quem restou continua apontando para a sala"
 
-    # Último humano sai: sala é fechada.
+    # Último humano sai: a sala não é fechada na hora (Fase 77) — entra na
+    # janela de 60s, para quem saiu voltar com `retomar_identidade`.
     c2.emit("sair_da_sala", {"chave": cs2["chave_secreta"]})
-    assert modulo_store.carregar_sala(SALA) is None, "último humano saindo fecha a sala"
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby is not None, "sala sem humano não pode sumir antes do prazo"
+    _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+    assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [SALA], \
+        "vencido o prazo, a sala é fechada"
     assert funcoes_gerais.sala_do_cliente(sid2) is None, \
         "índice sid do último a sair deve ser limpo"
     c1.disconnect()
@@ -3459,6 +3489,221 @@ def teste_master_renomeia_ia():
     _ok("master renomeia o nome dos bots (Fase 75)")
 
 
+def _avancar_sem_humano(lobby, segundos):
+    """
+    Fase 77: volta o relógio da ausência `segundos` no lobby e persiste. O
+    carimbo é o que os handlers escrevem, então o teste escreve igual — com o
+    resumo junto, que é o que a varredura lê.
+    """
+    marca = datetime.now() - timedelta(seconds=segundos)
+    lobby.sem_humano_em = marca
+    for jogador in list(lobby.jogadores) + list(lobby.espectadores):
+        if not jogador.is_ia:
+            jogador.desconectado_em = marca
+    modulo_store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+    return lobby
+
+
+def teste_janela_60s_preserva_identidade():
+    """
+    Fase 77: quem volta DENTRO da janela de 60s retoma a sessão inteira, mesmo
+    com a graça de 30s já vencida. Este é o bug que a regra anterior (Fase 23)
+    tinha: o `_tem_humano_recente` expurgava aos 30s da graça, e quem voltasse
+    em T+40 recebia `vaga_perdida_inatividade` — a mesa sumia, não a partida.
+    """
+    _limpar()
+    grace_original = modulo_app.GRACE_RECONEXAO_SEGUNDOS
+    modulo_app.GRACE_RECONEXAO_SEGUNDOS = 30
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        ana_chave = cs1["chave_secreta"]
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby.pagina == 1
+
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby is not None, "a sala não pode ser apagada na hora"
+        # Avança o relógio: 45s sem humano — graça (30s) VENCIDA, janela (60s) não.
+        _avancar_sem_humano(lobby, 45)
+        assert funcoes_gerais.prazo_abandono_vencido(lobby) is False
+
+        c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c1b.emit("retomar_identidade", {"chave": ana_chave})
+        eventos = c1b.get_received()
+        lobby = modulo_store.carregar_sala(SALA)
+        anas = [j for j in lobby.jogadores if j.username == "Ana"]
+        assert len(anas) == 1, "não pode duplicar nem perder a identidade"
+        assert anas[0].desconectado_em is None, "a retomada encerra a janela"
+        assert lobby.pagina == 1, "a partida em andamento deve ser preservada"
+        assert lobby.sem_humano_em is None, "com humano de volta o carimbo é limpo"
+        assert not _contar_eventos(eventos, "retomar_negado"), \
+            "dentro da janela ninguém pode ser negado"
+        c1b.disconnect()
+    finally:
+        modulo_app.GRACE_RECONEXAO_SEGUNDOS = grace_original
+        _limpar()
+    _ok("volta dentro da janela de 60s preserva a partida inteira (Fase 77)")
+
+
+def teste_varredura_cancela_sala_vencida():
+    """
+    Fase 77: passada a janela de 60s, a varredura cancela a sala — some do
+    store, do índice de resumos, e a lápide fica uma única vez.
+    """
+    _limpar()
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+        assert funcoes_gerais.prazo_abandono_vencido(lobby) is True
+
+        canceladas = funcoes_gerais.varrer_salas_abandonadas(forcar=True)
+        assert canceladas == [SALA], f"a varredura deve cancelar a sala, veio {canceladas}"
+        assert modulo_store.carregar_sala(SALA) is None, "a sala cancelada sai do store"
+        assert all(r.get("sala") != SALA for r in modulo_store.listar_resumos()), \
+            "a sala cancelada sai do índice de resumos (senão vira fantasma na busca)"
+        assert modulo_store.consumir_sala_cancelada(SALA) is True
+        assert modulo_store.consumir_sala_cancelada(SALA) is False, "a lápide é one-shot"
+    finally:
+        _limpar()
+    _ok("varredura cancela a sala vencida e limpa o índice (Fase 77)")
+
+
+def teste_retorno_apos_cancelamento():
+    """
+    Fase 77: quem volta DEPOIS do cancelamento recebe `msg.partida_cancelada` e
+    é realocado na mesma sala, zerada (nova identidade, master, snapshot) — sem
+    isso o cliente ficaria órfão, com a tela presa no watchdog.
+    """
+    _limpar()
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        ana_chave = cs1["chave_secreta"]
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+        assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [SALA]
+
+        c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        c1b.emit("retomar_identidade", {"chave": ana_chave})
+        eventos = c1b.get_received()
+        negado = _achar_evento(eventos, "retomar_negado")
+        assert negado is not None, "deve avisar que a partida foi cancelada"
+        assert negado.get("motivo", {}).get("chave") == "msg.partida_cancelada", \
+            f"motivo de cancelamento, veio {negado.get('motivo')}"
+
+        # A sala voltou, zerada, com o cliente dentro como jogador master.
+        lobby = modulo_store.carregar_sala(SALA)
+        assert lobby is not None, "a sala deve ser recriada no mesmo código"
+        assert lobby.status == "espera" and not lobby.partidas, "sala nova, sem partida"
+        assert len(lobby.jogadores) == 1, "só o que voltou fica na sala nova"
+        eu = lobby.jogadores[0]
+        assert eu.chave_secreta != ana_chave, "a chave da partida morta não pode voltar"
+        assert eu.master, "quem volta é o único servidor: master"
+        assert eu.is_ia is False
+        # A tela monta: connect_start + a página 0 chega (snapshot da espera).
+        assert _achar_evento(eventos, "connect_start") is not None
+        assert _contar_eventos(eventos, "mudar_pagina") >= 1, "sem snapshot a tela não abre"
+        c1b.disconnect()
+    finally:
+        _limpar()
+    _ok("retorno após cancelamento avisa e realoca na sala zerada (Fase 77)")
+
+
+def teste_sala_com_humano_nunca_cancela():
+    """
+    Fase 77: a varredura não pode tocar em sala COM humano (inclusive espectador
+    apenas). O carimbo é o único relógio, e ele é limpo com gente na mesa.
+    """
+    _limpar()
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        # Selo antigo e vencido, MAS com humano conectado: é o caso que a
+        # releitura sob lock tem de corrigir.
+        lobby = modulo_store.carregar_sala(SALA)
+        lobby.sem_humano_em = datetime.now() - timedelta(
+            seconds=funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+        modulo_store.salvar_sala_com_resumo(lobby, lobby.resumo_partida())
+        assert funcoes_gerais.varrer_salas_abandonadas(forcar=True) == [], \
+            "sala com humano não pode ser cancelada"
+        assert modulo_store.carregar_sala(SALA) is not None
+        # E o TTL volta a ser longo, porque há gente.
+        lobby = modulo_store.carregar_sala(SALA)
+        assert modulo_store._ttl_da_sala(lobby) is None
+        c1.disconnect()
+    finally:
+        _limpar()
+    _ok("sala com humano nunca é cancelada pela varredura (Fase 77)")
+
+
+def teste_varredura_respeita_rate_limit():
+    """
+    Fase 77: a varredura oportunista é auto-limitada por instância (30s), senão
+    cada `listar_partidas` varre o índice inteiro e multiplica o custo por
+    jogador na home. `forcar=True` é o escape do teste e do `gc_salas.py`.
+    """
+    _limpar()
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2, "quantidade": 1})
+        c1.emit("iniciar_partida", {"chave": cs1["chave_secreta"], "dados_qtd": 1})
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        _avancar_sem_humano(lobby, funcoes_gerais.TEMPO_SEM_HUMANO_SEGUNDOS + 1)
+        assert funcoes_gerais.varrer_salas_abandonadas() == [SALA], \
+            "a primeira passada não pode ser suprimida"
+        # Segunda passada imediata: cancela de novo? Não — a sala já morreu, e o
+        # rate-limit de 30s é o que evita varrer o índice a cada busca.
+        assert funcoes_gerais.varrer_salas_abandonadas() == [], "segunda passada é limitada"
+    finally:
+        _limpar()
+    _ok("varredura oportunista respeita o intervalo de 30s (Fase 77)")
+
+
+def teste_sala_sem_humano_tem_ttl_curto():
+    """
+    Fase 77: a barreira final — se o `gc` da VPS não rodar, o TTL curto do store
+    expira a sala sem humano mesmo assim (e o resumo junto, senão o id ficaria
+    no índice como fantasma).
+    """
+    _limpar()
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        lobby = modulo_store.carregar_sala(SALA)
+        assert modulo_store._ttl_da_sala(lobby) is None, "com humano, TTL longo"
+        c1.disconnect()
+        lobby = modulo_store.carregar_sala(SALA)
+        assert modulo_store._ttl_da_sala(lobby) == modulo_store.armazenamento.TTL_SALA_SEM_HUMANO
+        assert modulo_store.armazenamento.TTL_SALA_SEM_HUMANO \
+            < modulo_store.armazenamento.TTL_SALA
+        # Com gente de volta, o carimbo é limpo e o TTL longo volta — senão uma
+        # sala de 60s que voltou a ter gente levaria 120s para sumir do store.
+        c1b = socketio.test_client(app, query_string=f"sala={SALA}&tem_chave=1")
+        lobby = modulo_store.carregar_sala(SALA)
+        funcoes_gerais.reavaliar_vida(lobby)
+        assert lobby.sem_humano_em is None
+        assert modulo_store._ttl_da_sala(lobby) is None
+        c1b.disconnect()
+    finally:
+        _limpar()
+    _ok("sala sem humano recebe TTL curto (Fase 77)")
+
+
 def verificar_integracao():
     print("5) integração flask_socketio.test_client (Fases 6, 7 e 15)")
     global modulo_store, modulo_app, funcoes_gerais, socketio, app
@@ -3503,7 +3748,7 @@ def verificar_integracao():
     testes_fase15 = [
         ("B1-gate", teste_gate_pagina_confirmacoes),
         ("B2-espectador", teste_espectador_nao_e_jogador),
-        ("B3-bot-solo", teste_sala_so_com_bot_e_removida),
+        ("B3-bot-solo", teste_sala_so_com_bot_sobrevive_ate_o_prazo),
         ("GC-bot-persistido", teste_gc_unificado_sala_bot_sem_humano),
         ("busca-humanos", teste_busca_esconde_sala_sem_humano),
         ("heartbeat-resumo", teste_heartbeat_renova_resumo),
@@ -3596,13 +3841,21 @@ def verificar_integracao():
     testes_fase76 = [
         ("renomear-ia", teste_master_renomeia_ia),
     ]
+    testes_fase77 = [
+        ("janela-60s", teste_janela_60s_preserva_identidade),
+        ("varredura-cancela", teste_varredura_cancela_sala_vencida),
+        ("retorno-apos-cancelamento", teste_retorno_apos_cancelamento),
+        ("humano-nunca-cancela", teste_sala_com_humano_nunca_cancela),
+        ("varredura-rate-limit", teste_varredura_respeita_rate_limit),
+        ("ttl-curto", teste_sala_sem_humano_tem_ttl_curto),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
                            + testes_expulsao + testes_autojogar + testes_fase_d
                            + testes_fase23 + testes_fase25 + testes_fase46
                            + testes_fase29 + testes_fase30 + testes_fase69
-                           + testes_fase76):
+                           + testes_fase76 + testes_fase77):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

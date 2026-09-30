@@ -30,6 +30,7 @@ sem conhecer o motivo original.
 | [008](008-websocket-unico-transporte.md) | WebSocket como transporte único (revisa o sticky por IP do ADR-006) | Aceito |
 | [009](009-ritmo-partida-so-ias.md) | Ritmo da partida só de IAs: relógio no lobby + poll do espectador | Aceito |
 | [010](010-bot-prudente-substituicao.md) | O substituto do desconectado é um bot prudente (estilo persistido na partida) | Aceito |
+| [011](011-sala-abandonada-60s-lapide-varredura.md) | Sala abandonada morre em 60s: carimbo próprio + lápide + varredura | Aceito |
 
 ## Template
 

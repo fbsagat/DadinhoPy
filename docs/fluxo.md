@@ -92,7 +92,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 |---|---|---|---|
 | `connect_start` | app.py:445 | cliente | 1661 |
 | `sala_cheia` | app.py:426/432 | cliente | 432 |
-| `retomar_negado` (`motivo` {chave, params}; Fase 30: `msg.vaga_perdida_inatividade` vs `msg.retomar_outra_sala`) | app.py:621 | cliente | 1729 |
+| `retomar_negado` (`motivo` {chave, params}; Fase 30: `msg.vaga_perdida_inatividade` vs `msg.retomar_outra_sala`; Fase 77: `msg.partida_cancelada`, quando a lápide diz que a sala foi cancelada por abandono — vem acompanhado de `connect_start`+snapshot da sala zerada, senão a tela trava) | app.py:1088 (Fase 77) | cliente | 1729 |
 | `update_username` | app.py:592 | cliente | 1740 |
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |

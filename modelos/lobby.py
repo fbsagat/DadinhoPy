@@ -60,6 +60,13 @@ class Lobby:
         # graça expirada, início de partida, expulsão). Permite o retorno explicar
         # por que a vaga foi perdida (motivo do `retomar_negado`).
         self.vagas_recentes = {}
+        # Fase 77: instante em que a sala ficou pela última vez sem NENHUM humano
+        # conectado (jogadores fora da graça + espectadores). None = tem gente.
+        # Diferente de `visto_em`: aquele é carimbado pelo heartbeat (presença),
+        # este só no instante em que a sala esvazia (ausência) — nenhum fluxo de
+        # bot o renova, e é ele que arma a janela de retorno de 60s do
+        # cancelamento por abandono (Fase 77).
+        self.sem_humano_em = None
 
     @staticmethod
     def config_padrao():
@@ -208,6 +215,7 @@ class Lobby:
             'vagas_recentes': {chave: {'nome': vaga.get('nome'), 'em': vaga['em'].isoformat()}
                                for chave, vaga in self.vagas_recentes.items()
                                if isinstance(vaga, dict) and vaga.get('em') is not None},
+            'sem_humano_em': self.sem_humano_em.isoformat() if self.sem_humano_em else None,
             'jogadores': [jogador.para_dict(self) for jogador in self.jogadores],
             'espectadores': [jogador.para_dict(self) for jogador in self.espectadores],
             'partidas': [self._partida_para_dict(partida) for partida in self.partidas],
@@ -317,6 +325,12 @@ class Lobby:
                 }
             except (ValueError, TypeError):
                 continue
+        sem_humano_em = dados.get('sem_humano_em')
+        if sem_humano_em:
+            try:
+                lobby.sem_humano_em = datetime.fromisoformat(sem_humano_em)
+            except (ValueError, TypeError):
+                lobby.sem_humano_em = None
 
         jogadores = {}
         for dados_jogador in dados.get('jogadores', []):
@@ -673,6 +687,9 @@ class Lobby:
             'master': master.username if master else None,
             'criada_em': self.criado_em.isoformat() if self.criado_em else None,
             'visto_em': self.visto_em.isoformat() if self.visto_em else None,
+            # Fase 77: a varredura de salas abandonadas lê o RESUMO (leve) em vez de
+            # reidratar o Lobby inteiro, por isso o carimbo de ausência viaja aqui.
+            'sem_humano_em': self.sem_humano_em.isoformat() if self.sem_humano_em else None,
             'pode_entrar': self.status == 'espera'
                            and len(self.jogadores) < int(self.config.get('max_jogadores', 6)),
             'pode_iniciar': pode_iniciar,

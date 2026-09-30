@@ -20,14 +20,15 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 
 | Chave | Conteúdo | TTL |
 |---|---|---|
-| `dadinho:sala:<id>` | JSON do `Lobby` | renovado a cada `salvar_sala` |
-| `dadinho:resumo:<id>` | resumo leve da busca | idem |
+| `dadinho:sala:<id>` | JSON do `Lobby` | 7 dias com humano conectado; **120s sem humano** (Fase 77) |
+| `dadinho:resumo:<id>` | resumo leve da busca | idem (o TTL curto vale para o resumo, senão o id fica no índice como fantasma) |
 | `dadinho:resumos` | SET com os ids dos resumos (SMEMBERS+MGET em vez de SCAN) | — |
 | `dadinho:sid:<client_id>` | índice `client_id → sala_id` (para `achar_jogador` sem varrer o store) | 1 dia |
 | `dadinho:lobby_seq` | INCR para numerar lobbies | — |
+| `dadinho:lapide:<id>` | marcador de "sala cancelada por abandono" (Fase 77) | 300s |
 
 - `store.salvar_resumo` é deduplicado por conteúdo (cache em processo) para não reescrever resumo idêntico.
-- TTL resolve salas órfãs: função morre sem disconnect → sala expira sozinha.
+- TTL resolve salas órfãs: função morre sem disconnect → sala expira sozinha. É também a **barreira final** do cancelamento por abandono: com a sala sem humano, o TTL cai para 120s mesmo que nenhum dos caminhos de limpeza rode (ADR-011).
 - Escritas complexas usam `_comando` (body-style POST com array JSON); leituras usam path-style (`GET`/`INCR`/`SCAN`).
 
 ## Isolamento por sala e modelagem
@@ -65,14 +66,18 @@ Layout do store (Upstash, Fase 8) — chaves próprias com TTL, nada de hash ún
 
 ## GC de sala e vida da sala
 
-- **`app.py:_gc_sala`** é o ponto único: expurga a janela de reconexão e fecha a sala quando `app._tem_humano_recente` é falso (sem humano conectado **nem** dentro da janela de reconexão). Chamado em `achar_jogador` (todo handler mutável), `handle_connect` (sala não-vazia) e `verificar_desconectados`; `handle_disconnect` mantém o fechamento explícito pós-lock.
+- **`app.py:_gc_sala`** é o ponto único, com **três checagens em ordem** (Fase 77): (1) se `prazo_abandono_vencido(lobby)` (janela de 60s sem nenhum humano conectado), cancela a sala e devolve `True`; (2) sala **sem** humano conectado e **dentro** da janela não expurga ninguém e não fecha — quem caiu continua na sala com `desconectado_em` e o `retomar_identidade` religa a sessão inteira; (3) **com** humano presente, o expurgo da graça roda como sempre (a graça de 30s só substitui humano por bot quando há outro humano na mesa). Inverter (1) e (2) é o bug da Fase 23. Chamado em `achar_jogador` (todo handler mutável), `handle_connect` (sala não-vazia) e `verificar_desconectados`; `handle_disconnect` mantém o cancelamento pós-lock.
+- **`Lobby.sem_humano_em`** é o relógio da ausência (entra no store com a sala, `versoes` 10→11, e no `resumo_partida`): carimbado em `reavaliar_vida` quando não há jogador fora da graça nem **espectador** conectado (espectador conta como humano — está usando o serviço), e **limpo** assim que existe humano. `visto_em` não serve para isto (é tocado por IA e heartbeat). `TEMPO_SEM_HUMANO_SEGUNDOS` = 60, com override por `DADINHO_TEMPO_SEM_HUMANO_SEGUNDOS`.
+- **Quem volta tarde é realocado, não cuspido:** `retomar_identidade` julga o prazo **antes** de religar a identidade (se confiasse só no GC, a linha que limpa o carimbo impediria a checagem e ressuscitaria a sala vencida), e então chama `_realocar_em_sala_nova`: sala recriada zerada no mesmo código, o que volta entra como jogador/master, recebe `connect_start` + snapshot e o `retomar_negado` com `msg.partida_cancelada`. Sem o realocar, o `connect_start` adiado (`tem_chave=1`) ficaria sem snapshot e a tela travaria no watchdog.
+- **Lápide one-shot** (`dadinho:lapide:<id>`, 300s): o cancelamento é silencioso no servidor (a sala está vazia, não há cliente na room para `emit`), então a lápide é a única forma de o `retomar_negado` dizer a verdade — sem ela, `vagas_recentes` já foi apagado e o motivo cairia no genérico "sessão de outra sala". Consumida na primeira leitura (consumir apaga).
+- **Três caminhos limpam, em camadas:** `_gc_sala` (imediato, quando algo toca a sala), `funcoes_gerais.varrer_salas_abandonadas` chamada oportunISTamente por `listar_partidas` (quem está na home já leu o índice; 30s por instância, até 50 resumos por passada) e o serviço **`gc_salas.py`** no `docker-compose` da VPS (o único garantido, 30s, `forcar=True`). Todos usam a **mesma função**, sob `trancar_sala_distribuida` + releitura fresca, e engolem erro de rede por sala. Detalhes/decisão no ADR-011.
 - **Fase 23:** o último humano de uma partida só com IAs ganha a janela de reconexão mesmo sem outro humano ativo — blips (tab em segundo plano estoura `ping_timeout` de 20s, reciclagem da função na Vercel) não removem mais o humano nem apagam a sala; o expurgo fica a cargo de GC posterior (novo humano no connect, `verificar_desconectados` ou TTL do store).
 - `funcoes_gerais.remover_sala` limpa store, resumo, índice em processo e sids. O resumo (`humanos`) esconde salas sem humano conectado na busca.
 - **`Lobby.marcar_visto()`** (Fase 17): carimbado em `atualizar_lista_usuarios`/`iniciar_partida` e renovado pelo `heartbeat`. A busca descarta resumo sem `visto_em` ou parado há `funcoes_gerais.LIMITE_RESUMO_PARADO_SEGUNDOS` — esconde fantasmas de instância que morreu sem `disconnect`.
 
 ## Jogadores IA (`ia.py`, Fase 11/20)
 
-- Bots são `Jogador` com `is_ia=True` e `ia_nivel` (1-4), sem socket (`client_id=ia:<hex>`); **nunca viram master** e a sala é removida quando não resta humano conectado nem na janela de reconexão.
+- Bots são `Jogador` com `is_ia=True` e `ia_nivel` (1-4), sem socket (`client_id=ia:<hex>`); **nunca viram master** e a sala segue viva na janela de 60s sem humano conectado, sendo cancelada só depois de vencida (Fase 77).
 - Cada bot tem **personalidade própria** (`ia_risco`/`ia_agressividade`, 0-1, sorteadas em `criar_ia`/`sorteiar_personalidade`, inclusive ao substituir desconectado): modulam o limiar de desconfiança, a altura das apostas e o tempo de pensamento (`FAIXAS_PENSAMENTO`); ousados/agressivos decidem mais rápido. Ruído por lance mantém o bot imprevisível. Com **humano com dados** na mesa (`so_ias` False) o tempo é multiplicado por `FATOR_COM_HUMANO` (1.8) para o humano acompanhar/raciocinar; a pausa só encurta (0.70) quando **não resta humano com dados**.
 - O motor de decisão é **puro** (só os próprios dados + informação pública — **nunca** `rodada.todos_os_dados`).
 - `ia.processar(lobby)` é o orquestrador e roda **dentro do request** (sem threads/timers, serverless-safe): chamado ao fim dos handlers mutáveis, avança rolagem/apostas/conferência/vitória até precisar de humano. Quando **só restam IAs com dados** (`somente_ias_na_partida`), os bots jogam ~30% mais rápido.

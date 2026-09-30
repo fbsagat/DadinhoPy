@@ -54,7 +54,10 @@ if ($LASTEXITCODE -ne 0) { Write-Host "ERRO: copia falhou." -ForegroundColor Red
 Write-Host "==> Rebuild da API (image dadinho-api) e do nginx ..." -ForegroundColor Cyan
 # Fase 61: `api` tem o `build: .`; api2/3/4 usam a MESMA image `dadinho-api`
 # (sem build próprio) — um build sobe as 4 réplicas.
-& $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx"
+# Fase 77: `gc` (varredura de salas abandonadas) usa a MESMA image, então entra
+# no mesmo `up` — o script `python gc_salas.py` e o código novo já vêm no build da
+# api; subir o serviço a cada deploy é o que garante que ele não fique parado.
+& $cmdR "cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx gc"
 
 # nginx.conf bind-mount de arquivo unico: so o --force-recreate re-resolve o
 # mount para o inode novo. Recreate apenas quando o conteudo mudou (evita
@@ -80,6 +83,10 @@ if ($hashLocal -ne $hashComposeRemotoAntes) {
 }
 
 Write-Host "==> Smoke test local ..." -ForegroundColor Cyan
+# Fase 77: o `gc` precisa estar vivo, senão a limpeza de salas abandonadas só
+# depende do TTL curto (120s) e da varredura oportunista. Uma passada solitária
+# com --uma-vez valida env + import + acesso ao Redis sem deixar o loop para trás.
+& $cmdR "cd /opt/dadinho && sudo docker compose exec -T gc python gc_salas.py --uma-vez"
 # A réplica 1 em 8000 (loopback), as demais em 8001-8003, e a borda nginx em
 # 8090 (por onde o tunnel passa).
 & $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo && curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8090/robots.txt && curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"

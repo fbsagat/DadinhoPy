@@ -313,9 +313,15 @@ def verificar_store_producao():
         "os.environ.pop('DADINHO_REDIS_URL', None);"
         "import store;"
     )
+    # `PYTHONIOENCODING` + decodificação explícita: a checagem casa um texto com
+    # acento. Sem isso, o filho escreve na codificação do console (cp1252 num
+    # Windows) e o pai decodifica em UTF-8 (ou vice-versa) — a comparação falha
+    # por mojibake, não pelo store. O CI (ubuntu) passa por acaso; a máquina de
+    # desenvolvimento não.
+    ambiente = dict(os.environ, PYTHONIOENCODING="utf-8")
     resultado = subprocess.run(
-        [sys.executable, "-c", codigo], cwd=RAIZ,
-        capture_output=True, text=True, timeout=60,
+        [sys.executable, "-c", codigo], cwd=RAIZ, env=ambiente,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
     )
     saida = (resultado.stderr or "") + (resultado.stdout or "")
     _checar(
@@ -492,6 +498,27 @@ def verificar_roundtrip():
     _checar("migração v9 -> v10",
             m9.jogadores[0].ia_estilo is None and m9.jogadores[1].ia_estilo is None,
             str([j.ia_estilo for j in m9.jogadores]))
+
+    # v10 -> v11: o carimbo de "sala sem nenhum humano" entra no formato.
+    # Sala antiga (v10) fica com None = "nunca esvaziou", que é o estado neutro
+    # (não cancela nada por acidente logo no deploy).
+    v10 = {"sala_id": "v10", "lobby_num": 1, "versao": 10, "jogadores": [
+        {"client_id": "h", "is_ia": False}], "espectadores": [], "partidas": []}
+    m10 = modelos.Lobby.de_dict(dict(v10))
+    _checar("migração v10 -> v11", m10.sem_humano_em is None, str(m10.sem_humano_em))
+
+    # O carimbo precisa sobreviver ao round-trip E viajar no resumo (é o que a
+    # varredura de salas abandonadas lê, sem reidratar o Lobby inteiro).
+    from datetime import datetime as _dt
+    lobby_sem_humano = modelos.Lobby(sala_id="rt2", lobby_numero=8)
+    marca = _dt(2026, 1, 2, 3, 4, 5)
+    lobby_sem_humano.sem_humano_em = marca
+    copia_selo = modelos.Lobby.de_dict(lobby_sem_humano.para_dict())
+    _checar("round-trip sem_humano_em", copia_selo.sem_humano_em == marca,
+            str(copia_selo.sem_humano_em))
+    _checar("resumo carrega sem_humano_em",
+            lobby_sem_humano.resumo_partida().get("sem_humano_em") == marca.isoformat(),
+            str(lobby_sem_humano.resumo_partida().get("sem_humano_em")))
 
 
 # ---------------------------------------------------------------------------

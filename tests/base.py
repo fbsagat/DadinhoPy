@@ -26,7 +26,7 @@ MODULOS = [
     "modelos/partida.py", "modelos/lobby.py",
     "funcoes_gerais.py", "store.py", "ia.py", "seed.py",
     "tema.py", "gerar_musica.py", "narrador.py", "simular_ia.py",
-    "observabilidade.py", "anti_fraude.py", "api/index.py",
+    "observabilidade.py", "anti_fraude.py", "api/index.py", "gc_salas.py",
 ]
 SALA = "verificacao"
 
@@ -115,6 +115,11 @@ def _contar_eventos(lista, nome):
 
 def _limpar():
     modulo_store.remover_sala(SALA)
+    # Fase 77: a lápide é one-shot e keyed por sala, então sobrevive ao
+    # `remover_sala` — sem consumir aqui, o cancelamento de um teste vaza o
+    # `msg.partida_cancelada` para o teste seguinte (que espera, p.ex., a chave
+    # stale genérica).
+    modulo_store.consumir_sala_cancelada(SALA)
 
 
 def _conectar():

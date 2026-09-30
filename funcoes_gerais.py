@@ -1,6 +1,8 @@
 from flask_socketio import emit
 from modelos import Lobby, sala_room
 from datetime import datetime
+import http.client
+import os
 import re
 import secrets
 import store
@@ -27,6 +29,35 @@ GRACE_RECONEXAO_SEGUNDOS = 30
 # Fase 15: limite de espectadores simultâneos por sala (entram assistindo uma
 # partida em andamento); evita que conexões de leitura inchem o estado da sala.
 MAX_ESPECTADORES = 20
+
+
+def _ler_tempo_sem_humano():
+    """
+    Fase 77: janela (segundos) sem nenhum humano conectado antes de cancelar a
+    sala. Override por `DADINHO_TEMPO_SEM_HUMANO_SEGUNDOS` (mesmo desenho do opt-in
+    `DADINHO_LIMITE_SOCKETS_IP` em app.py): existe para dar folga a quem roda
+    simulação headless de partidas, onde não há cliente humano para "voltar" e a
+    sala seria cancelada no meio. Valor inválido/<=0 cai no padrão.
+    """
+    try:
+        valor = int(os.environ.get('DADINHO_TEMPO_SEM_HUMANO_SEGUNDOS', '') or TEMPO_SEM_HUMANO_PADRAO)
+    except (TypeError, ValueError):
+        return TEMPO_SEM_HUMANO_PADRAO
+    return valor if valor > 0 else TEMPO_SEM_HUMANO_PADRAO
+
+
+# Fase 77: TOTAL desde a saída do último humano, não "grace + 60s". A graça de 30s
+# (GRACE_RECONEXAO_SEGUNDOS) é subjanela disto e serve a outro propósito (trocar o
+# caído por IA enquanto ainda tem gente na mesa).
+TEMPO_SEM_HUMANO_PADRAO = 60
+TEMPO_SEM_HUMANO_SEGUNDOS = _ler_tempo_sem_humano()
+
+# Fase 77: carimbo/lápide no store. A lápide (chave curta) sobrevive à deleção da
+# sala para que quem volta depois saiba que a sessão ERA dele e a partida acabou —
+# sem ela o `retomar_identidade` cairia no "sessão de outra sala", que é mentira.
+# Mesma janela de `VAGAS_RECENTES_SEGUNDOS` (5min): é o prazo que o cliente
+# guarda a chave no localStorage.
+TTL_LAPIDE_SALA = 300
 
 # Limite de caracteres do apelido — fonte única do número. Vale para o que o
 # jogador digita (`validar_input`) e para o que a IA sorteia: `ia.gerar_nome`
@@ -210,6 +241,71 @@ def remover_sala(sala_id):
         store.desregistrar_sid(client_id)
     store.remover_sala(sala_id)
     store.remover_resumo(sala_id)
+
+
+# ---------------------------------------------------------------------------
+# Fase 77: cancelamento por abandono.
+#
+# A sala vive TEMPO_SEM_HUMANO_SEGUNDOS (60s) sem nenhum humano conectado antes
+# de ser cancelada. Três funções, todas sem `emit` de propósito: o cancelamento
+# só acontece com a sala VAZIA, então não há cliente na room para notificar — o
+# único afetado é quem volta depois, e ele é avisado pela lápide.
+# ---------------------------------------------------------------------------
+
+
+def reavaliar_vida(lobby):
+    """
+    Fase 77: mantém `Lobby.sem_humano_em` coerente com quem está na sala.
+    Com humano conectado (jogador fora da graça OU espectador) o carimbo é
+    LIMPO; sem ninguém, carimba agora se ainda não estava. Devolve True se
+    mudou o carimbo (para o chamador persistir).
+
+    Nenhum fluxo de bot passa por aqui: `humanos_conectados` já exclui IAs, e
+    `atualizar_lista_usuarios` (que os bots usam) não chama esta função.
+    """
+    if lobby is None:
+        return False
+    if lobby.tem_humano_conectado():
+        if lobby.sem_humano_em is not None:
+            lobby.sem_humano_em = None
+            return True
+        return False
+    if lobby.sem_humano_em is None:
+        lobby.sem_humano_em = datetime.now()
+        return True
+    return False
+
+
+def prazo_abandono_vencido(lobby, agora=None):
+    """
+    True se a sala passou do tempo sem humanos (Fase 77). Sem carimbo = ainda
+    não esvaziou desde a última gravação, então não vence.
+    """
+    if lobby is None or lobby.sem_humano_em is None:
+        return False
+    agora = agora or datetime.now()
+    try:
+        return (agora - lobby.sem_humano_em).total_seconds() >= TEMPO_SEM_HUMANO_SEGUNDOS
+    except TypeError:
+        return False
+
+
+def cancelar_sala_por_abandono(lobby, agora=None):
+    """
+    Fase 77: cancela a sala cujo carimbo venceu — grava a lápide (para o
+    retorno explicar) e deleta store/resumo/índices, pelo mesmo caminho do
+    `_gc_sala`. Devolve True se cancelou (lobby None ou ainda com gente = False).
+
+    NÃO adquire lock: quem chama (o `_gc_sala`, sempre dentro do handler) já
+    segura. A varredura (`varrer_salas_abandonadas`) adquire por sala antes.
+    """
+    if lobby is None or prazo_abandono_vencido(lobby, agora) is False:
+        return False
+    if lobby.tem_humano_conectado():
+        return False
+    store.marcar_sala_cancelada(lobby.sala_id)
+    remover_sala(lobby.sala_id)
+    return True
 
 
 def mudar_pagina(num, sala):
@@ -698,3 +794,116 @@ def validar_input(texto, tamanho_minimo=1, tamanho_maximo=LIMITE_APELIDO, permit
         return False
 
     return True
+
+
+# ---------------------------------------------------------------------------
+# Fase 77: varredura de salas abandonadas.
+#
+# O `_gc_sala` só roda quando ALGUÉM toca a sala — e quando o último humano sai,
+# ninguém mais toca. Sem isto, a sala fica no store até o TTL curto (120s) e o
+# cancelamento nunca acontece com o motivo certo. Duas chamadas:
+#
+#   - `gc_salas.py` na VPS (loop de 30s) — a garantia dura;
+#   - `listar_partidas` (alguém na home) — opportunista, com rate-limit.
+#
+# Fica aqui, e não em `app.py`, para o `gc_salas.py` importar direto SEM dar
+# boot no Flask. Por isso não emite nada (a sala cancelada está vazia) e engole
+# erro de rede por sala: uma varredura que falha é a mesma que não rodou.
+# ---------------------------------------------------------------------------
+
+# Rate-limit da varredura oportunista, por instância (segundos).
+INTERVALO_VARREDURA_SEGUNDOS = 30
+# Teto de salas examinadas por passada: a varredura é uma barreira de segurança
+# em background, não um paginador. O resto cai na próxima passada.
+MAX_SALAS_POR_VARREDURA = 50
+
+_ultima_varredura = 0.0
+_varredura_guard = threading.Lock()
+
+
+def _vencida_no_resumo(resumo, agora=None):
+    """
+    Fase 77: True se o resumo indica uma sala sem humano com a janela de 60s já
+    vencida. Lê o RESUMO (leve) em vez de reidratar o Lobby — é o que permite
+    varrer o índice inteiro sem custo de desserialização.
+    """
+    if not isinstance(resumo, dict):
+        return False
+    humanos = resumo.get('humanos')
+    if humanos is None:
+        humanos = resumo.get('jogadores') or 0
+    try:
+        if int(humanos or 0) > 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    carimbo = resumo.get('sem_humano_em')
+    if not carimbo:
+        return False
+    try:
+        passou = ((agora or datetime.now()) - datetime.fromisoformat(carimbo)).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return passou >= TEMPO_SEM_HUMANO_SEGUNDOS
+
+
+def varrer_salas_abandonadas(agora=None, forcar=False):
+    """
+    Fase 77: cancela as salas sem humano cujo prazo de 60s venceu. Devolve a
+    lista dos ids cancelados. Reentrante-safe: quem chama durante a varredura
+    (o `salvar_sala` do lock) não entra em recursão.
+
+    `agora` fixa o relógio do JULGAMENTO (testes) e `forcar` pula o rate-limit de
+    30s por instância (testes e `gc_salas.py`, que já é o ritmo próprio dele) —
+    e nesse caso a janela NÃO é consumida, para uma passada forçada não
+    sufocar a varredura oportunista da API. O rate-limit é medido em
+    `time.monotonic` — relógio que não anda para trás quando o NTP ajusta o
+    relógio de parede, ao contrário do `datetime.now()` que julga o prazo.
+    """
+    global _ultima_varredura
+    agora = agora or datetime.now()
+    if not forcar:
+        with _varredura_guard:
+            ultimo = _ultima_varredura
+            _ultima_varredura = time.monotonic()
+        if ultimo and time.monotonic() - ultimo < INTERVALO_VARREDURA_SEGUNDOS:
+            return []
+
+    canceladas = []
+    for resumo in store.listar_resumos()[:MAX_SALAS_POR_VARREDURA]:
+        if not _vencida_no_resumo(resumo, agora):
+            continue
+        sala_id = resumo.get('sala')
+        if not sala_id:
+            continue
+        try:
+            cancelada = _cancelar_sala_trancada(sala_id, agora)
+        except (store.TravaIndisponivel, store.ConflitoDeEstado, store.erros_de_rede(),
+                OSError, http.client.HTTPException):
+            # Lock ocupado (outro handler está na sala) ou store fora: pula esta
+            # sala. A próxima passada pega — same de quando o GC não roda.
+            continue
+        if cancelada:
+            canceladas.append(sala_id)
+    return canceladas
+
+
+def _cancelar_sala_trancada(sala_id, agora=None):
+    """
+    Fase 77: cancela UMA sala sob o lock (in-process + distribuído) e releitura
+    fresca do store. O lock é obrigatório: sem ele, um `retomar_identidade` que
+    está chegando recria a sala do zero enquanto o cancelador a apaga.
+    A releitura é o que torna a checagem honesta — o resumo pode ter sido
+    gravado há segundos, ou o `sem_humano_em` pode já ter sido limpo.
+    """
+    cancelada = False
+    with store.trancar_sala(sala_id):
+        with store.trancar_sala_distribuida(sala_id):
+            lobby = store.carregar_sala(sala_id)
+            if lobby is not None and cancelar_sala_por_abandono(lobby, agora):
+                cancelada = True
+    # Fora do lock, como no `handle_disconnect`: `esquecer_sala` é a limpeza do
+    # cache/lock em processo, e adiá-la evita corrida com um connect novo.
+    if cancelada:
+        store.esquecer_sala(sala_id)
+    return cancelada

@@ -22,6 +22,8 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             gerar_codigo_sala, GRACE_RECONEXAO_SEGUNDOS, MAX_ESPECTADORES, SALA_PADRAO,
                             emitir_status_conferencia, emitir_status_vitoria, emitir_status_rolagem,
                             emitir_dispatcher_turno, reconstruir_tela_sala,
+                            reavaliar_vida, prazo_abandono_vencido,
+                            cancelar_sala_por_abandono, varrer_salas_abandonadas,
                             EMOJIS_PERMITIDOS, EMOJIS_POR_CATEGORIA, COOLDOWN_CHAT,
                             _categoria_canonica_emoji, bot_enviar_emoji)
 from modelos import Jogador
@@ -498,38 +500,41 @@ def _resolver_caidos_para_partida(lobby):
     return mudou
 
 
-def _tem_humano_recente(lobby):
-    """
-    True se a sala tem um humano CONECTADO ou dentro da janela de reconexão
-    (desconectado_em marcado e ainda não expirado). Bots não contam. É a base do
-    GC de sala (Fase 23): o último humano de uma partida só com IAs que cai por
-    um blip (tab em segundo plano, reciclagem da função na Vercel) tem a janela
-    de graça para voltar — antes, a sala morria junto na hora do disconnect.
-    """
-    agora = datetime.now()
-    for jogador in lobby.jogadores:
-        if jogador.is_ia:
-            continue
-        if jogador.desconectado_em is None:
-            return True
-        if (agora - jogador.desconectado_em).total_seconds() < GRACE_RECONEXAO_SEGUNDOS:
-            return True
-    return any(not e.is_ia for e in lobby.espectadores)
-
-
 def _gc_sala(lobby):
     """
-    GC unificado de sala: expurga a janela de reconexão (Fase 9/11) e fecha a
-    sala quando não resta humano conectado NEM na janela de reconexão (Fase
-    15/23). Todo caminho que toca o estado passa por aqui, para que nenhum fluxo
-    deixe uma sala sem humano persistida (só bots, todos na janela de graça
+    GC unificado de sala (Fase 77): expurga a janela de reconexão (Fase 9/11) e
+    cancela a sala que passou TEMPO_SEM_HUMANO_SEGUNDOS (60s) sem nenhum humano
+    conectado. Todo caminho que toca o estado passa por aqui, para que nenhum
+    fluxo deixe uma sala sem humano persistida (só bots, todos na janela de graça
     expirada, instância morta sem disconnect). Devolve True se a sala foi fechada.
+
+    A ORDEM das três checagens é a essence da Fase 77:
+    1. Cancelamento vence TUDO. Se o prazo de 60s venceu, a sala morre sem
+       expurgar ninguém — o fim natural da partida (`ia.processar` no
+       `_purgar_desconectados`) não tem por onde rodar.
+    2. Sala SEM humano conectado e dentro da janela de 60s: NÃO expurga ninguém e
+       não fecha. Quem caiu continua na sala com `desconectado_em`, então o
+       `retomar_identidade` religa a sessão inteira até o prazo. (Na regra
+       anterior — Fase 23, o `_tem_humano_recente` que morava aqui — este era o
+       bug: aos 30s da graça o expurgo removia o jogador e quem voltasse em T+40
+       recebia `vaga_perdida_inatividade` em vez de retomar a partida.)
+    3. Com humano presente, o expurgo roda como sempre: a graça de 30s existe
+       para trocar o caído por IA enquanto ainda tem gente na mesa.
     """
-    mudou = _purgar_desconectados(lobby)
-    if not _tem_humano_recente(lobby):
-        remover_sala(lobby.sala_id)
-        esquecer_sala(lobby.sala_id)
-        return True
+    mudou = reavaliar_vida(lobby)
+    if prazo_abandono_vencido(lobby):
+        if cancelar_sala_por_abandono(lobby):
+            # Mesmo contrato do `handle_disconnect`: a lápide já foi gravada por
+            # `cancelar_sala_por_abandono`, e o lock/cache em processo é
+            # liberado FORA do escopo (o chamador segura o `trancar_sala`).
+            store.esquecer_sala(lobby.sala_id)
+            return True
+    if not lobby.tem_humano_conectado():
+        # Janela de retorno: a sala fica intacta (só o carimbo foi gravado).
+        if mudou:
+            salvar_sala(lobby)
+        return False
+    mudou = _purgar_desconectados(lobby) or mudou
     # Fase 15: partida sem nenhum jogador restante (todos saíram) mas ainda com
     # espectador humano conectado ficaria presa em "jogando" para sempre — quem
     # entra depois só vira espectador e ninguém reinicia. Volta à sala de espera
@@ -953,6 +958,13 @@ def handle_connect():
                 emit("connect_start",
                      {"is_master": jogador.master, 'chave_secreta': jogador.chave_secreta, 'sala': lobby.sala_id,
                       'username': jogador.username})
+                # Fase 77: entrou gente na sala, então o carimbo de ausência tem
+                # de cair ANTES do save abaixo. O `_gc_sala` acima não pode fazer
+                # isto: ele roda antes do placeholder existir, quando a sala
+                # ainda parece sem humano. Sem esta linha a sala ficava com o
+                # TTL curto (120s) mesmo com gente jogando — e o store a
+                # engolia no meio da partida.
+                reavaliar_vida(lobby)
                 atualizar_lista_usuarios(lobby)
                 if not deferir_snapshot:
                     enviar_snapshot_sala(lobby, jogador)
@@ -980,6 +992,37 @@ def handle_connect():
             return
 
 
+def _realocar_em_sala_nova(client_id, sala_id, motivo_chave):
+    """
+    Fase 77: recoloca quem voltou numa sala APAGADA de volta na MESMA sala, agora
+    zerada. Sem isto, o cliente ficaria órfão: o `connect_start` adiado
+    (`tem_chave=1`, Fase D2) nunca receberia snapshot e a tela não montaria.
+
+    O jogador que volta entra na sala de espera (status `espera` ⇒ jogador, não
+    espectador) e é master — é o único servidor que sobrou. A chave antiga morre
+    junto com a sala apagada; o `retomar_negado` carrega o motivo e o cliente
+    adota a chave nova do placeholder, como no caminho genérico de chave stale.
+    """
+    store.esquecer_sala(sala_id)
+    lobby = obter_sala(sala_id)
+    join_room(lobby.sala_room(), sid=client_id)
+    jogador = lobby.buscar_jogador_pelo_client_id(client_id)
+    if jogador is None:
+        jogador = Jogador(client_id=client_id, master=lobby.verificar_jogador_master() is False)
+        jogador.lobby_atual = lobby
+        lobby.adicionar_jogador(jogador)
+    registrar_cliente(client_id, sala_id)
+    emit('connect_start',
+         {'is_master': jogador.master, 'chave_secreta': jogador.chave_secreta,
+          'sala': lobby.sala_id, 'username': jogador.username},
+         to=client_id, ignore_queue=True)
+    atualizar_lista_usuarios(lobby)
+    enviar_snapshot_sala(lobby, jogador)
+    if store.consumir_sala_cancelada(sala_id):
+        emit('retomar_negado', {'motivo': {'chave': motivo_chave}},
+             to=client_id, ignore_queue=True)
+
+
 @socketio.on('retomar_identidade')
 @evento_mutavel(cooldown=None)
 def retomar_identidade(dados=None):
@@ -1005,6 +1048,16 @@ def retomar_identidade(dados=None):
     lobby = store.carregar_sala(sala_id)
     if lobby is None:
         return
+    # Fase 77: a janela de 60s é julgada AQUI, não só no `_gc_sala`. Este
+    # handler roda com o lock (`evento_mutavel`), e é justamente ele quem traz o
+    # humano DE VOLTA — se confiasse só no GC, uma sala vencida sobreviveria
+    # até o próximo a tocar nela, e o carimbo seria limpo na linha 1070
+    # (impossibilitando a checagem), ressuscitando uma partida que deveria ter
+    # morrido. Julgar antes de religar a identidade é o ponto.
+    if prazo_abandono_vencido(lobby):
+        if cancelar_sala_por_abandono(lobby):
+            _realocar_em_sala_nova(client_id, sala_id, 'msg.partida_cancelada')
+            return
     alvo = lobby.buscar_jogador_pela_chave(chave)
     if alvo is None:
         # A chave não pertence a esta sala (ex.: sessão de outra sala, ou o
@@ -1019,11 +1072,19 @@ def retomar_identidade(dados=None):
         placeholder = lobby.buscar_jogador_pelo_client_id(client_id)
         if placeholder is not None:
             enviar_snapshot_sala(lobby, placeholder)
-        vaga = lobby.buscar_vaga_recente(chave)
-        if vaga is not None:
-            motivo = {'chave': 'msg.vaga_perdida_inatividade'}
+        # Fase 77: a lápide vem PRIMEIRO, antes de `vagas_recentes`. Depois que a
+        # sala foi cancelada e recriada, `vagas_recentes` está vazio e cairíamos no
+        # "sessão de outra sala" — que é mentira: a sessão ERA desta sala, a
+        # partida é que foi cancelada por abandono. A lápide é one-shot (consumir
+        # apaga), então um segundo retorno cai no motivo genérico.
+        if store.consumir_sala_cancelada(sala_id):
+            motivo = {'chave': 'msg.partida_cancelada'}
         else:
-            motivo = {'chave': 'msg.retomar_outra_sala'}
+            vaga = lobby.buscar_vaga_recente(chave)
+            if vaga is not None:
+                motivo = {'chave': 'msg.vaga_perdida_inatividade'}
+            else:
+                motivo = {'chave': 'msg.retomar_outra_sala'}
         emit('retomar_negado', {'motivo': motivo}, to=client_id, ignore_queue=True)
         return
     if alvo.client_id == client_id:
@@ -1050,6 +1111,11 @@ def retomar_identidade(dados=None):
         # (ver `ia.desmarcar_substituto`: evita dois cards com o mesmo `id`).
         alvo.username = ia.desmarcar_substituto(lobby, alvo)
     lobby.definir_master()
+    # Fase 77: o carimbo de ausência vira nulo — a sala tem humano de novo, então
+    # a janela de 60s não pode vencer e o TTL longo do store volta no
+    # `atualizar_lista_usuarios` logo abaixo. Precisa vir ANTES do save, senão o
+    # cancelamento acontece depois e apaga uma sala com gente.
+    reavaliar_vida(lobby)
     emit("connect_start",
          {"is_master": alvo.master, 'chave_secreta': alvo.chave_secreta,
           'sala': lobby.sala_id, 'username': alvo.username}, to=client_id, ignore_queue=True)
@@ -1133,16 +1199,23 @@ def handle_disconnect():
 
                 if lobby.contar_jogadores() > 0:
                     lobby.definir_master()
-                # Fase 11/15/23: a sala só é fechada quando não resta humano conectado
-                # NEM na janela de reconexão — o último humano de uma partida de IAs pode
-                # voltar. Sem ninguém conectado/na janela não há evento futuro para o
-                # expurgo do serverless, então fechar aqui evita salas vazias no store.
-                if _tem_humano_recente(lobby):
-                    # S6: atualizar_lista_usuarios já persiste a sala (e o resumo da busca).
-                    atualizar_lista_usuarios(lobby)
-                else:
-                    remover_sala(lobby.sala_id)
+                # Fase 11/15/23 + 77: a sala NUNCA morre aqui. O último humano que
+                # cai só carimba `sem_humano_em` e a sala espera a janela de 60s
+                # do cancelamento por abandono (que decide no `_gc_sala` ou na
+                # varredura). Antes (Fase 23) a regra era `_tem_humano_recente`:
+                # sem ninguém conectado NEM na graça, fechar na hora — o que
+                # matava a partida num blip de rede e dava no máximo 30s de
+                # retorno. Cancelar aqui também é o que causa a corrida com um
+                # `retomar_identidade` que está chegando agora.
+                # Fase 77: carimba (ou limpa, se sobrou gente) antes de decidir.
+                reavaliar_vida(lobby)
+                if cancelar_sala_por_abandono(lobby):
                     sala_esvaziou = True
+                else:
+                    # `atualizar_lista_usuarios` persiste a sala (carimbo) e o
+                    # resumo da busca; o TTL curto do store (Fase 77) entra
+                    # sozinho, porque a sala está sem humano.
+                    atualizar_lista_usuarios(lobby)
         except (store.TravaIndisponivel, store.ConflitoDeEstado, store.erros_de_rede(),
                 OSError, http.client.HTTPException):
             # Lock distribuído indisponível, save stale (Fase 52), ou falha do
@@ -1471,6 +1544,14 @@ def listar_partidas(dados):
     filtros = dados.get('filtros', {})
     sala_atual = dados.get('sala_atual')
     resumos = listar_resumos_partidas(filtros, sala_atual=sala_atual)
+    # Fase 77: opportunisticamente, quem está na home (e portanto lê o índice de
+    # resumos) também cancela as salas abandonadas vencidas. É a rede que faz a
+    # limpeza acontecer enquanto o site tem tráfego, sem depender do cron da VPS
+    # (e o único que roda no deploy da Vercel, onde o cron é 1x/dia). A varredura
+    # é idempotente, engole erro de rede e se auto-limita a uma passada por
+    # instância a cada 30s — a listagem acima (que acabou de ler o mesmo índice)
+    # NÃO é afetada: a varredura roda depois dela.
+    varrer_salas_abandonadas()
     emit('partidas_listadas', {'partidas': resumos}, to=client_id, ignore_queue=True)
 
 
