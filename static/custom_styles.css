@@ -304,6 +304,17 @@ canvas {
            o card crescer quando um nome longo quebrava linha no cabeçalho). */
         height: 165px !important;
     }
+
+    /* Fase 81: mesmo tratamento de altura fixa para os cards da conferência
+       (tela 3) — sem isto, apelidos longos quebram linha e o card cresce,
+       perdendo a simetria com os irmãos na mesma row. */
+    #cards_conferencia .card {
+        height: 165px !important;
+    }
+
+    #cards_conferencia .card-title {
+        font-size: 0.85rem;
+    }
 }
 
 /* Fase 5: sala de espera e busca de partidas. */
@@ -1411,6 +1422,23 @@ h5,
 #cards_conferencia .card {
     border-radius: 14px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    /* Fase 81: altura FIXA — o nome do jogador (h5.card-title) não pode inflar o
+       card no conferenciar mobile (caso já resolvido na tela 2 em Fase 32/34). */
+    height: 163px;
+    min-width: 0;
+}
+
+#cards_conferencia .card-body {
+    overflow-y: auto;
+}
+
+/* Fase 81: o nome do jogador não influencia o tamanho do card — fica em linha
+   única com reticências no fim. Mesmo padrão de `.nome-jogador` na tela 2. */
+#cards_conferencia .card-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 @media (max-width: 575px) {
