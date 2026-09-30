@@ -3455,6 +3455,76 @@ def teste_bot_adicionado_confirma_master():
     _ok("bot_adicionado confirma ao master só os bots que entraram (Fase 79)")
 
 
+def teste_painel_ia_tem_cooldown_proprio():
+    """
+    O painel 🤖 não pode dividir a janela de cooldown com o painel de config.
+    O seletor de nível (`ia_nivel`) fica logo acima do botão "Adicionar IA" e
+    cada `change` dele emite `configurar_partida`: na janela padrão, dividida
+    pelo `sid` cru, o clique seguinte era descartado em silêncio — a IA só
+    entrava na segunda tentativa. Mesmo caso do `chat_reagindo` (Fase 77).
+
+    Os dois painéis agora têm balde próprio (`config_sala` / `ia_sala`), e o
+    rate limit de cada um continua valendo: dois `adicionar_ia` seguidos ainda
+    entram só o primeiro. E pedir sem vaga agora RESPONDE (`lobby_lotado`) em
+    vez de sumir — antes era indistinguível do descarte por cooldown.
+    """
+    _limpar()
+    modulo_app.tem_cooldown = funcoes_gerais.tem_cooldown
+    _sleep_real = time.sleep
+    try:
+        c1, cs1, _ = _conectar()
+        c1.emit("apelido", {"apelido_msg": "Ana"})
+        _sleep_real(0.6)
+
+        # Rate limit do painel continua valendo: dois cliques colados, um só.
+        # Nada de leitura de store no meio — o par precisa sair colado mesmo.
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2,
+                                 "quantidade": 1})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 2,
+                                 "quantidade": 1})
+        assert _contar_eventos(c1.get_received(), "bot_adicionado") == 1, \
+            "dois pedidos de IA em rajada não podem criar dois bots"
+        assert len(modulo_store.carregar_sala(SALA).jogadores) == 2, \
+            f"o segundo pedido em rajada é barrado, len={len(modulo_store.carregar_sala(SALA).jogadores)}"
+        _sleep_real(0.6)
+
+        # Trocar o nível e clicar em "Adicionar IA" sem pausa no meio, como o
+        # master faz: o `configurar_partida` não pode comer a janela do botão.
+        c1.emit("configurar_partida", {"chave": cs1["chave_secreta"],
+                                       "config": {"ia_nivel_padrao": 4}})
+        c1.emit("adicionar_ia", {"chave": cs1["chave_secreta"], "nivel": 4,
+                                 "quantidade": 1})
+        eventos = c1.get_received()
+        assert _contar_eventos(eventos, "bot_adicionado") == 1, \
+            "o clique logo após trocar o nível não pode ser dropado pelo cooldown"
+        lobby = modulo_store.carregar_sala(SALA)
+        assert len(lobby.jogadores) == 3, \
+            f"a IA tem de entrar na primeira tentativa, len={len(lobby.jogadores)}"
+        assert lobby.config["ia_nivel_padrao"] == 4, \
+            f"a config do nível também tem de ser aplicada: {lobby.config!r}"
+        assert lobby.jogadores[2].ia_nivel == 4, \
+            f"o bot nasce no nível escolhido, veio {lobby.jogadores[2].ia_nivel}"
+        c1.disconnect()
+    finally:
+        modulo_app.tem_cooldown = lambda *a, **k: False
+    _limpar()
+
+    # Sala cheia: o pedido não cria nada, mas o master é avisado (não é silêncio).
+    c2, cs2, _ = _conectar()
+    c2.emit("completar_com_ias", {"chave": cs2["chave_secreta"], "nivel": 2})
+    c2.get_received()
+    c2.emit("adicionar_ia", {"chave": cs2["chave_secreta"], "nivel": 2,
+                             "quantidade": 1})
+    eventos = c2.get_received()
+    assert "bot_adicionado" not in [e["name"] for e in eventos], \
+        "sala cheia não pode tocar o som de bot entrando"
+    assert _achar_evento(eventos, "lobby_lotado") is not None, \
+        "pedido sem vaga tem de responder (sala lotada), não ficar em silêncio"
+    c2.disconnect()
+    _limpar()
+    _ok("painel de IAs tem cooldown próprio e responde quando a sala lota")
+
+
 def teste_master_renomeia_ia():
     """
     Fase 75: o master renomeia o bot direto na lista. O `renomear_ia` recoloca
@@ -3914,6 +3984,7 @@ def verificar_integracao():
     ]
     testes_fase79 = [
         ("bot-adicionado", teste_bot_adicionado_confirma_master),
+        ("painel-ia-cooldown", teste_painel_ia_tem_cooldown_proprio),
     ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15

@@ -58,20 +58,20 @@ Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a
 | `connect` (handshake `?sala=`, `tem_chave`) | `handle_connect` | — |
 | `retomar_identidade` (`chave`) | `retomar_identidade` | cooldown=None, sem autenticar |
 | `apelido` (`apelido_msg`) | `escolher_apelido` | evento_mutavel, extrair_chave=None |
-| `configurar_partida` (`chave`, `config`) | `configurar_partida` | master + chave |
+| `configurar_partida` (`chave`, `config`) | `configurar_partida` | master + chave; cooldown próprio (`cooldown_chave='config_sala'`) |
 | `ficar_pronto` (`chave`) | `ficar_pronto` | + chave, guarda `username is None` (emit `pronto_sem_nome`) |
 | `iniciar_partida` (`chave`, `dados_qtd`) | `iniciar_partida` | master + chave, valida `pode_iniciar` |
 | `comprometer_seed` (`chave`, `compromisso`) | `comprometer_seed` | chave, cooldown=None |
 | `revelar_seed` (`chave`, `nonce`) | `revelar_seed` | chave, cooldown=None |
 | `solicitar_auditoria` | `solicitar_auditoria` | chave |
-| `adicionar_ia`/`completar_com_ias`/`remover_ia` (chave) | app.py:712/723/734 | master + chave |
-| `renomear_ia` (`chave`, `client_id`, `apelido`) | `renomear_ia` | master + chave, só na espera; recusa → `renomear_ia_negado` |
+| `adicionar_ia`/`completar_com_ias`/`remover_ia` (chave) | app.py:1396/1414/1428 | master + chave; cooldown próprio (`cooldown_chave='ia_sala'`), para o `configurar_partida` do seletor de nível não consumir a janela do botão logo abaixo |
+| `renomear_ia` (`chave`, `client_id`, `apelido`) | `renomear_ia` | master + chave, mesmo balde `ia_sala`; só na espera; recusa → `renomear_ia_negado` |
 | `expulsar_jogador` (`chave`, `client_id`) | `expulsar_jogador` | master + chave |
 | `sair_da_sala` (`chave`) | `sair_da_sala` | cooldown=None, espectador sem chave; jogador na espera/eliminado: exige chave e remove sem janela de reconexão; jogador ativo na partida: no-op |
 | `listar_partidas` (`filtros`, `sala_atual`) | `listar_partidas` | evento_leitura |
 | `criar_sala` | `criar_sala` | — |
 | `verificar_desconectados` | `verificar_desconectados` | extrair_chave=None |
-| `heartbeat` (`chave`, `pagina`, `vez`) | `heartbeat` | cooldown=None, sem autenticar |
+| `heartbeat` (`chave`, `pagina`, `vez`) | `heartbeat` | sem autenticar, `lock_distribuido=False`; **herda `COOLDOWN_ESCRITA` (0,5s) na janela do `sid` cru** — compete com os handlers mutáveis que não isolaram balde |
 | `espectador_leitura` (`chave`, `pagina`) | `espectador_leitura` | cooldown=None, + chave (poll do espectador, Fase 69) |
 | `jogar_dados` (`chave`) | `jogar_dados` | + chave |
 | `joguei_dados` (`chave_secreta`) | `joguei_dados` | chave (campo `chave_secreta`), idempotente por rodada |
@@ -97,8 +97,8 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `atualizar_pontos` | funcoes_gerais:327 | sala | 597 |
 | `master_def` | funcoes_gerais:354 | cliente | 607 |
 | `atualizar_lista_usuarios`/`update_user_list` | funcoes_gerais:388 / app.py:889 | sala / cliente | 468 |
-| `lobby_lotado` | app.py:1068 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu) | fecha o drawer de configurações |
-| `bot_adicionado` (`quantidade`) | app.py:1458 (`_confirmar_bots_ao_master`, em `adicionar_ia`/`completar_com_ias`, Fase 79) | cliente (só o master que pediu; só quando o bot entrou mesmo) | bip sintetizado (`tocar_som_bot`), um por bot |
+| `lobby_lotado` | app.py:1463 (`_avisar_lobby_lotado`, em `adicionar_ia`/`completar_com_ias`) | cliente (só o master que pediu; dispara mesmo quando nenhum bot coube, para "sala cheia" não ser indistinguível de um drop) | fecha o drawer de configurações (script.js:1630) |
+| `bot_adicionado` (`quantidade`) | app.py:1482 (`_confirmar_bots_ao_master`, em `adicionar_ia`/`completar_com_ias`, Fase 79) | cliente (só o master que pediu; só quando o bot entrou mesmo) | bip sintetizado (`tocar_som_bot`, script.js:1638), um por bot |
 | `renomear_ia_negado` (`motivo` {chave, params}: `msg.motivo.ia_invalido`/`ia_ocupado`/`ia_alvo`) | `renomear_ia` (Fase 75) | cliente (só o master) | mostra o alerta da recusa |
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |

@@ -1729,10 +1729,27 @@ function alternar_pronto() {
 }
 
 // O master aplica as configurações ao alterar qualquer campo da sala de espera.
+// Aglutinado: mexer em dois campos seguidos (ou arrastar por um `<select>`)
+// não pode virar dois `configurar_partida` — o segundo cairia na janela de
+// cooldown do primeiro e a config do servidor ficaria atrás da tela, que o
+// `update_user_list` seguinte reverte. Um emit por pausa vale o mesmo que a
+// última edição e ainda economiza um comando do store.
+let _enviar_config_timer = null;
+
+function agendar_enviar_config() {
+    if (_enviar_config_timer) {
+        clearTimeout(_enviar_config_timer);
+    }
+    _enviar_config_timer = setTimeout(function () {
+        _enviar_config_timer = null;
+        enviar_config();
+    }, 350);
+}
+
 ['config_nome', 'config_dados', 'config_max', 'config_coringa', 'config_publica', 'config_substituir_ia', 'config_verificacao', 'ia_nivel', 'config_tempo'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
-        el.addEventListener('change', enviar_config);
+        el.addEventListener('change', agendar_enviar_config);
     }
 });
 

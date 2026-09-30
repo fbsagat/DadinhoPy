@@ -558,7 +558,10 @@ def evento_mutavel(func=None, *, cooldown=COOLDOWN_ESCRITA, lock_distribuido=Tru
       fluxo do jogo, e um drop silencioso pelo cooldown travaria a partida);
       `cooldown_chave` isola a janela deste handler num balde próprio
       (`<chave>:<sid>`), para dois eventos do MESMO sid não consumirem a janela
-      um do outro (ex.: o preview do chat derrubava o emoji real).
+      um do outro. Sem `cooldown_chave` a janela é a do `sid` cru e vale para
+      TODOS os handlers mutáveis: o descarte é silencioso, então dois comandos
+      vizinhos no mesmo painel (o `configurar_partida` do seletor de nível e o
+      `adicionar_ia` logo abaixo) se anulavam. Mesmo padrão de `chat_reagindo`.
     - A4: lock por sala no processo, cobrindo todo o read-modify-write;
     - Fase 24: lock distribuído por sala (Upstash) por dentro do local —
       serializa a mutação ENTRE instâncias (pré-requisito da message queue);
@@ -1290,12 +1293,18 @@ def iniciar_partida(dados, lobby, jogador):
 
 
 @socketio.on('configurar_partida')
-@evento_mutavel
+@evento_mutavel(cooldown_chave='config_sala')
 @autenticar(exigir_master=True)
 def configurar_partida(dados, lobby, jogador):
     """
     Aplica as configurações da partida definidas pelo master na sala de espera
     (nome, quantidade de dados, máximo de jogadores, coringa, pública).
+
+    Janela de cooldown no balde `config_sala`: o seletor de nível da IA fica
+    logo acima do botão "Adicionar IA" (mesmo painel), e cada `change` dele
+    dispara um `configurar_partida`. Na janela padrão, dividida pelo `sid` cru
+    com todo handler mutável, o clique seguinte era descartado em silêncio e
+    só funcionava na segunda tentativa.
     """
     if lobby.status != 'espera':
         return
@@ -1385,7 +1394,7 @@ def solicitar_auditoria(dados, lobby, jogador):
 
 
 @socketio.on('adicionar_ia')
-@evento_mutavel
+@evento_mutavel(cooldown_chave='ia_sala')
 @autenticar(exigir_master=True)
 def adicionar_ia(dados, lobby, jogador):
     """O master adiciona bots à sala de espera (níveis 1-4, Fase 11)."""
@@ -1394,12 +1403,16 @@ def adicionar_ia(dados, lobby, jogador):
     criados = ia.adicionar_bots(lobby, dados.get('nivel', 2), dados.get('quantidade', 1))
     if criados:
         atualizar_lista_usuarios(lobby)
-        _avisar_lobby_lotado(lobby, jogador)
         _confirmar_bots_ao_master(jogador, criados)
+    # Fora do `if`: pedir sem vaga é justamente o caso em que o master precisa
+    # de resposta — com o aviso dentro, sala cheia era silêncio e indistinguível
+    # do descarte por cooldown. O aviso só dispara se o limite foi atingido de
+    # fato, então payload inválido (invariante #4) não fecha a config.
+    _avisar_lobby_lotado(lobby, jogador)
 
 
 @socketio.on('completar_com_ias')
-@evento_mutavel
+@evento_mutavel(cooldown_chave='ia_sala')
 @autenticar(exigir_master=True)
 def completar_com_ias(dados, lobby, jogador):
     """O master preenche as vagas restantes da sala com bots (Fase 11)."""
@@ -1408,12 +1421,12 @@ def completar_com_ias(dados, lobby, jogador):
     criados = ia.completar_bots(lobby, dados.get('nivel', 2))
     if criados:
         atualizar_lista_usuarios(lobby)
-        _avisar_lobby_lotado(lobby, jogador)
         _confirmar_bots_ao_master(jogador, criados)
+    _avisar_lobby_lotado(lobby, jogador)
 
 
 @socketio.on('remover_ia')
-@evento_mutavel
+@evento_mutavel(cooldown_chave='ia_sala')
 @autenticar(exigir_master=True)
 def remover_ia(dados, lobby, jogador):
     """O master remove bots da sala de espera, por nível ou todos (Fase 11)."""
@@ -1424,7 +1437,7 @@ def remover_ia(dados, lobby, jogador):
 
 
 @socketio.on('renomear_ia')
-@evento_mutavel
+@evento_mutavel(cooldown_chave='ia_sala')
 @autenticar(exigir_master=True)
 def renomear_ia(dados, lobby, jogador):
     """
@@ -1454,6 +1467,12 @@ def _avisar_lobby_lotado(lobby, jogador):
     do lobby ao card "Jogadores" — só volta quando TODAS as vagas foram
     preenchidas, não a cada bot adicionado. Só dispara se o limite foi
     atingido; quem ainda tem vaga não recebe o evento.
+
+    É chamado mesmo quando `criados` veio vazio: com a sala já cheia o pedido do
+    master não cria nada, e é justamente esse "não aconteceu nada" que precisa
+    de retorno. O `lobby_lotado` é a única resposta possível aqui sem evento
+    novo (o motivo de não ter criado pode ser só a sala cheia, e é o que o
+    cliente sabe mostrar).
     """
     limite = int(lobby.config.get('max_jogadores', 6))
     if len(lobby.jogadores) >= limite:
