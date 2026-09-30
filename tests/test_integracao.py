@@ -869,7 +869,7 @@ def teste_sala_orfa_e_fechada():
 
 
 def teste_sala_padrao_fica_na_home():
-    # Fase 18: sem código (ou com `?sala=padrao`/inválido), o connect NÃO cria
+    # Fase 18: sem código (ou com `?sala=padrao`), o connect NÃO cria
     # sala automaticamente — o cliente fica na home e decide criar ou buscar.
     _limpar()
     modulo_store.remover_sala(funcoes_gerais.SALA_PADRAO)
@@ -884,11 +884,16 @@ def teste_sala_padrao_fica_na_home():
         "a sala padrão não pode ser materializada"
     c1.disconnect()
 
-    # Código inválido também cai na home (normalizar_sala usa o sentinela).
+    # Fase 77: código presente mas formato inválido → avisa (sala_invalida)
+    # em vez de cair silenciosamente na sala padrão.
     c2 = socketio.test_client(app, query_string="sala=invalida!")
     eventos2 = c2.get_received()
     assert _achar_evento(eventos2, "sala_criada") is None
-    assert not _achar_evento(eventos2, "connect_start").get("sala")
+    negado = _achar_evento(eventos2, "sala_invalida")
+    assert negado is not None, "código inválido deve emitir sala_invalida"
+    assert negado.get("motivo", {}).get("chave") == "msg.sala_codigo_invalido"
+    assert _achar_evento(eventos2, "connect_start") is None, \
+        "código inválido não deve emitir connect_start"
     c2.disconnect()
 
     # "Criar sala" (evento) devolve um código novo que funciona como sala normal.

@@ -29,7 +29,8 @@ Eventos sempre escopados à room da sala (`to=sala_<id>`) no namespace global.
 
 ## Home sem sala e busca
 
-- **Home sem sala (Fase 18):** `handle_connect` sem `?sala=` (ou `?sala=padrao` inválida) **não cria sala automaticamente** — emite `connect_start` sem sala (`chave_secreta` vazia) e o cliente fica em `#painel_home`: "Criar sala" (`criar_sala` → `sala_criada` → navega via `gerar_codigo_sala`) ou "Buscar partidas" (`listar_partidas`). Entrar por código: busca ou link compartilhado.
+- **Home sem sala (Fase 18):** `handle_connect` sem `?sala=` (ou `?sala=padrao`) **não cria sala automaticamente** — emite `connect_start` sem sala (`chave_secreta` vazia) e o cliente fica em `#painel_home`: "Criar sala" (`criar_sala` → `sala_criada` → navega via `gerar_codigo_sala`) ou "Buscar partidas" (`listar_partidas`). Entrar por código: busca ou link compartilhado.
+  - **Código inválido (Fase 77):** `?sala=` presente mas formato quebrado (ex: `?sala=abc!`) — o servidor emite `sala_invalida` em vez de `connect_start` e o cliente avisa + limpa a query string, sem nunca materializar a sala padrão.
 - **Busca:** tela client-side (fora do ciclo de páginas), `listar_partidas` → `partidas_listadas` (somente leitura, `to=client_id`). Filtros: nome/código, status, coringa, vaga, ordenação (`funcoes_gerais.listar_resumos_partidas`). Salas privadas não aparecem.
 
 ## Espectadores (Fase 15)
@@ -92,6 +93,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | Evento | Origem (ex) | Escopo | `script.js` |
 |---|---|---|---|
 | `connect_start` | app.py:445 | cliente | 1661 |
+| `sala_invalida` (`motivo` {chave, params}; Fase 77: código de sala inválido na URL — avisa e limpa a query sem ficar na sala padrão) | app.py:895 | cliente | `socket.on('sala_invalida')` |
 | `sala_cheia` | app.py:426/432 | cliente | 432 |
 | `retomar_negado` (`motivo` {chave, params}; Fase 30: `msg.vaga_perdida_inatividade` vs `msg.retomar_outra_sala`; Fase 77: `msg.partida_cancelada`, quando a lápide diz que a sala foi cancelada por abandono — vem acompanhado de `connect_start`+snapshot da sala zerada, senão a tela trava) | app.py:1088 (Fase 77) | cliente | 1729 |
 | `update_username` | app.py:592 | cliente | 1740 |

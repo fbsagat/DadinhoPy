@@ -173,6 +173,21 @@ def normalizar_sala(sala_id):
     return SALA_PADRAO
 
 
+def sala_e_invalida(sala_raw):
+    """
+    True quando o código de sala foi passado na query string mas é inválido:
+    presente, não vazio, não é 'padrao' e não bate com a regex. Diferente de
+    ausente/vazio (→ home) e de ?sala=padrao (→ home deliberada): um código
+    quebrado deve avisar, não cair silenciosamente na sala padrão (Fase 77).
+    """
+    if not isinstance(sala_raw, str):
+        return False
+    sala = sala_raw.strip().lower()
+    if not sala or sala == SALA_PADRAO:
+        return False
+    return re.fullmatch(r"[a-z0-9\-_]{1,24}", sala) is None
+
+
 def obter_sala(sala_id):
     """
     Retorna o Lobby da sala, carregando-o do store distribuído ou criando caso ainda não exista.

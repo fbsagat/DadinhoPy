@@ -10,6 +10,11 @@ let indiceAtual = 0;
 let chave_secreta = '';
 let nome_jogador = '';
 let sala_atual = getParamSala();
+// Fase 77: código crú da query string (?sala=...), sem validação. Enviado no
+// handshake para o servidor detectar códigos inválidos e avisar (em vez de
+// cair silenciosamente na sala padrão). `sala_atual` (validado) continua sendo
+// usado para `modo_home` e `chave_resumo`; o socket usa o valor crú.
+const sala_param_raw = (new URLSearchParams(window.location.search).get('sala') || '');
 // Fase 18: sem código válido na URL o jogador fica na home — não cria sala
 // automaticamente. `modo_home` controla qual painel da tela 0 aparece.
 let modo_home = !sala_atual;
@@ -172,7 +177,7 @@ const captcha_sitekey = (document.querySelector('meta[name="dadinho-turnstile-si
 const socket = io(api_url || undefined, {
     autoConnect: !captcha_sitekey,
     transports: ['websocket'],
-    query: { sala: sala_atual, tem_chave: chave_resumo ? '1' : '0' },
+    query: { sala: sala_param_raw, tem_chave: chave_resumo ? '1' : '0' },
     closeOnBeforeunload: false,
     // Fase 78: backoff exponencial alto para evitar storm de reconexão que
     // pode disparar rate limit/WAF do Cloudflare. O default do socket.io
@@ -1130,6 +1135,22 @@ socket.on('sala_cheia', function () {
     // Sala pedida lotada: em vez de travar no alerta, cria uma sala nova.
     mostrar_alerta(t('msg.sala_cheia'), 'aviso')
         .then(() => criar_sala());
+});
+
+// Fase 77: código de sala presente na URL mas formato inválido. Avisa ao invés
+// de cair silenciosamente na sala padrão e limpa a query string.
+socket.on('sala_invalida', function (data) {
+    _watchdog_connect_start = _cancelar_watchdog(_watchdog_connect_start);
+    _watchdog_connect_tentativas = 0;
+    const motivo = (data && data.motivo && data.motivo.chave)
+        ? t(data.motivo.chave, data.motivo.params || {})
+        : t('msg.sala_codigo_invalido');
+    // Limpa a query string antes de mostrar o alerta: o aviso é sobre o código
+    // que estava na URL, que já está sendo descartado.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('sala');
+    window.history.replaceState({}, '', url.toString());
+    mostrar_alerta(motivo, 'aviso');
 });
 
 socket.on('iniciar_negado', function (data) {

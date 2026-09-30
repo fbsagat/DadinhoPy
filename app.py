@@ -25,7 +25,7 @@ from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normaliza
                             reavaliar_vida, prazo_abandono_vencido,
                             cancelar_sala_por_abandono, varrer_salas_abandonadas,
                             EMOJIS_PERMITIDOS, EMOJIS_POR_CATEGORIA, COOLDOWN_CHAT,
-                            _categoria_canonica_emoji, bot_enviar_emoji)
+                            _categoria_canonica_emoji, bot_enviar_emoji, sala_e_invalida)
 from modelos import Jogador
 from store import trancar_sala, trancar_sala_distribuida, esquecer_sala
 from datetime import datetime
@@ -893,12 +893,19 @@ def handle_connect():
 
     sala_id = normalizar_sala(request.args.get('sala'))
     if sala_id == SALA_PADRAO:
-        # Fase 18: chegou sem código (ou com código inválido) — home, não cria
-        # sala automaticamente. O cliente fica conectado (o socket é necessário
-        # para `criar_sala` e `listar_partidas`), mas sem sala nem jogador até
-        # escolher criar uma sala ou entrar pela busca.
-        emit('connect_start', {'is_master': False, 'chave_secreta': '', 'sala': None},
-             to=client_id, ignore_queue=True)
+        # Fase 18: sem código (ou ?sala=padrao) → home, sem criar sala. O cliente
+        # fica conectado (socket serve pra `criar_sala` e `listar_partidas`).
+        # Fase 77: código presente mas formato inválido → avisa em vez de cair
+        # silenciosamente na sala padrão. O cliente limpa a query string via
+        # `socket.on('sala_invalida')` e mosta o aviso.
+        if sala_e_invalida(request.args.get('sala', '')):
+            emit('sala_invalida', {
+                'motivo': {'chave': 'msg.sala_codigo_invalido',
+                           'params': {'codigo': (request.args.get('sala', '') or '')[:24]}}
+            }, to=client_id, ignore_queue=True)
+        else:
+            emit('connect_start', {'is_master': False, 'chave_secreta': '', 'sala': None},
+                 to=client_id, ignore_queue=True)
         return
     with trancar_sala(sala_id):
         try:
