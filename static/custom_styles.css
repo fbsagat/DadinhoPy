@@ -1157,6 +1157,45 @@ h5,
     }
 }
 
+/* ------- Indicadores de mais/menos dados (tela 2) ------- */
+/* Posicionados via `::before` no card-header (o `card-ultima` usa `::after`),
+   então não há conflito visual. Ciano para mais dados, laranja para menos. */
+#cards .card-header.card-mais-dados::before,
+#cards .card-header.card-menos-dados::before {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    z-index: 2;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    pointer-events: none;
+}
+#cards .card-header.card-mais-dados::before {
+    content: '▲';
+    background-color: rgba(13, 202, 240, 0.30);
+    color: #0dcaf0;
+    border: 3px solid rgba(13, 202, 240, 0.65);
+}
+#cards .card-header.card-menos-dados::before {
+    content: '▼';
+    background-color: rgba(253, 126, 20, 0.30);
+    color: #fd7e14;
+    border: 3px solid rgba(253, 126, 20, 0.65);
+}
+/* Recuo no nome e no badge para não sobrepor o ícone do indicador */
+#cards .card-header.card-mais-dados .nome-jogador,
+#cards .card-header.card-mais-dados .badge-dados,
+#cards .card-header.card-menos-dados .nome-jogador,
+#cards .card-header.card-menos-dados .badge-dados {
+    margin-left: 26px;
+}
+
 /* Grid no desktop: cards com largura FIXA e igual (198px), grupo SEMPRE
    centralizado em qualquer quantidade de jogadores. Fase 32 (P2) usava
    `auto-fit` com `1fr`, que esticava os cards da última linha; a troca para

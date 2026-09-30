@@ -2020,6 +2020,38 @@ function montar_cabecalho_card(cabecalho, jogador, qtd) {
     cabecalho.title = jogador;
 }
 
+// Fase: indicadores visuais de quem tem MAIS e MENOS dados (tela 2).
+// Calcula a partir da lista de contagens por jogador (jogadores_dados_qtd)
+// que vem em `reset_rodada`. Round 1: todos iguais → sem indicadores.
+function atualizar_indicadores_dados(nomes, dados_qtd_list) {
+    // Limpa indicadores antigos de todos os headers visíveis
+    document.querySelectorAll('#cards .card-header').forEach(function (el) {
+        el.classList.remove('card-mais-dados', 'card-menos-dados');
+    });
+    if (!nomes || !dados_qtd_list || nomes.length === 0) {
+        return;
+    }
+    const max = Math.max.apply(null, dados_qtd_list);
+    const min = Math.min.apply(null, dados_qtd_list);
+    // Todos com a mesma quantidade — não há distinção significativa
+    if (max === min) {
+        return;
+    }
+    nomes.forEach(function (nome, i) {
+        const card = document.getElementById('card_hea_' + nome);
+        if (!card) {
+            return;
+        }
+        if (dados_qtd_list[i] === max) {
+            card.classList.add('card-mais-dados');
+            card.title = t('js.indicador.mais_dados');
+        } else if (dados_qtd_list[i] === min) {
+            card.classList.add('card-menos-dados');
+            card.title = t('js.indicador.menos_dados');
+        }
+    });
+}
+
 // Função para criar cada seção de dados
 function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
     const col = document.createElement('div');
@@ -2537,6 +2569,8 @@ socket.on('construtor_html', function (data) {
 
         principal.appendChild(divCol); // Adicionando tudo ao DOM
     })
+    // Round 1: todos têm dados_tt (mesmo valor) — limpa indicadores antigos
+    atualizar_indicadores_dados([], []);
 })
 
 // função para atualizar um turno
@@ -2924,6 +2958,8 @@ socket.on('reset_rodada', function (data) {
             c_row.innerHTML = '';
         }
     });
+    // Atualiza indicadores de mais/menos dados com as contagens recém-atualizadas
+    atualizar_indicadores_dados(jogadores, jogadores_dados);
 });
 
 // Função que atualiza cada partida, executa a cada inicio de partida
@@ -2955,6 +2991,8 @@ socket.on('reset_partida', function () {
     }
     parar_celebracao();
     limpar_narrador();
+    // Limpa indicadores de mais/menos dados ao voltar ao lobby
+    atualizar_indicadores_dados([], []);
 });
 
 // Função coletiva para construir formatação dinâmina para todos os os jogadores da partida (broadcast)
