@@ -15,7 +15,7 @@ del _async_mode_lido, _os
 
 from flask import Flask, Response, make_response, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from funcoes_gerais import (buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
+from funcoes_gerais import (abrir_pagina_turnos, buscar_lobby_pelo_client_id, mudar_pagina, normalizar_sala, obter_sala,
                             atualizar_lista_usuarios, montar_payload_lista_usuarios, remover_sala,
                             salvar_sala, validar_input, enviar_snapshot_sala, listar_resumos_partidas,
                             registrar_cliente, desregistrar_cliente, sala_do_cliente, tem_cooldown,
@@ -381,11 +381,12 @@ def _remover_jogador_da_sala(lobby, jogador):
             # e o desbloqueio reverteria a tela para os turnos.
             if (lobby.pagina == 1 and rodada is not None
                     and rodada.verificar_se_todos_ja_jogaram_seus_dados()):
-                lobby.pagina = 2
                 # Mesma regra de `joguei_dados`: quem só estava esperando o
-                # desconectado não pode perder tempo de turno com a rolagem.
-                rodada.iniciar_turnos()
-                mudar_pagina(2, sala=lobby.sala_id)
+                # desconectado não pode perder tempo de turno com a rolagem —
+                # `abrir_pagina_turnos` carimba o início e entrega a mão a todos
+                # os humanos (sem `meus_dados`, a tela de turnos abria com os
+                # dados da rodada anterior, Fase 82).
+                abrir_pagina_turnos(lobby)
 
     # Fase 22: a remoção muda quem ainda falta conferir/rolar — reapresenta o
     # status (a partida pode ter avançado ou ter declarado um vencedor acima).
@@ -1882,7 +1883,8 @@ def jogar_dados(dados, lobby, jogador):
         # Reenvio idempotente: se o jogador já rolou mas perdeu o resultado
         # (cooldown/rede), o re-clique reentrega o `jogar_dados_resultado` em
         # vez de abortar em silêncio — destrava a rolagem (Fase 22).
-        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados,
+                                       "rodada": jogador.rodada_atual.uid()},
              to=jogador.client_id, ignore_queue=True)
         # Fase 72: repõe também a pill de confirmação da rolagem. Só o primeiro
         # branch a emitia; sem isto, um retry de resultado perdido devolvia os
@@ -1893,7 +1895,8 @@ def jogar_dados(dados, lobby, jogador):
     # Fase 22: mostra em tempo real quem já rolou e quem ainda falta.
     emitir_status_rolagem(lobby)
     # Fase 10 (S4): escopo explícito — o resultado é só de quem rolou.
-    emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+    emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados,
+                                   "rodada": jogador.rodada_atual.uid()},
          to=jogador.client_id, ignore_queue=True)
     # Fase 73: `ia.processar` marca as IAs como roladas aqui mesmo — o status da
     # rolagem não precisa esperar a animação. Mas a virada para a página 2 fica
@@ -1941,20 +1944,19 @@ def joguei_dados(dados, lobby, jogador):
     if not jogador.joguei_dados:
         return
     # Fase 10 (S4): escopo explícito — os dados são só de quem confirmou.
-    emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
     rodada = jogador.rodada_atual
+    emit('meus_dados', {'dados': jogador.dados, 'rodada': rodada.uid()},
+         to=jogador.client_id, ignore_queue=True)
     # Executar isso \/ quando o último jogar os dados. O guard de `lobby.pagina`
     # torna o handler idempotente: um reenvio (retry do cliente, 2ª instância,
     # clique duplo) já na tela 2 NÃO re-roda `iniciar_turnos` — sem ele,
     # `atualizar_front_pro_da_vez` recarimbava `vez_em` e o jogador da vez podia
     # estender o próprio turno indefinidamente.
     if lobby.pagina == 1 and rodada.verificar_se_todos_ja_jogaram_seus_dados():
-        lobby.pagina = 2
-        # Antes de abrir a tela de turnos: o relógio do primeiro jogador começa
-        # AGORA, não no início da rodada (que carimbou `vez_em` na tela de
-        # jogar dados) — senão ele paga a rolagem com o tempo do turno.
-        rodada.iniciar_turnos()
-        mudar_pagina(2, sala=lobby.sala_id)
+        # Fase 82: a transição entrega a mão de TODOS os humanos, não só a de
+        # quem confirmou — os demais nunca recebiam `meus_dados` e a página 2
+        # abria com os dados da rodada anterior.
+        abrir_pagina_turnos(lobby)
     elif lobby.pagina != 1:
         # Fase 80: a sala JÁ abriu a página 2, mas o cliente que perguntou não
         # recebeu o `mudar_pagina` (broadcast preso na instância de origem, fila
@@ -1966,6 +1968,37 @@ def joguei_dados(dados, lobby, jogador):
         enviar_snapshot_sala(lobby, jogador)
     ia.processar(lobby)
     salvar_sala(lobby)
+
+
+@socketio.on('pedir_snapshot')
+@evento_mutavel(cooldown=2.0, lock_distribuido=False, cooldown_chave='snapshot')
+@autenticar(extrair_chave=lambda d: d.get('chave_secreta', ''))
+def pedir_snapshot(dados, lobby, jogador):
+    """
+    Reconstrói a página ATUAL para um cliente que detectou conteúdo velho
+    (Fase 82).
+
+    O cliente carimba a rodada de cada conteúdo (`construtor_dados`,
+    `construtor_html`, `meus_dados`) e compara com o `rodada` que vem no
+    `mudar_pagina`. Se divergir — o flip chegou, mas o conteúdo se perdeu entre
+    instâncias, na reconexão ou numa fila de animação engasgada —, ele pede
+    este snapshot uma vez por página/rodada. É somente leitura: nada é mutado
+    nem salvo; o rate limit tem balde próprio (`snapshot`) para não dividir a
+    janela do `sid` cru com os demais handlers.
+
+    O guard de `pagina == lobby.pagina` evita reconstruir uma tela que a sala
+    já deixou (o snapshot abre a página autoritativa, mas chegaria fora de
+    ordem no meio de uma transição em curso). Payload malformado é ignorado.
+    """
+    if lobby.pagina not in (1, 2, 3, 4):
+        return
+    try:
+        pagina = int(dados.get('pagina'))
+    except (TypeError, ValueError):
+        return
+    if pagina != lobby.pagina:
+        return
+    enviar_snapshot_sala(lobby, jogador)
 
 
 def _tempo_max(lobby):
@@ -2042,7 +2075,8 @@ def _executar_autojogar(lobby, jogador):
         # Rolar os dados do atrasado (o avanço de página continua no fluxo do
         # `ia.processar`, como na jogada manual).
         jogador.joguei_dados = True
-        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados},
+        emit("jogar_dados_resultado", {"jogador": jogador.client_id, "dados_jogador": jogador.dados,
+                                       "rodada": jogador.rodada_atual.uid()},
              to=jogador.client_id)
         emitir_status_rolagem(lobby)
     elif lobby.pagina == 2:

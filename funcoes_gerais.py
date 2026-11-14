@@ -323,11 +323,53 @@ def cancelar_sala_por_abandono(lobby, agora=None):
     return True
 
 
-def mudar_pagina(num, sala):
+def mudar_pagina(num, sala, rodada=None):
     """
     Envia a mudança de página escopada à room da sala.
+
+    `rodada` (Fase 82) é o marcador `partida_num:rodada_num` da rodada que a
+    tela deve exibir. O cliente compara com o marcador do conteúdo que já
+    recebeu e, se divergir, pede um snapshot da página (`pedir_snapshot`) em
+    vez de abrir uma tela vazia ou com os dados da rodada anterior.
     """
-    emit("mudar_pagina", {'pag_numero': num}, to=sala_room(sala))
+    payload = {'pag_numero': num}
+    if rodada is not None:
+        payload['rodada'] = rodada
+    emit("mudar_pagina", payload, to=sala_room(sala))
+
+
+def abrir_pagina_turnos(lobby):
+    """
+    Abre a página de turnos (2) ao fim da rolagem, entregando a mão de cada
+    humano da mesa (Fase 82).
+
+    A transição viva só mandava `meus_dados` para quem confirmava o próprio
+    `joguei_dados`. Quem era destravado por outro caminho — a IA rolando
+    (`ia._processar_rolagem`), a jogada automática (`_executar_autojogar`) ou a
+    saída do desconectado (`_remover_jogador_da_sala`) — chegava na página 2
+    sem nunca preencher `#meus_dados`: o painel ficava com os dados da rodada
+    anterior (o elemento é estático e nunca é limpo). Aqui a virada é única:
+    manda a mão de cada humano, carimba o início dos turnos e só então emite o
+    `mudar_pagina` (último evento, como no snapshot).
+
+    Deve ser chamada com a página ainda em 1 e a rodada já com todos os
+    `joguei_dados` marcados; mutações no lobby/rodada ficam a cargo de quem
+    chama salvar a sala.
+    """
+    partida = lobby.partidas[-1] if lobby.partidas else None
+    if partida is None or not partida.rodadas:
+        return
+    rodada = partida.rodadas[-1]
+    uid = rodada.uid()
+    for alvo in partida.jogadores:
+        if alvo.is_ia:
+            continue
+        # Sem `ignore_queue`: a transição vale para toda a mesa e pode ser
+        # originada em outra instância (a fila distribui o emit).
+        emit('meus_dados', {'dados': alvo.dados, 'rodada': uid}, to=alvo.client_id)
+    rodada.iniciar_turnos()
+    lobby.pagina = 2
+    mudar_pagina(2, sala=lobby.sala_id, rodada=uid)
 
 
 def _rodada_atual(lobby):
@@ -534,11 +576,13 @@ def enviar_snapshot_sala(lobby, jogador):
         if rodada is not None:
             emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': espectador,
                                       'tempo_max': int(lobby.config.get('tempo_max_jogada', 0) or 0),
+                                      'rodada': rodada.uid(),
                                       'reconstrucao': True},
                  to=jogador.client_id, ignore_queue=True)
             if not espectador and jogador.joguei_dados and jogador.dados:
                 # Já rolou: repete o resultado pra reapresentar os dados na tela.
-                emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados},
+                emit('jogar_dados_resultado', {'jogador': jogador.client_id, 'dados_jogador': jogador.dados,
+                                               'rodada': rodada.uid()},
                      to=jogador.client_id, ignore_queue=True)
             reemitir_narracao_rodada(rodada, jogador)
             emitir_status_rolagem(lobby)
@@ -554,14 +598,16 @@ def enviar_snapshot_sala(lobby, jogador):
             }
             emit('construtor_html',
                  {'rodada_n': rodada.rodada_num, 'turnos_lista': turnos_lista,
-                  'dados_tt': partida.dados_qtd, 'reconstrucao': True}, to=jogador.client_id, ignore_queue=True)
+                  'dados_tt': partida.dados_qtd, 'rodada': rodada.uid(),
+                  'reconstrucao': True}, to=jogador.client_id, ignore_queue=True)
             # Fase 6 (B7): em rodada 2+, cada jogador pode ter perdido dados; o
             # construtor_html usa a base (partida.dados_qtd), então corrige os cards
             # com reset_rodada (mesmo mecanismo do fluxo normal do jogo).
             if rodada.rodada_num > 1:
                 emit('reset_rodada',
                      {'jogadores_nomes': [j.username for j in partida.jogadores],
-                      'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores]},
+                      'jogadores_dados_qtd': [j.dados_qtd for j in partida.jogadores],
+                      'rodada': rodada.uid()},
                      to=jogador.client_id, ignore_queue=True)
             emit('dados_mesa', {'total': sum(j.dados_qtd for j in partida.jogadores)}, to=jogador.client_id, ignore_queue=True)
             if rodada.com_coringa is False:
@@ -572,7 +618,8 @@ def enviar_snapshot_sala(lobby, jogador):
                     'ultimo_coringa': rodada.coringa_atual_jogador.username if rodada.coringa_atual_jogador else '',
                 }, to=jogador.client_id, ignore_queue=True)
             if not espectador:
-                emit('meus_dados', {'dados': jogador.dados}, to=jogador.client_id, ignore_queue=True)
+                emit('meus_dados', {'dados': jogador.dados, 'rodada': rodada.uid()},
+                     to=jogador.client_id, ignore_queue=True)
             nomes = [j.username for j in partida.jogadores]
             vez_atual = rodada.vez_atual
             emit('formatador_coletivo', {'jogadores_nomes': nomes,
@@ -618,7 +665,12 @@ def enviar_snapshot_sala(lobby, jogador):
     # Fase P1: o flip de página é o ÚLTIMO evento da página — o conteúdo (cards,
     # dados, turno, etc.) já foi montado, como no fluxo vivo, e os sons do
     # reconstruction são mantidos em mute até aqui.
-    emit("mudar_pagina", {'pag_numero': pagina}, to=jogador.client_id, ignore_queue=True)
+    # Fase 82: páginas de rodada carregam o marcador que o cliente confere
+    # contra o conteúdo recebido (divergência → `pedir_snapshot`).
+    payload_pagina = {'pag_numero': pagina}
+    if pagina in (1, 2) and rodada is not None:
+        payload_pagina['rodada'] = rodada.uid()
+    emit("mudar_pagina", payload_pagina, to=jogador.client_id, ignore_queue=True)
 
 
 def montar_payload_lista_usuarios(lobby):

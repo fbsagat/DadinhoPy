@@ -9,6 +9,7 @@
   - boot com `VERCEL=1` respondendo 200;
   - round-trip e migrações de serialização (v1→v3 / v2→v3);
   - integração via `flask_socketio.test_client` cobrindo Fases 6/7 (B3/B6/B1/B7/B2/B4, A3/A6/V3/V2/A4/A5 + partida completa) e `teste_retomar_identidade_por_evento` (Fase D);
+  - Fase 82: `virada-entrega-maos` (a transição 1→2 manda `meus_dados` a todos os humanos na rodada 2 e `pedir_snapshot` reconstrói a página atual) e `desconexao-entrega-mão` (a saída do desconectado usa a mesma transição), além do teste comportamental em `node`/`vm` da animação presa ao `rodada_dados_token`;
   - regressões guardadas: `heartbeat-espera-fresco` (Fase E2).
 - **`python simular_ia.py --partidas 20 --dados 3`** — simulação headless dos bots (hierarquia 4>3>2>1 preservada, sem travamentos). Uso de balanceamento/verificação, não roda dentro do app.
 - **Sempre complementar com o teste manual em dois browser tabs**: criar sala, rodar partida completa até vitória. Único meio de verificação real do comportamento em produção.

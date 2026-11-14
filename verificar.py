@@ -75,6 +75,7 @@ def verificar_node():
     verificar_sons(node)
     verificar_acoes_html(node)
     verificar_fila_eventos(node)
+    verificar_animacao_rodada(node)
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +426,99 @@ def verificar_fila_eventos(node):
         capture_output=True, text=True,
     )
     _checar("fila serial de eventos re-arma após exceção (Fase 80)",
+            resultado.returncode == 0,
+            (resultado.stderr or resultado.stdout).strip())
+
+
+# ---------------------------------------------------------------------------
+# 2d) a animação da rolagem pertence à rodada que a disparou (Fase 82).
+# O handler extraído é o REAL de `jogar_dados_resultado`: ele captura o token
+# da rodada antes da animação e cada callback confere. O teste comportamental
+# roda com timers síncronos e prova os três casos:
+#   (a) resultado de OUTRA rodada (marcador divergente) não anima;
+#   (b) token trocado no meio da animação (o `construtor_dados` da rodada
+#       seguinte) não chama a confirmação — antes, o watchdog confirmava a
+#       rodada errada;
+#   (c) rodada intacta confirma normalmente.
+# ---------------------------------------------------------------------------
+_CODIGO_ANIMACAO_RODADA = r"""
+const fs = require('fs'), vm = require('vm');
+const js = fs.readFileSync(process.argv[1], 'utf8');
+const header = 'socket.on("jogar_dados_resultado"';
+const i = js.indexOf(header);
+if (i < 0) { console.error('handler jogar_dados_resultado nao encontrado'); process.exit(1); }
+const ini = js.indexOf('{', i);
+let prof = 1, j = ini + 1;
+while (j < js.length && prof > 0) {
+  if (js[j] === '{') prof++;
+  else if (js[j] === '}') prof--;
+  j++;
+}
+const corpo = js.slice(i, j) + ');';
+const ctx = {
+  console, Math, Array, Number, Object, JSON, String, Boolean,
+  setTimeout: (f) => { f(); return 1; },
+  clearTimeout: () => {},
+  setInterval: () => 1,
+  clearInterval: () => {},
+  document: { getElementById: () => ({ src: '' }) },
+  diceImages: ['dado.png'],
+  rolagem_animada: false,
+  rodada_dados_token: 1,
+  conteudo_rodada: { 1: '1:2', 2: null },
+  confirmacoes: 0,
+  tocar_som: () => {},
+  tocar_som_variante: () => {},
+  esconder_shake_hint: () => {},
+  desativar_botao_dados: () => {},
+  parar_timer_jogada: () => {},
+  cancelar_retry_rolagem: () => {},
+  cancelar_animacao_rolagem: () => {},
+  confirmar_dados_vistos: () => { ctx.confirmacoes += 1; },
+  socket: { on: (nome, fn) => { ctx.handler = fn; } },
+  animacao_rolagem_intervalo: null,
+  animacao_rolagem_som: null,
+  animacao_rolagem_timeout: null,
+  animacao_rolagem_timeout_confirmacao: null,
+};
+vm.createContext(ctx);
+vm.runInContext(corpo, ctx);
+if (typeof ctx.handler !== 'function') { console.error('handler nao registrado'); process.exit(1); }
+function reiniciar(token) {
+  ctx.confirmacoes = 0;
+  ctx.rolagem_animada = false;
+  ctx.rodada_dados_token = token;
+  ctx.tocar_som_variante = () => {};
+}
+// (a) marcador de outra rodada: nem entra na animação.
+reiniciar(1);
+ctx.handler({ dados_jogador: [6], rodada: '1:1' });
+if (ctx.confirmacoes !== 0 || ctx.rolagem_animada !== false) {
+  console.error('resultado de outra rodada animou/confirmou'); process.exit(1);
+}
+// (c) rodada intacta: anima e confirma uma vez.
+reiniciar(1);
+ctx.handler({ dados_jogador: [6], rodada: '1:2' });
+if (ctx.confirmacoes !== 1) {
+  console.error('rodada intacta nao confirmou (conf=' + ctx.confirmacoes + ')'); process.exit(1);
+}
+// (b) token trocado durante a animação: a confirmação da rodada velha não sai.
+reiniciar(4);
+ctx.tocar_som_variante = () => { ctx.rodada_dados_token += 1; };
+ctx.handler({ dados_jogador: [6], rodada: '1:2' });
+if (ctx.confirmacoes !== 0) {
+  console.error('animacao de rodada antiga confirmou a rodada nova'); process.exit(1);
+}
+console.log('animacao da rolagem presa a rodada (Fase 82) ok');
+"""
+
+
+def verificar_animacao_rodada(node):
+    resultado = subprocess.run(
+        [node, "-e", _CODIGO_ANIMACAO_RODADA, os.path.join(RAIZ, "static", "script.js")],
+        capture_output=True, text=True,
+    )
+    _checar("animação da rolagem presa à rodada (Fase 82)",
             resultado.returncode == 0,
             (resultado.stderr or resultado.stdout).strip())
 

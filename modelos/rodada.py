@@ -55,6 +55,10 @@ class Rodada:
         # store, então qualquer instância o lê (sem timer/thread no servidor).
         self.proximo_lance_em = None
 
+    def uid(self):
+        """Marcador estável desta rodada: `partida_num:rodada_num` (Fase 82)."""
+        return self.da_partida.uid_rodada(self.rodada_num)
+
     def __repr__(self):
         jogadores_nomes = [jogador.username for jogador in self.da_partida.jogadores]
         txt = (f"(RODADA {self.rodada_num} da partida {self.da_partida} com os jogadores: {jogadores_nomes}, "

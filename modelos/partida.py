@@ -56,6 +56,17 @@ class Partida:
         """
         return self.do_lobby.sala_room()
 
+    def uid_rodada(self, rodada_numero):
+        """
+        Identificador estável de uma rodada desta partida (Fase 82).
+
+        `partida_num:rodada_num` é único dentro da sala e sobrevive ao store
+        (não depende de `id()` nem de ordem de lista), então serve de marcador
+        para o cliente saber se o conteúdo que chegou é da rodada que ele está
+        abrindo. Não confundir com `proxima_partida_num`, que nunca se repete.
+        """
+        return f"{self.partida_num}:{rodada_numero}"
+
     def construir_rodada(self):
         """
         Constrói uma nova rodada numa partida.
@@ -68,13 +79,17 @@ class Partida:
         for lobby_jogador in self.do_lobby.jogadores:
             if lobby_jogador.client_id not in [jogador.client_id for jogador in self.jogadores]:
                 emit('espectador', {'nome': lobby_jogador.username}, to=lobby_jogador.client_id)
-                emit('construtor_dados', {'quantidade': lobby_jogador.dados_qtd, 'espectador': True},
+                emit('construtor_dados', {'quantidade': lobby_jogador.dados_qtd, 'espectador': True,
+                                          'rodada': self.uid_rodada(verificar['rodada_numero'])},
                      to=lobby_jogador.client_id)
         # ESPECTADOR /\
 
         # Terminar a rodada caso só tenha um jogador com dado(s) sobrando.
         vez_atual = verificar['vez_atual']
         rodada_numero = verificar['rodada_numero']
+        # Fase 82: marcador da rodada em todo evento de conteúdo/virada — o
+        # cliente usa para detectar tela aberta com conteúdo da rodada anterior.
+        uid_rodada = self.uid_rodada(rodada_numero)
         if 'final' in verificar and verificar['final']:
             # Declara este jogador o vencedor da partida.
             self.declarar_vencedor(verificar['vez_atual'])
@@ -104,7 +119,7 @@ class Partida:
                 turnos_lista[jogador.username] = [[0, 0]]
             emit("construtor_html",
                  {'rodada_n': rodada_numero, 'turnos_lista': turnos_lista,
-                  'dados_tt': self.dados_qtd}, to=self.sala_room())
+                  'dados_tt': self.dados_qtd, 'rodada': uid_rodada}, to=self.sala_room())
             emit('dados_mesa', {'total': self.dados_qtd * len(self.jogadores)}, to=self.sala_room())
             emit('atualizar_coringa', {'coringa_atual': 0, 'ultimo_coringa': ''}, to=self.sala_room())
 
@@ -132,11 +147,12 @@ class Partida:
 
             for jogador in self.jogadores:
                 emit('construtor_dados', {'quantidade': jogador.dados_qtd, 'espectador': False,
-                                          'tempo_max': tempo_max_jogada},
+                                          'tempo_max': tempo_max_jogada, 'rodada': uid_rodada},
                      to=jogador.client_id)
                 dados_mesa += jogador.dados_qtd
             if rodada_numero > 1:
-                emit('reset_rodada', {'jogadores_nomes': nomes, 'jogadores_dados_qtd': jogadores_dados_qtd},
+                emit('reset_rodada', {'jogadores_nomes': nomes, 'jogadores_dados_qtd': jogadores_dados_qtd,
+                                      'rodada': uid_rodada},
                      to=self.sala_room())
                 emit('atualizar_coringa', {'coringa_atual': 0}, to=self.sala_room())
                 emit('dados_mesa', {'total': dados_mesa}, to=self.sala_room())
@@ -146,7 +162,7 @@ class Partida:
                      narrador.narracao_rodada(rodada_numero, dados_mesa, iniciante=vez_atual,
                                            primeira=(rodada_numero == 1))),
                  to=self.sala_room())
-            emit("mudar_pagina", {'pag_numero': 1}, to=self.sala_room())
+            emit("mudar_pagina", {'pag_numero': 1, 'rodada': uid_rodada}, to=self.sala_room())
             # Fase 22: status inicial da rolagem (todos pendentes) para o
             # front acompanhar quem já rolou em tempo real.
             emit('rolagem_status', rodada.status_rolagem_dict(), to=self.sala_room())

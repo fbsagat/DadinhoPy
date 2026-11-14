@@ -1441,15 +1441,11 @@ def _processar_rolagem(lobby, permitir_virada_pagina=True):
         # de a animação terminar. Ver `processar`.
         if not permitir_virada_pagina:
             return False
-        lobby.pagina = 2
-        # Fase 73: o `vez_em` da rolagem (carimbado em `construir_rodada`) foi
-        # contado desde o início da rodada — na transição pela página 1 o
-        # relógio do primeiro turno precisa (re)começar AGORA, senão o
-        # jogador paga a rolagem com o tempo do turno. `joguei_dados` já faz
-        # isto; este é o mesmo guarda-chuva para a transição via `jogar_dados`
-        # → `ia.processar` e pelo heartbeat de recuperação.
-        rodada.iniciar_turnos()
-        funcoes_gerais.mudar_pagina(2, sala=lobby.sala_id)
+        # Fase 82: a virada entrega `meus_dados` a todos os humanos — quem estava
+        # esperando as IAs nunca recebia a mão e abria a página 2 com os dados
+        # da rodada anterior. O helper carimba o início dos turnos e emite o
+        # `mudar_pagina` por último.
+        funcoes_gerais.abrir_pagina_turnos(lobby)
         return True
     return False
 

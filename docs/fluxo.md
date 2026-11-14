@@ -18,6 +18,7 @@ Eventos sempre escopados à room da sala (`to=sala_<id>`) no namespace global.
 
 - **Sala de espera (0):** o master edita `Lobby.config` via `configurar_partida` (nome, `dados_qtd`, `max_jogadores`, `com_coringa`, `publica`, `substituir_desconectado_por_ia`, `ia_nivel_padrao`, `verificacao_ativa`) e controla bots (`adicionar_ia`/`completar_com_ias`/`remover_ia`/`renomear_ia`); o apelido (`apelido`) pode ser trocado quantas vezes quiser enquanto o jogador não está pronto — travado ao ficar pronto (e destravado ao desfazer); jogadores alternam prontidão (`ficar_pronto`); `iniciar_partida` libera somente com `Lobby.pode_iniciar()` (>=2, todos com apelido, todos os não-master prontos — bots já entram prontos; com verificacao_ativa, exige revelações de seed completas). Sala cheia recusa connect (`sala_cheia`). `status` vira `"jogando"` ao iniciar e volta a `"espera"` no `resetar_para_lobby`.
 - **Rolagem (1):** cada um rola (`jogar_dados` → dados derivados; `joguei_dados` confirma ao servidor; `rolagem_status` mostra confirmados). Quando todos confirmam, `mudar_pagina 2`.
+- **Transição 1→2 e a mão do jogador (Fase 82):** a virada é uma só — `funcoes_gerais.abrir_pagina_turnos` — usada por `joguei_dados`, `ia._processar_rolagem` (IA/`autojogar`) e `_remover_jogador_da_sala` (desconexão). Ela entrega `meus_dados` a **todos** os humanos da mesa (antes só quem confirmava o próprio `joguei_dados` recebia; o `#meus_dados` é estático e nunca era limpo, então a página 2 abria com os dados da rodada anterior ou vazia), carimba `iniciar_turnos` e emite o `mudar_pagina 2` por último. Todo conteúdo de rodada (`construtor_dados`, `construtor_html`, `meus_dados`, `jogar_dados_resultado`, `reset_rodada`) e o `mudar_pagina` 1/2 levam `rodada` = `partida_num:rodada_num`; se o cliente abrir a tela com marcador divergente, pede `pedir_snapshot` (uma vez por rodada/página, até 2 tentativas de 3s).
 - **Confirmação da rolagem (Fase 80):** `jogar_dados` marca a rolagem mas **não** abre a página 2 — a supressão é de propósito (`ia.processar(..., permitir_virada_pagina=False)`), para o cliente ver a animação e o resultado antes da virada. Quem abre é o `joguei_dados`, emitido 2s depois do resultado, e o gatilho é a **primeira** confirmação que chega depois do último dado (o judge é `verificar_se_todos_ja_jogaram_seus_dados`, sobre a rolagem, não sobre a confirmação). Como esse emit era o único e saía uma vez só, o cliente passou a **reenviá-lo enquanto a tela não mudar** (watchdog da confirmação: 4s, teto de 6 tentativas, `setTimeout` sobrevive a socket caiu), e o servidor o trata como confirmação: `cooldown=None` (não divide o balde do `sid` cru — um descarte mudo custava a partida parada), guard `jogador.joguei_dados` (retry de rodada anterior não confirma dados velhos) e, com a sala **já** virada, `enviar_snapshot_sala` — o mesmo reparo do heartbeat na divergência de página, que fecha a janela de 60s. Idempotente: o guard de `lobby.pagina == 1` impede re-roda de `iniciar_turnos` (ver abaixo).
 - **Turnos/apostas (2):** o jogador da vez aposta (`apostar`) ou desconfia (`desconfiar`). Aposta válida avança a vez (`atualizar_turno`/`meu_turno`/`espera_turno`); desconfiança abre a conferência (página 3). Coringa (`atualizar_coringa`) segue as regras de `config.com_coringa`.
 - **Conferência (3):** todos confirmam `conferencia_final` (gated por `lobby.pagina == 3`); `cards_conferencia` + `rendimento` narrado. Perdedor perde dados; fim da rodada → `reset_rodada` (ou `reset_partida` com pontos e nova rodada) e volta à página 1 (ou página 4 se alguém zerou).
@@ -77,6 +78,7 @@ Com `substituir_desconectado_por_ia` ligada, `verificar_desconectados` expurga a
 | `espectador_leitura` (`chave`, `pagina`) | `espectador_leitura` | cooldown=None, + chave (poll do espectador, Fase 69) |
 | `jogar_dados` (`chave`) | `jogar_dados` | + chave |
 | `joguei_dados` (`chave_secreta`) | `joguei_dados` | chave (campo `chave_secreta`), cooldown=None (Fase 80: confirmação, não pode ser descartada pelo balde do `sid`); guard `jogador.joguei_dados`; idempotente por rodada; com a sala já na página 2, responde `enviar_snapshot_sala` (retry do cliente) |
+| `pedir_snapshot` (`chave_secreta`, `pagina`; Fase 82) | `pedir_snapshot` | + chave; `cooldown=2.0` com balde próprio (`cooldown_chave='snapshot'`, `lock_distribuido=False`); só responde se `pagina == lobby.pagina` (reconstrói a página atual, nada mutado/salvo) |
 | `autojogar` (`chave`) | `autojogar` | + chave |
 | `apostar` (`{dados:{chave, dado, quantidade}}`) | `apostar` | `_chave_aninhada` |
 | `desconfiar` (`{dados:{chave}}`) | `desconfiar` | `_chave_aninhada` |
@@ -106,16 +108,16 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `expulso_da_sala`/`jogador_expulso` | app.py:771/773 | cliente/sala | 799/811 |
 | `saiu_da_sala` | app.py:949 | cliente | 824 |
 | `jogador_desconectado` | app.py:699 | cliente | 1835 |
-| `mudar_pagina` | funcoes_gerais:178/230 | sala/cliente | 880 |
-| `meus_dados` | app.py:933 | cliente | 899 |
+| `mudar_pagina` (`pag_numero`; `rodada` nas páginas 1/2 — Fase 82) | funcoes_gerais:178/230 | sala/cliente | 880 |
+| `meus_dados` (`dados`, `rodada`; Fase 82: entregue a toda a mesa na virada) | app.py:933 | cliente | 899 |
 | `dados_mesa` | funcoes_gerais:280 | cliente | 925 |
 | `atualizar_coringa` | funcoes_gerais:282 | cliente/sala | 936 |
-| `construtor_dados` | funcoes_gerais:252 | cliente | 1009 |
-| `construtor_html` | funcoes_gerais:269 | cliente | 1117 |
+| `construtor_dados` (`rodada`; Fase 82) | funcoes_gerais:252 | cliente | 1009 |
+| `construtor_html` (`rodada`; Fase 82) | funcoes_gerais:269 | cliente | 1117 |
 | `atualizar_turno` | modelos/turno.py:53 | sala | 1183 |
 | `meu_turno` | modelos/rodada.py:375 / funcoes_gerais:236 (dispatcher D2) | cliente | 1270 |
 | `espera_turno` | modelos/rodada.py:382 / funcoes_gerais:242 (dispatcher D2) | cliente | 1306 |
-| `reset_rodada` | funcoes_gerais:276 | cliente | 1316 |
+| `reset_rodada` (`rodada`; Fase 82) | funcoes_gerais:276 | cliente | 1316 |
 | `reset_partida` | modelos/lobby.py:406 | sala | 1340 |
 | `formatador_coletivo` | funcoes_gerais:292 | cliente | 1371 |
 | `botao_vencedor_ativ` | funcoes_gerais:331 | cliente | 1405 |
@@ -126,7 +128,7 @@ Eventos para a room (`to=sala_room()`) salvo indicação contrária:
 | `espectador` | funcoes_gerais:248 | cliente | 1608 |
 | `espectador_ritmo` | app.py:espectador_leitura (Fase 69) | cliente | handler do poll |
 | `narracao` (Fase 11/30: substituição em app.py:414 e retorno em app.py:1003) | modelos/partida.py:127 | sala | 214 |
-| `jogar_dados_resultado` | app.py:916 | cliente | 1744 |
+| `jogar_dados_resultado` (`rodada`; Fase 82) | app.py:916 | cliente | 1744 |
 | `jogada_invalida` | modelos/rodada.py:98 (`txtchave`/`txtparams`) | cliente | 1795 |
 | `iniciar_negado` | app.py:612 (`motivo`) | cliente | 438 |
 | `pronto_sem_nome` | app.py:1237 (guard do `ficar_pronto`) | cliente | — |

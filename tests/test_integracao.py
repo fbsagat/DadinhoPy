@@ -2093,10 +2093,29 @@ def teste_autojogar():
     assert lobby.pagina == 1, "Bia ainda não rolou, deve seguir na rolagem"
 
     # Bia também atrasa: o autojogar dela destrava a página 2.
+    c1.get_received()
+    c2.get_received()
     c2.emit("autojogar", {"chave": k2})
     lobby = modulo_store.carregar_sala(SALA)
     assert lobby.pagina == 2, f"todos rolados deve ir para os turnos, pagina={lobby.pagina}"
     rodada = lobby.partidas[-1].rodadas[-1]
+    # Fase 82: a virada entrega `meus_dados` a TODOS os humanos (antes só quem
+    # confirmava o próprio `joguei_dados` recebia — a página 2 abria com os
+    # dados da rodada anterior) e carimba a rodada nos dois eventos.
+    for cliente, nome in ((c1, "Ana"), (c2, "Bia")):
+        eventos = cliente.get_received()
+        evento_dados = _achar_evento(eventos, "meus_dados")
+        assert evento_dados is not None, f"{nome} deve receber meus_dados na virada"
+        payload_dados = evento_dados
+        jogador = next(j for j in lobby.jogadores if j.username == nome)
+        assert payload_dados.get("dados") == jogador.dados, \
+            f"{nome} deve receber a mão da rodada corrente"
+        assert payload_dados.get("rodada") == rodada.uid(), \
+            "meus_dados deve carimbar a rodada (Fase 82)"
+        evento_pagina = _achar_evento(eventos, "mudar_pagina")
+        assert evento_pagina is not None
+        assert evento_pagina.get("rodada") == rodada.uid(), \
+            "mudar_pagina da virada deve carimbar a rodada (Fase 82)"
     vez = rodada.vez_atual
     vez_cli = c1 if vez.username == "Ana" else c2
     outro = c2 if vez.username == "Ana" else c1
@@ -3892,6 +3911,10 @@ def teste_confirmacao_rolagem_retry_idempotente():
     c1.emit("joguei_dados", {"chave_secreta": cs1["chave_secreta"]})
     lobby = modulo_store.carregar_sala(SALA)
     assert lobby.pagina == 2, "a primeira confirmação depois do último dado abre a página 2"
+    # Fase 82: a virada manda a mão a TODOS os humanos — Bia, que ainda nem
+    # confirmou, não pode entrar na tela de turnos com os dados da rodada anterior.
+    assert _achar_evento(c2.get_received(), "meus_dados") is not None, \
+        "a virada precisa entregar a mão a quem ainda não confirmou (Fase 82)"
     c2.emit("joguei_dados", {"chave_secreta": cs2["chave_secreta"]})
     assert modulo_store.carregar_sala(SALA).pagina == 2, "a confirmação do outro é inofensiva"
 
@@ -3970,6 +3993,124 @@ def teste_confirmacao_rolagem_ignora_cooldown():
         c2.disconnect()
         _limpar()
     _ok("confirmação da rolagem não divide o balde do sid (Fase 80)")
+
+
+def teste_virada_entrega_maos_rodada2():
+    """
+    Fase 82: a virada da rolagem não podia depender de quem confirmou.
+
+    O único `meus_dados` do fluxo vivo saía no `joguei_dados` do próprio
+    jogador; quem era destravado pela IA, pelo `autojogar` ou pela saída do
+    desconectado chegava na página 2 sem nunca preencher `#meus_dados` (elemento
+    estático, nunca limpo) — o painel mostrava os dados da RODADA ANTERIOR.
+    Aqui a rodada 2 é jogada de verdade: todos recebem a mão nova, com o
+    marcador da rodada nos eventos; e `pedir_snapshot` reconstrói a página
+    corrente para quem perdeu o conteúdo.
+    """
+    _limpar()
+    clis, _ = _conectar_trio(2)
+    lobby = _rodada_ate_conferencia(clis)
+    rodada1 = lobby.partidas[-1].rodadas[-1]
+    uid_rodada1 = rodada1.uid()
+    for c, chave in clis.values():
+        c.emit("conferencia_final", {"chave": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1, f"a rodada 2 deve começar na rolagem, pagina={lobby.pagina}"
+    partida = lobby.partidas[-1]
+    rodada2 = partida.rodadas[-1]
+    assert rodada2.rodada_num == 2
+    uid_rodada2 = rodada2.uid()
+    assert uid_rodada2 != uid_rodada1, "o marcador precisa mudar entre rodadas"
+    assert uid_rodada2 == f"{partida.partida_num}:2"
+
+    for c, _chave in clis.values():
+        c.get_received()
+    for c, chave in clis.values():
+        c.emit("jogar_dados", {"chave": chave})
+    # A PRIMEIRA confirmação depois do último dado abre a página 2.
+    primeiro = next(iter(clis))
+    clis[primeiro][0].emit("joguei_dados", {"chave_secreta": clis[primeiro][1]})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, "a virada precisa abrir os turnos"
+
+    for nome, (c, _chave) in clis.items():
+        eventos = c.get_received()
+        evento_dados = _achar_evento(eventos, "meus_dados")
+        assert evento_dados is not None, f"{nome} deve receber a mão na virada (Fase 82)"
+        payload = evento_dados
+        jogador = next(j for j in lobby.jogadores if j.username == nome)
+        assert payload.get("dados") == jogador.dados, \
+            f"{nome} deve receber a mão da rodada NOVA, não a anterior"
+        assert payload.get("rodada") == uid_rodada2
+        evento_pagina = _achar_evento(eventos, "mudar_pagina")
+        assert evento_pagina is not None
+        assert evento_pagina.get("pag_numero") == 2
+        assert evento_pagina.get("rodada") == uid_rodada2
+
+    # `pedir_snapshot` reconstrói a página ATUAL (cards + mão) com o marcador.
+    c1, k1 = clis[primeiro]
+    c1.get_received()
+    c1.emit("pedir_snapshot", {"chave_secreta": k1, "pagina": 2})
+    eventos = c1.get_received()
+    html = _achar_evento(eventos, "construtor_html")
+    mao = _achar_evento(eventos, "meus_dados")
+    pagina = _achar_evento(eventos, "mudar_pagina")
+    assert html and html.get("rodada") == uid_rodada2, \
+        "snapshot da página 2 deve carimbar a rodada nos cards"
+    assert mao and mao.get("rodada") == uid_rodada2, \
+        "snapshot da página 2 deve reentregar a mão da rodada"
+    assert pagina and pagina.get("rodada") == uid_rodada2
+
+    # Página divergente é ignorada (a sala já saiu dela).
+    c1.get_received()
+    c1.emit("pedir_snapshot", {"chave_secreta": k1, "pagina": 1})
+    assert _achar_evento(c1.get_received(), "construtor_dados") is None, \
+        "snapshot de página que a sala não está mais aberta deve ser ignorado"
+
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("virada da rolagem entrega a mão da rodada nova (Fase 82)")
+
+
+def teste_desconexao_destrava_entrega_mao():
+    """Fase 82: a saída do desconectado também abre a página 2 pela transição
+    compartilhada — quem esperava recebe a própria mão, não a da rodada antiga."""
+    _limpar()
+    clis, _ = _conectar_trio(2)
+    # `_conectar_trio` já abre a página 2 da rodada 1; joga a rodada até a
+    # conferência e confirma para começar a rodada 2 na rolagem (página 1).
+    _rodada_ate_conferencia(clis)
+    for c, chave in clis.values():
+        c.emit("conferencia_final", {"chave": chave})
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 1, f"a rodada 2 deve começar na rolagem, pagina={lobby.pagina}"
+    nomes = list(clis)
+    for nome in nomes[:2]:
+        clis[nome][0].emit("jogar_dados", {"chave": clis[nome][1]})
+    for nome in nomes:
+        clis[nome][0].get_received()
+    # O terceiro ainda não rolou e cai: a rolagem destrava para os demais.
+    clis[nomes[2]][0].disconnect()
+    # `verificar_desconectados` é bare e divide a janela do `sid` com o
+    # `jogar_dados` recém-emitido pelos ativos — espera o cooldown passar.
+    time.sleep(0.6)
+    _purgar_grace(clis)
+    lobby = modulo_store.carregar_sala(SALA)
+    assert lobby.pagina == 2, "sem o desconectado, todos os restantes rolaram"
+    uid = lobby.partidas[-1].rodadas[-1].uid()
+    for nome in nomes[:2]:
+        eventos = clis[nome][0].get_received()
+        evento_dados = _achar_evento(eventos, "meus_dados")
+        assert evento_dados is not None, \
+            f"{nome} deve receber a mão quando a saída do outro abre a página 2"
+        jogador = next(j for j in lobby.jogadores if j.username == nome)
+        assert evento_dados.get("dados") == jogador.dados
+        assert evento_dados.get("rodada") == uid
+        evento_pagina = _achar_evento(eventos, "mudar_pagina")
+        assert evento_pagina and evento_pagina.get("rodada") == uid
+    _desconectar_todos(clis)
+    _limpar()
+    _ok("saída do desconectado entrega a mão na virada (Fase 82)")
 
 
 def verificar_integracao():
@@ -4125,6 +4266,10 @@ def verificar_integracao():
         ("confirmacao-retry", teste_confirmacao_rolagem_retry_idempotente),
         ("confirmacao-cooldown", teste_confirmacao_rolagem_ignora_cooldown),
     ]
+    testes_fase82 = [
+        ("virada-entrega-maos", teste_virada_entrega_maos_rodada2),
+        ("desconexao-entrega-mão", teste_desconexao_destrava_entrega_mao),
+    ]
     try:
         for nome, func in (testes_fase6 + testes_fase7 + testes_fase15
                            + testes_hardening + testes_correcoes + testes_seed
@@ -4132,7 +4277,7 @@ def verificar_integracao():
                            + testes_fase23 + testes_fase25 + testes_fase46
                            + testes_fase29 + testes_fase30 + testes_fase69
                            + testes_fase76 + testes_fase77 + testes_fase79
-                           + testes_fase80):
+                           + testes_fase80 + testes_fase82):
             try:
                 func()
             except Exception as erro:  # noqa: BLE001 (agrega falhas dos testes)

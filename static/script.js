@@ -1926,6 +1926,9 @@ socket.on("mudar_pagina", function (data) {
         subtitulo.style.display = (data.pag_numero === 1 || data.pag_numero === 2) ? 'none' : 'block';
     }
     mostrar_dica(data.pag_numero);
+    // Fase 82: a tela abriu — o conteúdo é da rodada que o servidor anunciou?
+    // Se não, pede a reconstrução desta página em vez de exibir dado velho.
+    conferir_conteudo_pagina(data);
 
     // Fase 58 (M7): no mobile a conferência entra já mostrando o título e os
     // cards — o scroll posiciona o "Conferência" no topo do viewport, pulando
@@ -1947,6 +1950,12 @@ socket.on("mudar_pagina", function (data) {
 // Função para preencher os dados do jogador na página de partida
 socket.on('meus_dados', function (data) {
     const meus_dados = document.getElementById('meus_dados');
+    // Fase 82: payload defensivo. Um `dados` ausente/estranho derrubava o
+    // handler no meio, deixando o painel com o conteúdo da rodada anterior.
+    if (!meus_dados || !data || !Array.isArray(data.dados)) {
+        return;
+    }
+    mao_rodada = data.rodada || mao_rodada;
     meus_dados.innerHTML = "";
     const span = document.createElement('span');
     span.className = "fs-5 text-white me-2";
@@ -2115,6 +2124,34 @@ function createDiceSection(text, opacityClass, imageIndex, destaque = false) {
 let rolagem_pedida = false;
 let rolagem_animada = false;
 
+// Fase 82: handles da animação da rolagem. O `construtor_dados` de uma rodada
+// nova precisa cancelá-los — antes, os `setTimeout` da rodada anterior seguiam
+// vivos e pintavam o resultado velho por cima dos dados novos (ou confirmavam a
+// rodada errada pelo watchdog). Os callbacks também conferem o token.
+let animacao_rolagem_intervalo = null;
+let animacao_rolagem_som = null;
+let animacao_rolagem_timeout = null;
+let animacao_rolagem_timeout_confirmacao = null;
+
+function cancelar_animacao_rolagem() {
+    if (animacao_rolagem_intervalo !== null) {
+        clearInterval(animacao_rolagem_intervalo);
+        animacao_rolagem_intervalo = null;
+    }
+    if (animacao_rolagem_som !== null) {
+        clearInterval(animacao_rolagem_som);
+        animacao_rolagem_som = null;
+    }
+    if (animacao_rolagem_timeout !== null) {
+        clearTimeout(animacao_rolagem_timeout);
+        animacao_rolagem_timeout = null;
+    }
+    if (animacao_rolagem_timeout_confirmacao !== null) {
+        clearTimeout(animacao_rolagem_timeout_confirmacao);
+        animacao_rolagem_timeout_confirmacao = null;
+    }
+}
+
 // Fase 72: watchdog da rolagem — fecha o deadlock do "Jogar dados". O servidor
 // é idempotente no re-clique (app.py:1641-1647), mas o cliente trava o emit e
 // desativa o botão (ver `jogar_dados`): se o `jogar_dados` se perde no
@@ -2214,6 +2251,95 @@ function passo_confirmacao_dados(token) {
 function confirmar_dados_vistos() {
     cancelar_confirmacao_dados();
     passo_confirmacao_dados(rodada_dados_token);
+}
+
+// ---------------------------------------------------------------------------
+// Fase 82: marcador de rodada do conteúdo por página.
+//
+// O `mudar_pagina` abre a tela, mas o conteúdo chega em eventos separados
+// (`construtor_dados`, `construtor_html`, `meus_dados`). Se um deles se perde
+// entre instâncias, na reconexão ou numa fila de animação engasgada, a tela
+// abria vazia ou com o conteúdo da RODADA ANTERIOR — o `#meus_dados` é estático
+// e nunca era limpo. Cada construtor carimba a rodada que desenhou; na virada,
+// a divergência com o `rodada` do `mudar_pagina` pede UM snapshot da página
+// atual (`pedir_snapshot`), com no máximo duas tentativas.
+// ---------------------------------------------------------------------------
+const SNAPSHOT_RETRY_MS = 3000;
+const SNAPSHOT_MAX_TENTATIVAS = 2;
+const conteudo_rodada = { 1: null, 2: null };
+let mao_rodada = null;
+let snapshot_uid_pedido = null;
+let snapshot_tentativas = 0;
+let timer_snapshot = null;
+
+function cancelar_pedido_snapshot() {
+    if (timer_snapshot !== null) {
+        clearTimeout(timer_snapshot);
+        timer_snapshot = null;
+    }
+}
+
+function _conteudo_da_pagina_atrasado(pagina, rodada) {
+    if (pagina === 1) {
+        return conteudo_rodada[1] !== rodada;
+    }
+    if (pagina === 2) {
+        // Espectador não recebe `meus_dados` no snapshot: só os cards contam.
+        return conteudo_rodada[2] !== rodada
+            || (!eh_espectador && mao_rodada !== rodada);
+    }
+    return false;
+}
+
+function pedir_snapshot_pagina(pagina, rodada, uid) {
+    cancelar_pedido_snapshot();
+    if (snapshot_tentativas >= SNAPSHOT_MAX_TENTATIVAS) {
+        return;
+    }
+    snapshot_tentativas += 1;
+    // Reconexão/identidade em curso: conta a tentativa, mas o retry de 3s
+    // devolve o pedido quando o socket estiver de pé.
+    if (chave_confirmada && socket.connected) {
+        socket.emit('pedir_snapshot', { 'chave_secreta': chave_secreta, pagina: pagina });
+    }
+    timer_snapshot = setTimeout(function () {
+        timer_snapshot = null;
+        if (snapshot_uid_pedido !== uid) {
+            return;
+        }
+        if (!_conteudo_da_pagina_atrasado(pagina, rodada)) {
+            return; // o snapshot chegou e o conteúdo bateu
+        }
+        pedir_snapshot_pagina(pagina, rodada, uid);
+    }, SNAPSHOT_RETRY_MS);
+}
+
+function conferir_conteudo_pagina(data) {
+    const pagina = data && data.pag_numero;
+    const rodada = data && data.rodada;
+    if (pagina !== 1 && pagina !== 2) {
+        cancelar_pedido_snapshot();
+        snapshot_uid_pedido = null;
+        snapshot_tentativas = 0;
+        return;
+    }
+    // Servidor antigo/evento legado sem marcador: não há como julgar.
+    if (!rodada) {
+        return;
+    }
+    const uid = `${rodada}:${pagina}`;
+    if (snapshot_uid_pedido !== uid) {
+        cancelar_pedido_snapshot();
+        snapshot_uid_pedido = uid;
+        snapshot_tentativas = 0;
+    }
+    if (!_conteudo_da_pagina_atrasado(pagina, rodada)) {
+        return;
+    }
+    if (snapshot_tentativas >= SNAPSHOT_MAX_TENTATIVAS) {
+        return;
+    }
+    pedir_snapshot_pagina(pagina, rodada, uid);
 }
 
 // ---------------------------------------------------------------------------
@@ -2399,7 +2525,11 @@ socket.on('construtor_dados', function (data) {
     // Fase 80: rodada nova invalida qualquer confirmação ainda em voo (o
     // watchdog queimar a rodada errada é o erro que o token evita).
     rodada_dados_token += 1;
+    // Fase 82: cancela a animação da rodada anterior e carimba a rodada deste
+    // conteúdo. O `mudar_pagina` confere o carimbo antes de abrir a tela.
+    cancelar_animacao_rolagem();
     cancelar_confirmacao_dados();
+    conteudo_rodada[1] = data.rodada || null;
     const tela_jogar_dados = document.getElementById('tela_jogar_dados')
     const container = document.createElement('div');
     tela_jogar_dados.innerHTML = ""
@@ -2525,6 +2655,8 @@ socket.on('construtor_html', function (data) {
     if (data && data.reconstrucao === true) {
         reconstruindo_snapshot = true;
     }
+    // Fase 82: carimba a rodada dos cards (conferido no `mudar_pagina`).
+    conteudo_rodada[2] = data.rodada || null;
     const principal = document.getElementById('cards');
     principal.innerHTML = '';
 
@@ -3549,6 +3681,12 @@ socket.on("update_username", function (data) {
 })
 
 socket.on("jogar_dados_resultado", function (data) {
+    // Fase 82: resultado de OUTRA rodada (evento atrasado na fila) não pode
+    // animar, escrever no painel, parar o contador nem travar o botão desta.
+    // Sem o marcador não há como julgar (evento legado) e mantém o fluxo antigo.
+    if (data && data.rodada && conteudo_rodada[1] && data.rodada !== conteudo_rodada[1]) {
+        return;
+    }
     parar_timer_jogada(); // Fase 21: já rolou (manual ou automático), zera o contador.
     cancelar_retry_rolagem(); // Fase 72: resultado chegou, desarma o watchdog.
     // A rolagem já foi feita (manual, `autojogar` ou reenvio idempotente):
@@ -3560,9 +3698,13 @@ socket.on("jogar_dados_resultado", function (data) {
         return;
     }
     rolagem_animada = true;
+    // Fase 82: a animação e a confirmação pertencem a ESTA rodada. O token é
+    // incrementado pelo `construtor_dados` da rodada seguinte; se ele mudar no
+    // meio, os timers velhos saem sem pintar resultado/confirmar a rodada errada.
+    const token_animacao = rodada_dados_token;
     // Shake to roll (mobile): o resultado chegou — esconde o hint.
     esconder_shake_hint();
-    const dados_lista = data.dados_jogador;
+    const dados_lista = (data && Array.isArray(data.dados_jogador)) ? data.dados_jogador : [];
     const dados_qtd = dados_lista.length;
 
     const dados = [];
@@ -3579,11 +3721,15 @@ socket.on("jogar_dados_resultado", function (data) {
     const rollTime = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000; // Tempo total da rolagem
 
     // Inicia o som de rolagem, repetido enquanto a animação rola
-    const som_rolagem = setInterval(() => tocar_som('rolar_dados'), 1200);
+    animacao_rolagem_som = setInterval(() => tocar_som('rolar_dados'), 1200);
     tocar_som('rolar_dados');
 
     // Inicia a animação de rolagem para todos os dados
-    const animation = setInterval(() => {
+    animacao_rolagem_intervalo = setInterval(() => {
+        if (token_animacao !== rodada_dados_token) {
+            cancelar_animacao_rolagem();
+            return;
+        }
         dados.forEach(dado => {
             // Gera um índice aleatório para cada dado
             const randomIndex = Math.floor(Math.random() * diceImages.length);
@@ -3592,9 +3738,22 @@ socket.on("jogar_dados_resultado", function (data) {
     }, rollInterval);
 
     // Após o tempo total de rolagem, exibe o resultado final e para a animação
-    setTimeout(() => {
-        clearInterval(animation);
-        clearInterval(som_rolagem);
+    animacao_rolagem_timeout = setTimeout(() => {
+        animacao_rolagem_timeout = null;
+        // Fase 82: rodada virou durante a animação — não pinta dado velho nem
+        // confirma por ela (o token do watchdog também já mudou).
+        if (token_animacao !== rodada_dados_token) {
+            cancelar_animacao_rolagem();
+            return;
+        }
+        if (animacao_rolagem_intervalo !== null) {
+            clearInterval(animacao_rolagem_intervalo);
+            animacao_rolagem_intervalo = null;
+        }
+        if (animacao_rolagem_som !== null) {
+            clearInterval(animacao_rolagem_som);
+            animacao_rolagem_som = null;
+        }
 
         // Cria dinamicamente os resultados finais com base em "dados_lista"
         const finalResults = dados_lista.map(valor => `../static/imagens/dado/${valor}.png`);
@@ -3607,7 +3766,11 @@ socket.on("jogar_dados_resultado", function (data) {
 
         // Mostra o resultado por ~2 seg antes de enviar a confirmação
         // e o servidor mudar de tela.
-        setTimeout(() => {
+        animacao_rolagem_timeout_confirmacao = setTimeout(() => {
+            animacao_rolagem_timeout_confirmacao = null;
+            if (token_animacao !== rodada_dados_token) {
+                return;
+            }
             confirmar_dados_vistos();
         }, 2000);
     }, rollTime);
