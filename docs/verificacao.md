@@ -146,9 +146,13 @@ Na raiz do repo:
 ```
 
 O script faz tudo (tar com excludes → `/opt/dadinho`, `--build` da API **e do
-`nginx`** (Fase 59) **e do `gc`** (Fase 77, salas abandonadas), recreate do
+`nginx`** (Fase 59) **e do `gc`** (Fase 77, salas abandonadas), **reload do
+`nginx`** para re-resolver os IPs dos containers da API (o nginx resolve os
+`server apiN:8000` uma vez, no boot da config — sem o reload, quem cai no IP
+antigo toma 502), recreate do
 tunnel se `docker-compose.yml` mudou, smoke test local — `gc --uma-vez`, api 8000
-**e** nginx 8090 — e público). O acesso SSH é **via Tailscale** (recomendado): o IP público
+**e** nginx 8090 — e público, incluindo o upgrade WebSocket de verdade).
+O acesso SSH é **via Tailscale** (recomendado): o IP público
 da VPS pode ficar inacessível por mudança de IP ou firewall do provedor, mas o
 Tailscale mantém acesso estável. Params opcionais:
 `-HostVps` (padrão `100.70.126.50` — Tailscale IP; fallback `167.126.27.4`)
@@ -185,7 +189,22 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
    cd /opt/dadinho && sudo docker compose up -d --build api api2 api3 api4 nginx gc
    ```
 
-3. **Tunnel** — recriar apenas se `docker-compose.yml` mudou (o ingress do
+3. **Re-resolver o nginx** (obrigatório depois de recriar a API): o nginx
+   resolve `server api:8000`/`api2:8000`... **uma vez**, no carregamento da
+   config. Containers recriados podem voltar com outro IP; sem re-resolver, o
+   upstream morto devolve *connection refused* e parte dos jogadores toma 502
+   até o nginx desabilitar a entrada. O reload re-lê a config sem derrubar a
+   borda:
+
+   ```bash
+   cd /opt/dadinho && sudo docker compose exec -T nginx nginx -s reload
+   ```
+
+   Se `nginx.conf` mudou no repo, em vez do reload use
+   `docker compose up -d --force-recreate nginx` (o bind-mount de arquivo único
+   só é re-resolvido com o container novo).
+
+4. **Tunnel** — recriar apenas se `docker-compose.yml` mudou (o ingress do
    `cloudflared/config.yml` vive só na VPS; se editar manualmente por lá, recrie
    também):
 
@@ -205,13 +224,21 @@ e `-Usuario` (padrão `ubuntu`). Se o SSH no IP público falhar com timeout, use
    # borda nginx (Fase 59; por onde o tunnel passa)
    curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8090/robots.txt
    curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling'
-   # público (pelo tunnel)
+   # público (pelo tunnel) — polling e o upgrade WS de verdade (esperado 101)
    curl -s -o /dev/null -w 'robots:%{http_code}\n' https://dadinho-api.memetrigger.com/robots.txt
    curl -s 'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=polling'
+   curl -s -o /dev/null -w 'ws:%{http_code}\n' --http1.1 \
+     -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+     -H 'Origin: https://dadinho.memetrigger.com' \
+     -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+     'https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=websocket'
    ```
 
    O handshake deve responder `0{"sid":"...","upgrades":["websocket"],...}` (200,
-   `robots:<200>`). Depois validar com 2+ abas/navegadores: página da Vercel, socket
+   `robots:<200>`) e o upgrade WS `101`. Armadilhas do `curl`: sem `--http1.1`
+   ele usa HTTP/2 e o CF responde **400** (RFC 8441 não suportado), e `Origin`
+   da própria API (`https://dadinho-api...`) leva **502** do CF — use o do
+   frontend. Depois validar com 2+ abas/navegadores: página da Vercel, socket
    para a VPS.
 
    Na verificação do dia seguinte, `docker compose ps gc` deve continuar `Up` —

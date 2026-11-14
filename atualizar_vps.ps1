@@ -67,7 +67,13 @@ if ($hashNginxLocal -ne $hashNginxRemotoAntes) {
     Write-Host "==> nginx.conf mudou: recriando nginx ..." -ForegroundColor Yellow
     & $cmdR "cd /opt/dadinho && sudo docker compose up -d --force-recreate nginx"
 } else {
-    Write-Host "==> nginx.conf inalterado: nginx nao mexido." -ForegroundColor Green
+    # O nginx resolve `server api/api2/api3/api4` UMA VEZ, no boot da config: o
+    # rebuild acima recria os containers da API, que podem voltar com outros IPs.
+    # Sem re-resolver, o upstream antigo fica "conexao recusada" e o jogador que
+    # cai nele toma 502 ate o nginx desabilitar a entrada (visto em 2026-11-14).
+    # O reload re-lê a config e re-resolve sem derrubar a borda (sem downtime).
+    Write-Host "==> nginx.conf inalterado: reload para re-resolver os upstreams da API ..." -ForegroundColor Yellow
+    & $cmdR "cd /opt/dadinho && sudo docker compose exec -T nginx nginx -s reload"
 }
 
 # O tunnel so recria quando a definicao do servico mudou (docker-compose.yml).
@@ -92,8 +98,17 @@ Write-Host "==> Smoke test local ..." -ForegroundColor Cyan
 & $cmdR "curl -s -o /dev/null -w 'robots_local:%{http_code}\n' http://127.0.0.1:8000/robots.txt && curl -s 'http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling' | head -c 120 && echo && curl -s -o /dev/null -w 'robots_nginx:%{http_code}\n' http://127.0.0.1:8090/robots.txt && curl -s 'http://127.0.0.1:8090/socket.io/?EIO=4&transport=polling' | head -c 120 && echo"
 
 Write-Host "==> Smoke test publico (via tunnel) ..." -ForegroundColor Cyan
-curl.exe -s -o /dev/null -w "robots_pub:%{http_code}\n" "https://dadinho-api.memetrigger.com/robots.txt"
+curl.exe -s -o /dev/null -w "robots_pub:%{http_code}`n" "https://dadinho-api.memetrigger.com/robots.txt"
 $hand = curl.exe -s "https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=polling"
 Write-Host ($hand.Substring(0, [Math]::Min(120, $hand.Length)))
+# Upgrade WebSocket de verdade: o polling acima nao prova o caminho do navegador.
+# `--http1.1` e obrigatorio (o CF responde 400 ao upgrade via HTTP/2) e o Origin
+# tem que ser o do FRONTEND — Origin da propria API o CF bloqueia com 502.
+$ws = curl.exe -s -o NUL -w "%{http_code}" --http1.1 --max-time 10 `
+    -H "Connection: Upgrade" -H "Upgrade: websocket" `
+    -H "Origin: https://dadinho.memetrigger.com" `
+    -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" `
+    "https://dadinho-api.memetrigger.com/socket.io/?EIO=4&transport=websocket"
+Write-Host "ws_pub:$ws (esperado 101)"
 
 Write-Host "==> Concluido. Valide em 2+ abas (pagina da Vercel, socket para a VPS)." -ForegroundColor Green

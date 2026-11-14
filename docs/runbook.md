@@ -153,6 +153,33 @@ Obs.: um cliente que manda `Origin: https://dadinho-api...` (a própria API) tom
 `502` do Cloudflare — é bloqueio de borda, não a API; o browser manda o
 `Origin` do frontend e conecta normal.
 
+### 5.2. 502 intermitente logo depois de um deploy (upstream morto no nginx)
+
+Sintoma: o deploy "passou" (containers `healthy`, smoke local 200), mas parte
+dos jogadores toma 502/reconecta por alguns minutos. No log do nginx:
+
+```bash
+sudo docker logs --tail=50 dadinho-nginx | grep refused
+# connect() failed (111: Connection refused) while connecting to upstream,
+#   upstream: "http://172.21.0.3:8000/socket.io/?..."  <- IP que não existe mais
+```
+
+Causa: o nginx resolve `server api:8000`/`api2:8000`/... **uma vez**, no boot da
+config. `docker compose up -d --build api ...` recria os containers e eles podem
+voltar com IPs diferentes; as entradas velhas ficam em memória até o nginx
+desabilitá-las (`upstream server temporarily disabled`).
+
+Correção imediata (sem downtime):
+
+```bash
+cd /opt/dadinho && sudo docker compose exec -T nginx nginx -s reload
+```
+
+O `atualizar_vps.ps1` já faz esse reload em todo deploy. Se `nginx.conf` mudou
+no repo, o caminho é `docker compose up -d --force-recreate nginx` (bind-mount
+de arquivo único só é re-resolvido com o container novo).
+
+
 ## 6. Redis fora / perda de estado (SPOF conhecido — ADR-007)
 
 Sintoma: `/robots.txt` pode responder 200 (o app sobe), mas `connect`/handlers
